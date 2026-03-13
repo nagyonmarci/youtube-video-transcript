@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+asyncpg
+yt-dlp
+youtube-transcript-api
+pydantic-settings
+python-dotenv
+python-jose[cryptography]
+google-auth
+google-api-python-client
+google-auth-httplib2
+httpx
+python-multipart

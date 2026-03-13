@@ -1,0 +1,93 @@
+---
+import App from '../App.jsx';
+import '../index.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width" />
+  <title>Login - YouTube Transcript Manager</title>
+</head>
+<body>
+  <div class="app">
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 2rem;">
+      <div class="card" style="max-width: 400px; width: 100%; text-align: center; padding: 3rem; background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border-radius: 20px;">
+        <h1 style="font-size: 3rem; margin-bottom: 1rem;">🎬</h1>
+        <h2 style="margin-bottom: 0.5rem;">Welcome</h2>
+        <p class="muted" style="margin-bottom: 2rem;">Sign in to manage your YouTube transcripts.</p>
+        
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
+          <div id="google-btn"></div>
+          
+          <div style="margin: 1rem 0; width: 100%; display: flex; align-items: center; gap: 0.5rem; color: var(--muted);">
+            <hr style="flex: 1; border: 0; border-top: 1px solid rgba(255,255,255,0.1);" />
+            <span>OR</span>
+            <hr style="flex: 1; border: 0; border-top: 1px solid rgba(255,255,255,0.1);" />
+          </div>
+
+          <button id="dev-btn" class="secondary" style="width: 250px; background: rgba(255,255,255,0.05);">
+             🛠️ Developer Login (Bypass)
+          </button>
+        </div>
+        
+        <p id="error-msg" class="status-badge status-error" style="display: none; margin-top: 1.5rem; width: 100%;"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    import { BASE } from '../api/client';
+
+    // Load Google Identity Services
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+
+    script.onload = () => {
+      // @ts-ignore
+      google.accounts.id.initialize({
+        client_id: import.meta.env.PUBLIC_GOOGLE_CLIENT_ID || '', 
+        callback: handleCredentialResponse
+      });
+      // @ts-ignore
+      google.accounts.id.renderButton(
+        document.getElementById('google-btn'),
+        { theme: 'outline', size: 'large', width: 250 }
+      );
+      
+      const devBtn = document.getElementById('dev-btn');
+      if (devBtn) {
+        devBtn.onclick = () => handleCredentialResponse({ credential: 'dev_token' });
+      }
+    };
+
+    async function handleCredentialResponse(response) {
+      const errorEl = document.getElementById('error-msg');
+      try {
+        const res = await fetch(`${BASE}/auth/google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: response.credential })
+        });
+        
+        if (!res.ok) throw new Error('Failed to authenticate');
+        
+        const data = await res.json();
+        localStorage.setItem('yt_token', data.access_token);
+        localStorage.setItem('yt_user', JSON.stringify(data.user));
+        
+        window.location.href = '/';
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = '❌ Login failed. Please try again.';
+          errorEl.style.display = 'inline-block';
+        }
+      }
+    }
+  </script>
+</body>
+</html>

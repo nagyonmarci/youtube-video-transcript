@@ -1,0 +1,24 @@
+---
+import App from '../App.jsx';
+import '../index.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="generator" content={Astro.generator} />
+		<title>YouTube Transcript Manager</title>
+    <script src="https://accounts.google.com/gsi/client" async defer is:inline></script>
+    <script is:inline>
+      if (!localStorage.getItem('yt_token')) {
+        window.location.href = '/login';
+      }
+    </script>
+	</head>
+	<body>
+		<App client:only="react" />
+	</body>
+</html>
