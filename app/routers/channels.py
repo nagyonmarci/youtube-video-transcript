@@ -1,22 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from asyncpg import Connection
 from app.database import get_db
 from app.schemas import ChannelCreate, ChannelOut
 from app.worker import process_channel, refresh_channel_metadata
-from app.routers.auth import get_current_user
-from typing import Annotated
+from app.routers.auth import get_current_user, get_token
 
 router = APIRouter(tags=["Channels"])
-
-async def get_token(
-    authorization: Annotated[str | None, Header()] = None,
-    token: Annotated[str | None, Query()] = None
-):
-    if authorization and authorization.startswith("Bearer "):
-        return authorization.split(" ")[1]
-    if token:
-        return token
-    raise HTTPException(status_code=401, detail="Missing or invalid token")
 
 @router.post("/channels", response_model=dict)
 async def add_channel(

@@ -24,7 +24,7 @@ export default function App() {
 
   const handleStopTasks = async () => {
     try {
-      const res = await fetch(`${import.meta.env.PUBLIC_API_URL || "http://localhost:8000"}/channels/stop-tasks`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/channels/stop-tasks`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${localStorage.getItem("yt_token")}` }
       });
@@ -43,12 +43,12 @@ export default function App() {
     const fmt = confirm("Use Markdown format? (Cancel for TXT)") ? "md" : "txt";
     // @ts-ignore
     const client = google.accounts.oauth2.initTokenClient({
-      client_id: import.meta.env.PUBLIC_GOOGLE_CLIENT_ID || '',
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
       scope: 'https://www.googleapis.com/auth/drive.file',
       callback: async (tokenResponse) => {
         if (tokenResponse.error) return;
         try {
-          const res = await fetch(`${import.meta.env.PUBLIC_API_URL || "http://localhost:8000"}/export-all/save-to-drive`, {
+          const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/export-all/save-to-drive`, {
             method: "POST",
             headers: { 
               "Content-Type": "application/json",
@@ -113,7 +113,7 @@ export default function App() {
                 onClick={() => {
                   const fmt = confirm("Use Markdown format? (Cancel for TXT)") ? "md" : "txt";
                   const token = localStorage.getItem("yt_token");
-                  window.open(`${import.meta.env.PUBLIC_API_URL || "http://localhost:8000"}/export-all?format=${fmt}&token=${token}`, "_blank");
+                  window.open(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/export-all?format=${fmt}&token=${token}`, "_blank");
                 }}
               >
                 📥 Download All (Aggregated)
@@ -121,7 +121,7 @@ export default function App() {
               <button 
                 className="secondary"
                 style={{ background: 'rgba(66, 133, 244, 0.2)', border: '1px solid rgba(66, 133, 244, 0.4)' }}
-                onClick={() => handleSaveAllToDrive()}
+                onClick={() => handleAggregatedExport()}
               >
                 📁 Save All to Google Drive
               </button>
@@ -149,7 +149,7 @@ export default function App() {
                   if (!file) return;
                   const formData = new FormData();
                   formData.append("file", file);
-                  fetch(`${import.meta.env.PUBLIC_API_URL || "http://localhost:8000"}/auth/cookies`, {
+                  fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/auth/cookies`, {
                     method: "POST",
                     headers: { 
                       "Authorization": `Bearer ${localStorage.getItem("yt_token")}`

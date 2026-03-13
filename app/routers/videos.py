@@ -1,21 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query
 from asyncpg import Connection
 from app.database import get_db
 from app.schemas import VideoOut, TranscriptOut
-from app.routers.auth import get_current_user
-from typing import Annotated
+from app.routers.auth import get_current_user, get_token
 
 router = APIRouter(tags=["Videos"])
-
-async def get_token(
-    authorization: Annotated[str | None, Header()] = None,
-    token: Annotated[str | None, Query()] = None
-):
-    if authorization and authorization.startswith("Bearer "):
-        return authorization.split(" ")[1]
-    if token:
-        return token
-    raise HTTPException(status_code=401, detail="Missing or invalid token")
 
 @router.get("/videos/{channel_name}", response_model=list[VideoOut])
 async def list_videos(
@@ -61,7 +50,7 @@ async def get_transcript(
     
     # Check if user owns the channel of this video
     row = await db.fetchrow(
-        """SELECT v.video_id, v.title, v.url, v.transcript, v.status, v.processed_at 
+        """SELECT v.video_id, v.title, v.url, v.duration, v.transcript, v.status, v.processed_at
            FROM videos v
            JOIN channels c ON v.channel_id = c.id
            WHERE v.video_id=$1 AND c.owner_id=$2""", 

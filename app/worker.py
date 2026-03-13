@@ -179,7 +179,8 @@ async def _run_process_channel(channel_id: int):
                     if upload_date_str:
                         try:
                             uploaded_at = datetime.strptime(upload_date_str, "%Y%m%d").replace(tzinfo=timezone.utc)
-                        except: pass
+                        except (ValueError, TypeError):
+                            pass
 
                     # Phase 1: YouTubeTranscriptApi
                     transcript_text = None
@@ -188,7 +189,7 @@ async def _run_process_channel(channel_id: int):
                         tlist = ytt.list(video_id)
                         try:
                             t = tlist.find_transcript(['en', 'en-US', 'en-GB', 'hu'])
-                        except:
+                        except Exception:
                             t = next(iter(tlist))
                         
                         transcript_text = ' '.join([s['text'] for s in t.fetch()])
@@ -203,13 +204,13 @@ async def _run_process_channel(channel_id: int):
                     if transcript_text:
                         if exists:
                             await conn.execute(
-                                "UPDATE videos SET title=$1, url=$2, transcript=$3, duration=$4, uploaded_at=$5, processed_at=NOW(), status='processed' WHERE id=$6",
+                                "UPDATE videos SET title=$1, url=$2, transcript=$3, duration=$4, uploaded_at=$5, processed_at=NOW(), status='done' WHERE id=$6",
                                 entry.get('title'), video_url, transcript_text, duration, uploaded_at, exists['id']
                             )
                         else:
                             await conn.execute(
                                 """INSERT INTO videos(video_id, channel_id, channel_name, title, url, transcript, duration, uploaded_at, status, owner_id)
-                                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,'processed',$9)""",
+                                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,'done',$9)""",
                                 video_id, channel_id, channel_name, entry.get('title'), video_url, transcript_text, duration, uploaded_at, owner_id
                             )
                     else:
@@ -224,8 +225,10 @@ async def _run_process_channel(channel_id: int):
     finally:
         await conn.close()
         if cookie_path and os.path.exists(cookie_path):
-            try: os.remove(cookie_path)
-            except: pass
+            try:
+                os.remove(cookie_path)
+            except OSError:
+                pass
 
 async def _run_refresh_metadata(channel_id: int):
     await _run_process_channel(channel_id)
