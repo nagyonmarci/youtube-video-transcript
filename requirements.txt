@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 asyncpg
 yt-dlp
+curl_cffi
 youtube-transcript-api
 pydantic-settings
 python-dotenv
