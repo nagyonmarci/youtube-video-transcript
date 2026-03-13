@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     name TEXT,
     picture TEXT,
+    youtube_cookies TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -26,7 +27,8 @@ CREATE TABLE IF NOT EXISTS videos (
     duration INTEGER,
     uploaded_at TIMESTAMPTZ,
     status TEXT DEFAULT 'pending',
-    processed_at TIMESTAMPTZ
+    processed_at TIMESTAMPTZ,
+    owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_videos_channel_id ON videos(channel_id);

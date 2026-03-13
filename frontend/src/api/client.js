@@ -1,4 +1,4 @@
-export const BASE = import.meta.env.PUBLIC_API_URL || "http://localhost:8000";
+export const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 function getAuthHeader() {
   const token = localStorage.getItem("yt_token");

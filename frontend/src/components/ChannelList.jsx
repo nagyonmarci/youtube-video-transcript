@@ -3,7 +3,6 @@ import { deleteChannel } from "../api/client";
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function ChannelList({ channels, onSelect, selected, onDeleted }) {
-  const BASE = import.meta.env.PUBLIC_API_URL || "http://localhost:8000";
 
   async function handleDelete(name) {
     if (!confirm(`Are you sure you want to delete the channel "${name}"?`)) return;
@@ -30,7 +29,7 @@ export default function ChannelList({ channels, onSelect, selected, onDeleted })
     // Request access token for Drive
     // @ts-ignore
     const client = google.accounts.oauth2.initTokenClient({
-      client_id: import.meta.env.PUBLIC_GOOGLE_CLIENT_ID || '',
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
       scope: 'https://www.googleapis.com/auth/drive.file',
       callback: async (tokenResponse) => {
         if (tokenResponse.error) {

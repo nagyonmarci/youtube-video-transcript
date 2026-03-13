@@ -12,6 +12,10 @@ async def lifespan(app: FastAPI):
     yield
     # Cleanup on shutdown
     worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(
     title="YouTube Transcript API",
