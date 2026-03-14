@@ -92,47 +92,60 @@ def _parse_vtt(content: str) -> str:
     return ' '.join(lines)
 
 async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]) -> Optional[str]:
-    """Fallback: use yt-dlp to fetch auto-generated transcripts (tries vtt format)."""
-    tmp_dir = tempfile.mkdtemp()
-    try:
-        cmd = [
-            'yt-dlp', '--no-warnings', '--skip-download',
-            '--write-auto-subs', '--sub-langs', 'en',
-            '--sub-format', 'vtt',
-            '--format', 'worstaudio',
-            '--impersonate', 'chrome',
-            '--no-check-certificates',
-            '--output', f'{tmp_dir}/%(id)s',
-            f'https://www.youtube.com/watch?v={video_id}'
-        ]
+    """Fallback: use yt-dlp Python API to extract subtitles directly (no format resolution needed)."""
+    url = f'https://www.youtube.com/watch?v={video_id}'
+
+    def _extract():
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['en', 'en-US', 'en-GB'],
+            'subtitlesformat': 'vtt',
+            'impersonate': 'chrome',
+            'nocheckcertificate': True,
+        }
         if cookie_path:
-            cmd.extend(['--cookies', cookie_path])
+            ydl_opts['cookiefile'] = cookie_path
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return None
 
-        # Check for generated subtitle file regardless of exit code
-        for f in os.listdir(tmp_dir):
-            if f.endswith('.vtt'):
-                with open(os.path.join(tmp_dir, f), 'r') as vf:
-                    text = _parse_vtt(vf.read())
-                    if text.strip():
-                        print(f"    ✅ yt-dlp fallback SUCCESS for {video_id}")
-                        return text
+            # Try automatic captions first, then regular subtitles
+            for subs_key in ('automatic_captions', 'subtitles'):
+                subs = info.get(subs_key, {})
+                for lang in ('en', 'en-US', 'en-GB'):
+                    if lang in subs:
+                        # Find vtt or srv3 format entry
+                        for fmt in subs[lang]:
+                            sub_url = fmt.get('url')
+                            if sub_url:
+                                # Download the subtitle content
+                                import urllib.request
+                                req = urllib.request.Request(sub_url, headers={
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
+                                })
+                                with urllib.request.urlopen(req, timeout=30) as resp:
+                                    content = resp.read().decode('utf-8', errors='replace')
+                                    text = _parse_vtt(content)
+                                    if text.strip():
+                                        return text
+            return None
 
-        # No subtitle file found
-        err_msg = stderr.decode().strip()
-        if err_msg:
-            print(f"    ⚠️ yt-dlp fallback failed for {video_id} (code {proc.returncode}): {err_msg[:200]}")
-
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _extract)
+        if result:
+            print(f"    ✅ yt-dlp fallback SUCCESS for {video_id}")
+        else:
+            print(f"    ⚠️ yt-dlp fallback: no subtitles found for {video_id}")
+        return result
     except Exception as e:
-        print(f"    ⚠️ yt-dlp fallback fatal error for {video_id}: {e}")
-    finally:
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-    return None
+        print(f"    ⚠️ yt-dlp fallback failed for {video_id}: {e}")
+        return None
 
 async def _run_process_channel(channel_id: int):
     """Actual logic for processing a channel."""
