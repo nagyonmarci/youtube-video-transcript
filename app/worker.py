@@ -74,14 +74,31 @@ def _create_ytt_session(cookie_path: Optional[str]) -> YouTubeTranscriptApi:
             print(f"    ⚠️ Cookie load error: {e}")
     return YouTubeTranscriptApi(http_client=session)
 
+def _parse_vtt(content: str) -> str:
+    """Extract plain text from WebVTT subtitle content, removing timestamps and deduplicating."""
+    import re
+    lines = []
+    seen = set()
+    for line in content.splitlines():
+        # Skip VTT headers, timestamps, and empty lines
+        line = line.strip()
+        if not line or line == 'WEBVTT' or '-->' in line or re.match(r'^\d+$', line):
+            continue
+        # Remove VTT tags like <c> </c> <00:00:01.234>
+        clean = re.sub(r'<[^>]+>', '', line).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            lines.append(clean)
+    return ' '.join(lines)
+
 async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]) -> Optional[str]:
-    """Fallback: use yt-dlp to fetch auto-generated transcripts."""
+    """Fallback: use yt-dlp to fetch auto-generated transcripts (tries vtt format)."""
     tmp_dir = tempfile.mkdtemp()
     try:
         cmd = [
             'yt-dlp', '--no-warnings', '--skip-download',
             '--write-auto-subs', '--sub-langs', 'en',
-            '--sub-format', 'json3',
+            '--sub-format', 'vtt',
             '--impersonate', 'chrome',
             '--no-check-certificates',
             '--output', f'{tmp_dir}/%(id)s',
@@ -96,12 +113,10 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
         stdout, stderr = await proc.communicate()
 
         # Check for generated subtitle file regardless of exit code
-        # (yt-dlp may return non-zero due to warnings but still produce output)
         for f in os.listdir(tmp_dir):
-            if f.endswith('.json3'):
-                with open(os.path.join(tmp_dir, f), 'r') as jf:
-                    data = json.load(jf)
-                    text = ' '.join([e.get('segs', [{}])[0].get('utf8', '') for e in data.get('events', []) if e.get('segs')])
+            if f.endswith('.vtt'):
+                with open(os.path.join(tmp_dir, f), 'r') as vf:
+                    text = _parse_vtt(vf.read())
                     if text.strip():
                         print(f"    ✅ yt-dlp fallback SUCCESS for {video_id}")
                         return text
@@ -110,7 +125,7 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
         err_msg = stderr.decode().strip()
         if err_msg:
             print(f"    ⚠️ yt-dlp fallback failed for {video_id} (code {proc.returncode}): {err_msg[:200]}")
-            
+
     except Exception as e:
         print(f"    ⚠️ yt-dlp fallback fatal error for {video_id}: {e}")
     finally:
