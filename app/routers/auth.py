@@ -133,7 +133,7 @@ async def upload_cookies(
                 cookies_json = json.loads(json_blob)
                 cookies_text = json_to_netscape(cookies_json)
                 print("[Auth] Successfully converted JSON cookies to Netscape format.")
-            except:
+            except (json.JSONDecodeError, ValueError, KeyError):
                 # Not valid JSON after all, keep as raw text
                 pass
             
