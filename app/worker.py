@@ -99,6 +99,7 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
             'yt-dlp', '--no-warnings', '--skip-download',
             '--write-auto-subs', '--sub-langs', 'en',
             '--sub-format', 'vtt',
+            '--format', 'worstaudio',
             '--impersonate', 'chrome',
             '--no-check-certificates',
             '--output', f'{tmp_dir}/%(id)s',
