@@ -144,7 +144,9 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
             print(f"    ⚠️ yt-dlp fallback: no subtitles found for {video_id}")
         return result
     except Exception as e:
-        print(f"    ⚠️ yt-dlp fallback failed for {video_id}: {e}")
+        import traceback
+        print(f"    ⚠️ yt-dlp fallback failed for {video_id}: {type(e).__name__}: {e}")
+        traceback.print_exc()
         return None
 
 async def _run_process_channel(channel_id: int):
