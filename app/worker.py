@@ -80,8 +80,8 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
     try:
         cmd = [
             'yt-dlp', '--quiet', '--skip-download', 
-            '--write-auto-subs', '--sub-langs', 'en', 
-            '--sub-format', 'json3', '--remote-components', 'ejs:github',
+            '--write-auto-subs', '--sub-langs', 'en',
+            '--sub-format', 'json3',
             '--impersonate', 'chrome',
             '--output', f'{tmp_dir}/%(id)s',
             f'https://www.youtube.com/watch?v={video_id}'
@@ -143,7 +143,6 @@ async def _run_process_channel(channel_id: int):
             'quiet': True,
             'extract_flat': True,
             'force_generic_extractor': False,
-            'remote_components': ['ejs:github'],
         }
         if cookie_path:
             ydl_opts['cookiefile'] = cookie_path
