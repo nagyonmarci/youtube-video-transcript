@@ -79,22 +79,24 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
     tmp_dir = tempfile.mkdtemp()
     try:
         cmd = [
-            'yt-dlp', '--quiet', '--skip-download', 
+            'yt-dlp', '--no-warnings', '--skip-download',
             '--write-auto-subs', '--sub-langs', 'en',
             '--sub-format', 'json3',
             '--impersonate', 'chrome',
+            '--no-check-certificates',
             '--output', f'{tmp_dir}/%(id)s',
             f'https://www.youtube.com/watch?v={video_id}'
         ]
         if cookie_path:
             cmd.extend(['--cookies', cookie_path])
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         stdout, stderr = await proc.communicate()
-        
-        # Look for the generated file
+
+        # Check for generated subtitle file regardless of exit code
+        # (yt-dlp may return non-zero due to warnings but still produce output)
         for f in os.listdir(tmp_dir):
             if f.endswith('.json3'):
                 with open(os.path.join(tmp_dir, f), 'r') as jf:
@@ -103,11 +105,11 @@ async def _fetch_transcript_with_ytdlp(video_id: str, cookie_path: Optional[str]
                     if text.strip():
                         print(f"    ✅ yt-dlp fallback SUCCESS for {video_id}")
                         return text
-        
-        # If we didn't find a file, but had output/error
-        if proc.returncode != 0:
-            err_msg = stderr.decode().strip()
-            print(f"    ⚠️ yt-dlp fallback failed for {video_id} (code {proc.returncode}): {err_msg[:100]}...")
+
+        # No subtitle file found
+        err_msg = stderr.decode().strip()
+        if err_msg:
+            print(f"    ⚠️ yt-dlp fallback failed for {video_id} (code {proc.returncode}): {err_msg[:200]}")
             
     except Exception as e:
         print(f"    ⚠️ yt-dlp fallback fatal error for {video_id}: {e}")
