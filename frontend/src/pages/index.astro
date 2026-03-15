@@ -1,24 +1,123 @@
 ---
 import App from '../App.jsx';
-import '../index.css';
 ---
 
 <!DOCTYPE html>
-<html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<meta name="generator" content={Astro.generator} />
-		<title>YouTube Transcript Manager</title>
-    <script src="https://accounts.google.com/gsi/client" async defer is:inline></script>
-    <script is:inline>
-      if (!localStorage.getItem('yt_token')) {
-        window.location.href = '/login';
-      }
-    </script>
-	</head>
-	<body>
-		<App client:only="react" />
-	</body>
+<html lang="hu">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Transcript Downloader</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <App client:only="react" />
+  </body>
 </html>
+
+<style is:global>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f0f;
+    --bg2: #1a1a1a;
+    --bg3: #242424;
+    --border: #333;
+    --text: #e0e0e0;
+    --text2: #aaa;
+    --primary: #ff4444;
+    --primary-dim: rgba(255,68,68,0.15);
+    --green: #4caf50;
+    --yellow: #ffc107;
+    --red: #f44336;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  button {
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text);
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: var(--bg2); border-color: #555; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+  button.primary:hover { background: #cc3333; }
+  button.danger { background: rgba(244,67,54,0.2); border-color: rgba(244,67,54,0.4); color: #f88; }
+  button.danger:hover { background: rgba(244,67,54,0.35); }
+
+  input, textarea, select {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    outline: none;
+    width: 100%;
+  }
+  input:focus, textarea:focus { border-color: #555; }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge-done { background: rgba(76,175,80,0.2); color: #6fcf73; }
+  .badge-pending { background: rgba(255,193,7,0.2); color: #ffc107; }
+  .badge-processing { background: rgba(33,150,243,0.2); color: #64b5f6; }
+  .badge-no_transcript { background: rgba(158,158,158,0.2); color: #bbb; }
+  .badge-error { background: rgba(244,67,54,0.2); color: #f88; }
+
+  .app-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .app-header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-sidebar {
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .app-main {
+    overflow-y: auto;
+    padding: 0.75rem;
+  }
+</style>

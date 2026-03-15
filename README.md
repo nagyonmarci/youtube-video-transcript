@@ -1,78 +1,79 @@
-# YouTube Transcript Manager
+# YouTube Transcript Downloader
 
-YouTube csatornák videóinak automatikus transcript letöltése, kezelése és exportálása.
+YouTube csatornák és videók transzkriptjének letöltője. Directus backend, Astro + React frontend.
 
-## Jelenlegi stack
+## Stack
 
-- **Backend:** FastAPI + asyncpg + yt-dlp + youtube-transcript-api
-- **Frontend:** Astro + React
-- **DB:** PostgreSQL
+- **Backend adatbázis/API:** Directus v11 (headless CMS) + PostgreSQL
+- **Transcript fetcher:** Python FastAPI mikroszerviz (yt-dlp + youtube-transcript-api)
+- **Frontend:** Astro v6 + React + TanStack Table
 - **Infra:** Docker Compose
 
 ## Funkciók
 
-- Google OAuth bejelentkezés
-- YouTube csatornák hozzáadása (per user)
-- Automatikus transcript letöltés (youtube-transcript-api + yt-dlp fallback)
-- YouTube cookie támogatás (bot-védelem megkerülése)
-- Videó lista + transcript megtekintés
-- Export txt/md formátumban
-- Google Drive-ba mentés
-- Background worker queue (soros feldolgozás, rate limiting)
+- Csatornák hozzáadása: txt/csv fájl feltöltés, textarea, egyedi URL
+- Egyedi videó hozzáadás YouTube linkkel
+- Transzkript letöltés rate limitinggel (~60s/videó, randomizált)
+- Napi automatikus csatorna-frissítés (új videók)
+- Rendezhető táblázat: cím (link), feltöltés dátuma, hossz, státusz
+- Transzkript megjelenítés modal ablakban
+- Export: videónként, csatornánként, összesítve – TXT vagy MD formátum
 
-## Futtatás
+## Gyors indítás
 
 ```bash
-cp .env.example .env  # kitölteni a változókat
+cp .env.example .env
+# Szerkeszd a .env fájlt (jelszavak, token)
 docker compose up -d
 ```
 
-- API: http://localhost:8000
-- Frontend: http://localhost:4321
-- DB: localhost:5432
+Szolgáltatások:
+- **Frontend:** http://localhost:4321
+- **Directus admin:** http://localhost:8055 (admin / .env ADMIN_PASSWORD)
+- **Fetcher API:** http://localhost:8000
 
-## Lehetséges jövőbeli architektúra: Directus + Astro
+## .env változók
 
-A jelenlegi custom FastAPI backend nagyrésze kiváltható lenne Directus-szal:
-
-### Amit a Directus kiváltana
-
-| Jelenlegi custom kód | Directus |
+| Változó | Leírás |
 |---|---|
-| `auth.py` – Google OAuth, JWT, user CRUD | Beépített auth (Google OAuth SSO) |
-| `init.sql` – kézi DB séma | Admin UI-ból kezelhető séma |
-| `channels.py` – CRUD endpointok | Auto-generált REST + GraphQL API |
-| `videos.py` – listázás, szűrés | Beépített szűrés, rendezés, pagination |
-| `schemas.py` – Pydantic modellek | Nem kell |
-| `database.py` – connection pool | Beépített |
-| Admin felület | Teljes admin panel |
+| `POSTGRES_PASSWORD` | PostgreSQL jelszó |
+| `DIRECTUS_SECRET` | Directus titkos kulcs (JWT signing) |
+| `DIRECTUS_ADMIN_EMAIL` | Admin e-mail |
+| `DIRECTUS_ADMIN_PASSWORD` | Admin jelszó |
+| `DIRECTUS_ADMIN_TOKEN` | Statikus API token (frontend + fetcher) |
+| `PUBLIC_DIRECTUS_URL` | Directus URL a böngészőből (default: http://localhost:8055) |
+| `PUBLIC_FETCHER_URL` | Fetcher URL a böngészőből (default: http://localhost:8000) |
+| `REFRESH_CRON` | Napi frissítés cron (default: `0 2 * * *` = éjjel 2:00) |
 
-### Ami custom maradna
+## Csatorna feltöltési formátumok
 
-- **Worker logika** (yt-dlp + transcript letöltés) – Directus Flow/Hook-ként vagy külső Python service-ként
-- **Google Drive export** – Directus Flow-ként megoldható
-- **Cookie kezelés** – custom extension
-
-### Tervezett architektúra
-
+**txt fájl** (soronként egy URL):
 ```
-Astro frontend  -->  Directus (auth + API + DB)  -->  PostgreSQL
-                          |
-                     Directus Flow / külső worker
-                          |
-                     yt-dlp + youtube-transcript-api
+https://www.youtube.com/@channelname
+@anotherhandle
+UCxxxxxxxxxxxxxx
 ```
 
-### Előnyök
+**csv fájl** (az URL-t tartalmazó oszlop automatikusan felismert):
+```
+name,url
+Channel Name,https://www.youtube.com/@handle
+```
 
-- ~60-70% kevesebb custom kód
-- Beépített admin panel a tartalom kezeléséhez
-- Granulált jogosultságkezelés
-- Auto-generált API dokumentáció
-- Egyszerűbb maintenance
+## Rate limiting
 
-### Hátrányok
+- Transzkriptek között: 45-75 másodperc (véletlenszerű, átlag ~60s)
+- Csatorna videólista lekérések között: 5-15 másodperc
+- Soros feldolgozás (nincs párhuzamos letöltés)
+- 429/403 hibára exponenciális backoff (max 120s)
 
-- Directus container extra resource igény
-- Directus Flows Node.js-ben futnak (a worker logika Python – vagy át kell írni JS-re, vagy külön service marad)
-- Kevesebb kontroll az API felett
+## Architektúra
+
+```
+Frontend (Astro+React) ──► Directus REST API ──► PostgreSQL
+         │
+         └──► Fetcher (Python FastAPI)
+                   │
+                   ├─ yt-dlp (videólista, metaadat)
+                   └─ youtube-transcript-api (transzkript)
+```
