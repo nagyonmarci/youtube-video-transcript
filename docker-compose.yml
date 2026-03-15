@@ -1,48 +1,72 @@
 services:
-  api:
-    build: .
-    container_name: yt_transcript_api
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      POSTGRES_DB: directus
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U directus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  directus:
+    image: directus/directus:11
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8055:8055"
+    environment:
+      SECRET: ${DIRECTUS_SECRET:-change-me-in-production}
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: directus
+      DB_USER: directus
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-admin}
+      ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      PUBLIC_URL: ${PUBLIC_DIRECTUS_URL:-http://localhost:8055}
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "true"
+      WEBSOCKETS_ENABLED: "false"
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+
+  fetcher:
+    build: ./fetcher
+    restart: unless-stopped
+    depends_on:
+      - directus
     ports:
       - "8000:8000"
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./app:/app/app
-    restart: unless-stopped
+    environment:
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      REFRESH_CRON: ${REFRESH_CRON:-0 2 * * *}
 
   frontend:
     build: ./frontend
-    container_name: yt_transcript_frontend
+    restart: unless-stopped
+    depends_on:
+      - directus
+      - fetcher
     ports:
       - "4321:4321"
     environment:
-      - VITE_API_URL=http://localhost:8000
-    depends_on:
-      - api
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    restart: unless-stopped
-
-  db:
-    image: postgres:16-alpine
-    container_name: yt_transcript_db
-    env_file:
-      - .env
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init_db/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
+      PUBLIC_DIRECTUS_URL: ${PUBLIC_DIRECTUS_URL:-http://localhost:8055}
+      PUBLIC_DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      PUBLIC_FETCHER_URL: ${PUBLIC_FETCHER_URL:-http://localhost:8000}
 
 volumes:
   postgres_data:
+  directus_uploads:
+  directus_extensions:
