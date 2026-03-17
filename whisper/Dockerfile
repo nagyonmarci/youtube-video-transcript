@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch v1.7.3 https://github.com/ggerganov/whisper.cpp.git /whisper.cpp
