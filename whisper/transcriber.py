@@ -29,7 +29,7 @@ def download_audio(video_id: str, output_dir: str) -> Optional[str]:
     output_template = os.path.join(output_dir, f"{video_id}.%(ext)s")
     cmd = [
         "yt-dlp",
-        "-f", "worstaudio",
+        "-f", "worstaudio/bestaudio",
         "--no-warnings",
         "--no-playlist",
         "-o", output_template,
