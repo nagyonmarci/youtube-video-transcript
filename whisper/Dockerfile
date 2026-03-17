@@ -12,7 +12,10 @@ RUN git clone --depth 1 --branch v1.7.3 https://github.com/ggerganov/whisper.cpp
 
 WORKDIR /whisper.cpp
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build build --config Release -j$(nproc)
+    cmake --build build --config Release -j$(nproc) && \
+    # Binary is named 'whisper-cli' in newer versions, 'main' in older ones
+    find build/bin -maxdepth 1 -type f \( -name "whisper-cli" -o -name "main" \) \
+        | head -1 | xargs -I{} cp {} /usr/local/bin/whisper-cli
 
 # Stage 2: Runtime
 FROM python:3.12-slim
@@ -26,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy whisper.cpp binary
-COPY --from=builder /whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=builder /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 
 # Download model at build time
 ARG WHISPER_MODEL=ggml-large-v3.bin
