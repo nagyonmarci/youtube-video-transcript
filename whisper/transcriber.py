@@ -24,6 +24,23 @@ def check_disk_space(path: str = "/tmp") -> bool:
     return True
 
 
+MEMBERS_ONLY_PHRASES = (
+    "members-only",
+    "join this channel",
+    "members only",
+)
+
+
+def is_members_only_error(stderr: str) -> bool:
+    """Return True if yt-dlp failed because the video is members-only."""
+    lowered = stderr.lower()
+    return any(phrase in lowered for phrase in MEMBERS_ONLY_PHRASES)
+
+
+class MembersOnlyError(Exception):
+    """Raised when a video is members-only and cannot be downloaded."""
+
+
 def download_audio(video_id: str, output_dir: str) -> Optional[str]:
     """Download worst-quality audio from YouTube via yt-dlp."""
     output_template = os.path.join(output_dir, f"{video_id}.%(ext)s")
@@ -39,6 +56,9 @@ def download_audio(video_id: str, output_dir: str) -> Optional[str]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
+            if is_members_only_error(result.stderr):
+                logger.warning(f"Members-only video, skipping: {video_id}")
+                raise MembersOnlyError(video_id)
             logger.error(f"yt-dlp failed for {video_id}: {result.stderr[:500]}")
             return None
     except subprocess.TimeoutExpired:
