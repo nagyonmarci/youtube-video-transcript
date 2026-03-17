@@ -53,6 +53,25 @@ services:
       DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
       REFRESH_CRON: ${REFRESH_CRON:-0 2 * * *}
 
+  whisper:
+    build:
+      context: ./whisper
+      args:
+        WHISPER_MODEL: ggml-large-v3.bin
+    restart: unless-stopped
+    depends_on:
+      - directus
+    ports:
+      - "8001:8001"
+    environment:
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      WHISPER_MODEL_PATH: /app/models/ggml-large-v3.bin
+      WHISPER_THREADS: ${WHISPER_THREADS:-4}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
+      BATCH_CRON: ${WHISPER_BATCH_CRON:-0 3 * * *}
+      BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-50}
+
   frontend:
     build: ./frontend
     restart: unless-stopped
