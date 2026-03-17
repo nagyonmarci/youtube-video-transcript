@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from directus_client import DirectusClient
-from transcriber import transcribe_video
+from transcriber import MembersOnlyError, transcribe_video
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -96,17 +96,25 @@ async def process_transcription_task(task: dict):
     # Run transcription in thread pool (blocking I/O)
     current_task_info["phase"] = "transcribing"
     loop = asyncio.get_event_loop()
-    transcript = await loop.run_in_executor(
-        None,
-        transcribe_video,
-        video_id,
-        duration,
-        WHISPER_MODEL_PATH,
-        WHISPER_LANGUAGE,
-        WHISPER_THREADS,
-    )
-
     now = datetime.now(timezone.utc).isoformat()
+    try:
+        transcript = await loop.run_in_executor(
+            None,
+            transcribe_video,
+            video_id,
+            duration,
+            WHISPER_MODEL_PATH,
+            WHISPER_LANGUAGE,
+            WHISPER_THREADS,
+        )
+    except MembersOnlyError:
+        await directus.update_video(directus_id, {
+            "whisper_status": "members_only",
+            "processed_at": now,
+        })
+        logger.info(f"Members-only video, skipped: {video_id}")
+        return
+
     if transcript:
         await directus.update_video(directus_id, {
             "transcript": transcript,
