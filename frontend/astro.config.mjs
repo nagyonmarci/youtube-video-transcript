@@ -13,6 +13,7 @@ export default defineConfig({
       'import.meta.env.PUBLIC_DIRECTUS_URL': JSON.stringify(process.env.PUBLIC_DIRECTUS_URL || 'http://localhost:8055'),
       'import.meta.env.PUBLIC_DIRECTUS_TOKEN': JSON.stringify(process.env.PUBLIC_DIRECTUS_TOKEN || 'admin-token-change-me'),
       'import.meta.env.PUBLIC_FETCHER_URL': JSON.stringify(process.env.PUBLIC_FETCHER_URL || 'http://localhost:8000'),
+      'import.meta.env.PUBLIC_WHISPER_URL': JSON.stringify(process.env.PUBLIC_WHISPER_URL || 'http://localhost:8001'),
     },
   },
 });

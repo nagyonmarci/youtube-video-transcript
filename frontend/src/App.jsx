@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getChannels, getVideos, getAllVideos } from './lib/directus.js';
-import { stopProcessing, getStatus } from './lib/fetcher.js';
+import {
+  stopProcessing, getStatus,
+  getWhisperStatus, startWhisperBatch, stopWhisper, resumeWhisper,
+} from './lib/fetcher.js';
 import TopActions from './components/TopActions.jsx';
 import ChannelGrid from './components/ChannelGrid.jsx';
 import VideoTable from './components/VideoTable.jsx';
@@ -16,6 +19,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [fetcherStatus, setFetcherStatus] = useState(null);
+  const [whisperStatus, setWhisperStatus] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const loadChannels = useCallback(async () => {
@@ -49,6 +53,12 @@ export default function App() {
       setFetcherStatus(s);
     } catch {
       setFetcherStatus(null);
+    }
+    try {
+      const w = await getWhisperStatus();
+      setWhisperStatus(w);
+    } catch {
+      setWhisperStatus(null);
     }
   }, []);
 
@@ -97,22 +107,66 @@ export default function App() {
     }
   };
 
+  const handleWhisperStart = async () => {
+    try {
+      const result = await startWhisperBatch();
+      await loadStatus();
+    } catch (e) {
+      alert('Whisper hiba: ' + e.message);
+    }
+  };
+
+  const handleWhisperStop = async () => {
+    try {
+      await stopWhisper();
+      await loadStatus();
+    } catch (e) {
+      alert('Whisper hiba: ' + e.message);
+    }
+  };
+
+  const whisperRunning = whisperStatus && (whisperStatus.queue_size > 0 || whisperStatus.batch_running);
+
   return (
     <div className="app-layout">
       <header className="app-header">
         <span style={{ fontSize: '1.4rem' }}>▶</span>
         <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>YouTube Transcript Downloader</h1>
-        {fetcherStatus && fetcherStatus.queue_size > 0 && (
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span className="badge badge-processing">
-              Feldolgozás: {fetcherStatus.queue_size} a sorban
-              {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
+
+        <div className="header-status">
+          {/* Fetcher status */}
+          {fetcherStatus && fetcherStatus.queue_size > 0 && (
+            <span className="header-status-item">
+              <span className="badge badge-processing">
+                Feldolgozás: {fetcherStatus.queue_size} a sorban
+                {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
+              </span>
+              <button className="danger" onClick={handleStop} style={{ padding: '0.25rem 0.6rem' }}>
+                Stop
+              </button>
             </span>
-            <button className="danger" onClick={handleStop} style={{ padding: '0.25rem 0.6rem' }}>
-              Stop
-            </button>
+          )}
+
+          {/* Whisper status & controls */}
+          <span className="header-status-item">
+            {whisperRunning ? (
+              <>
+                <span className="badge badge-whisper">
+                  🎙 Whisper: {whisperStatus.queue_size} a sorban
+                  {whisperStatus.current_task?.video_id && ` • ${whisperStatus.current_task.video_id}`}
+                  {whisperStatus.current_task?.phase && ` (${whisperStatus.current_task.phase})`}
+                </span>
+                <button className="danger" onClick={handleWhisperStop} style={{ padding: '0.25rem 0.6rem' }}>
+                  Stop
+                </button>
+              </>
+            ) : (
+              <button onClick={handleWhisperStart} className="whisper-btn" style={{ padding: '0.25rem 0.6rem' }}>
+                🎙 Whisper indítás
+              </button>
+            )}
           </span>
-        )}
+        </div>
       </header>
 
       <div className="app-content">

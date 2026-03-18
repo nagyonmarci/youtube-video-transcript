@@ -39,3 +39,35 @@ export async function getStatus() {
   if (!res.ok) throw new Error(`status → ${res.status}`);
   return res.json();
 }
+
+// ---- Whisper service ----
+
+const WHISPER_URL = import.meta.env.PUBLIC_WHISPER_URL || 'http://localhost:8001';
+
+export async function getWhisperStatus() {
+  const res = await fetch(`${WHISPER_URL}/status`);
+  if (!res.ok) throw new Error(`whisper status → ${res.status}`);
+  return res.json();
+}
+
+export async function startWhisperBatch(limit = 50) {
+  const res = await fetch(`${WHISPER_URL}/transcribe-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit }),
+  });
+  if (!res.ok) throw new Error(`whisper batch → ${res.status}`);
+  return res.json();
+}
+
+export async function stopWhisper() {
+  const res = await fetch(`${WHISPER_URL}/stop`, { method: 'POST' });
+  if (!res.ok) throw new Error(`whisper stop → ${res.status}`);
+  return res.json();
+}
+
+export async function resumeWhisper() {
+  const res = await fetch(`${WHISPER_URL}/resume`, { method: 'POST' });
+  if (!res.ok) throw new Error(`whisper resume → ${res.status}`);
+  return res.json();
+}
