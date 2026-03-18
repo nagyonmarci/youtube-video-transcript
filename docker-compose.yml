@@ -70,7 +70,7 @@ services:
       WHISPER_THREADS: ${WHISPER_THREADS:-4}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
       BATCH_CRON: ${WHISPER_BATCH_CRON:-0 3 * * *}
-      BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-50}
+      BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-5000}
 
   frontend:
     build: ./frontend

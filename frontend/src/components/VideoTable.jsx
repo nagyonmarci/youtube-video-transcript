@@ -135,6 +135,7 @@ export default function VideoTable({
                           target="_blank"
                           rel="noopener noreferrer"
                           className="video-link"
+                          title={video.title || 'Ismeretlen'}
                           onClick={e => e.stopPropagation()}
                         >
                           {video.title || 'Ismeretlen'}
