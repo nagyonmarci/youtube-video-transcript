@@ -20,6 +20,12 @@ node_modules/
 frontend/dist/
 frontend/.astro/
 
+# Transcripts
+*_transcripts.txt
+
+# VPN compose
+docker-compose.vpn.yml
+
 # OS
 .DS_Store
 Thumbs.db
@@ -29,3 +35,11 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Claude Code
+.claude/
+
+# Local scratch files
+*.psd
+data.json
+frontend_react_backup/

@@ -190,13 +190,16 @@ async def process_single_video_task(task: dict):
 
     import subprocess, json as json_mod
     def get_video_info():
-        cmd = ["yt-dlp", "--dump-json", "--no-warnings", "--skip-download", video_url]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.stdout:
-                return json_mod.loads(result.stdout)
-        except Exception:
-            pass
+        # Try without format selector first; fall back to -f mhtml (storyboard)
+        # which is always available and contains all metadata we need
+        for fmt_args in [[], ["-f", "mhtml"]]:
+            cmd = ["yt-dlp", "--dump-json", "--no-warnings", "--skip-download"] + fmt_args + [video_url]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.stdout.strip():
+                    return json_mod.loads(result.stdout)
+            except Exception:
+                pass
         return {}
 
     info = await loop.run_in_executor(None, get_video_info)
@@ -211,13 +214,39 @@ async def process_single_video_task(task: dict):
         except ValueError:
             pass
 
+    # Resolve channel: use passed channel_id, or detect from yt-dlp metadata
+    channel_id = task.get("channel_id")
+    if not channel_id and info:
+        yt_channel_url = info.get("uploader_url") or info.get("channel_url") or ""
+        yt_channel_name = info.get("channel") or info.get("uploader") or ""
+        yt_channel_yt_id = info.get("channel_id") or ""
+        if yt_channel_url or yt_channel_yt_id:
+            handle = extract_handle_from_url(yt_channel_url) if yt_channel_url else yt_channel_yt_id
+            existing_ch = await directus.find_channel_by_handle(handle)
+            # Also try by YouTube channel ID (UCxxx) if handle lookup fails
+            if not existing_ch and yt_channel_yt_id and yt_channel_yt_id != handle:
+                existing_ch = await directus.find_channel_by_handle(yt_channel_yt_id)
+            if existing_ch:
+                channel_id = existing_ch["id"]
+                logger.info(f"Single video {yt_id}: linked to existing channel {handle}")
+            else:
+                ch_record = await directus.create_channel({
+                    "name": yt_channel_name or handle,
+                    "channel_url": yt_channel_url,
+                    "channel_handle": handle,
+                    "status": "done",
+                    "video_count": 0,
+                })
+                channel_id = ch_record.get("id")
+                logger.info(f"Single video {yt_id}: created new channel {handle}")
+
     video_data = {
         "video_id": yt_id,
         "title": info.get("title", yt_id),
         "url": video_url,
         "duration_seconds": info.get("duration"),
         "uploaded_at": uploaded_at,
-        "channel_id": task.get("channel_id"),
+        "channel_id": channel_id,
         "status": "pending",
     }
     created = await directus.create_video(video_data)

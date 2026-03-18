@@ -144,16 +144,15 @@ import App from '../App.jsx';
     gap: 0.75rem;
   }
 
-  /* --- Top Actions (3 cards in a row) --- */
+  /* --- Top Actions (3 cards in a row, always equal width) --- */
   .top-actions {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.75rem;
-    flex-wrap: wrap;
     align-items: flex-start;
   }
-  .top-action-card {
-    flex: 1;
-    min-width: 200px;
+  .top-actions .status-msg {
+    grid-column: 1 / -1;
   }
   .card-title {
     font-size: 0.85rem;
@@ -294,6 +293,10 @@ import App from '../App.jsx';
   .video-link {
     color: #64b5f6;
     text-decoration: none;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .video-link:hover { text-decoration: underline; }
   .btn-sm {
@@ -319,8 +322,7 @@ import App from '../App.jsx';
   /* --- Responsive --- */
   @media (max-width: 768px) {
     .app-content { padding: 0.5rem; }
-    .top-actions { flex-direction: column; }
-    .top-action-card { min-width: unset; }
+    .top-actions { grid-template-columns: 1fr; }
     .channel-card { min-width: 100px; max-width: 160px; }
     .video-header { flex-direction: column; align-items: flex-start; }
     .video-search { width: 100%; }
@@ -328,7 +330,6 @@ import App from '../App.jsx';
   }
 
   @media (min-width: 769px) and (max-width: 1024px) {
-    .top-action-card { min-width: 180px; }
     .channel-card { max-width: 180px; }
   }
 </style>
