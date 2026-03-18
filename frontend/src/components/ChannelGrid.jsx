@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { deleteChannel, getAllChannelVideos } from '../lib/directus.js';
 import { refreshChannel } from '../lib/fetcher.js';
 import {
@@ -6,9 +6,18 @@ import {
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
 
+const SORT_OPTIONS = [
+  { value: 'name_asc',   label: 'Név A–Z' },
+  { value: 'name_desc',  label: 'Név Z–A' },
+  { value: 'count_desc', label: 'Legtöbb videó' },
+  { value: 'count_asc',  label: 'Legkevesebb videó' },
+];
+
 export default function ChannelGrid({ channels, selectedChannel, onSelect, onChannelsChanged }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('name_asc');
 
   function showMsg(text, isError = false) {
     setMsg({ text, isError });
@@ -19,6 +28,26 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
     const map = { pending: 'Várakozik', processing: 'Folyamatban', done: 'Kész', error: 'Hiba' };
     return map[s] || s;
   };
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = q
+      ? channels.filter(ch =>
+          (ch.name || ch.channel_handle || '').toLowerCase().includes(q)
+        )
+      : [...channels];
+
+    list.sort((a, b) => {
+      const nameA = (a.name || a.channel_handle || '').toLowerCase();
+      const nameB = (b.name || b.channel_handle || '').toLowerCase();
+      if (sortKey === 'name_asc')   return nameA.localeCompare(nameB);
+      if (sortKey === 'name_desc')  return nameB.localeCompare(nameA);
+      if (sortKey === 'count_desc') return (b.video_count || 0) - (a.video_count || 0);
+      if (sortKey === 'count_asc')  return (a.video_count || 0) - (b.video_count || 0);
+      return 0;
+    });
+    return list;
+  }, [channels, search, sortKey]);
 
   async function handleRefresh(e, ch) {
     e.stopPropagation();
@@ -53,10 +82,29 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
     }
   }
 
+  const totalVideos = channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
+
   return (
     <div className="channel-section">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-        <h3 style={{ fontSize: '0.9rem', color: 'var(--text2)' }}>Összes csatorna ({channels.length})</h3>
+      <div className="channel-section-header">
+        <h3 style={{ fontSize: '0.9rem', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+          Csatornák ({filtered.length}/{channels.length})
+        </h3>
+        <input
+          className="channel-search"
+          placeholder="Keresés..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select
+          className="channel-sort"
+          value={sortKey}
+          onChange={e => setSortKey(e.target.value)}
+        >
+          {SORT_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
       </div>
 
       {msg && (
@@ -74,12 +122,12 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
           <div className="channel-card-name">Összes</div>
           <div className="channel-card-meta">
             <span style={{ fontSize: '0.75rem', color: 'var(--text2)' }}>
-              {channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0)} videó
+              {totalVideos} videó
             </span>
           </div>
         </div>
 
-        {channels.map(ch => {
+        {filtered.map(ch => {
           const isSelected = selectedChannel?.id === ch.id;
           return (
             <div
@@ -107,6 +155,12 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
             </div>
           );
         })}
+
+        {filtered.length === 0 && search && (
+          <div style={{ fontSize: '0.85rem', color: 'var(--text2)', padding: '0.5rem' }}>
+            Nincs találat: „{search}"
+          </div>
+        )}
       </div>
     </div>
   );
