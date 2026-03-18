@@ -104,6 +104,36 @@ import App from '../App.jsx';
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
+  .header-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .header-status-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .badge-whisper {
+    background: rgba(156,39,176,0.2);
+    color: #ce93d8;
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .whisper-btn {
+    background: rgba(156,39,176,0.2);
+    border-color: rgba(156,39,176,0.4);
+    color: #ce93d8;
+    font-weight: 600;
+  }
+  .whisper-btn:hover {
+    background: rgba(156,39,176,0.35);
+  }
 
   .app-content {
     flex: 1;
