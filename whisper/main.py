@@ -185,6 +185,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
 
+    # Pre-mark known members-only videos (title contains MEMBERS)
+    try:
+        count = await directus.mark_members_only_videos()
+        if count:
+            logger.info(f"Pre-marked {count} MEMBERS videos as members_only")
+    except Exception as e:
+        logger.warning(f"Could not pre-mark members-only videos: {e}")
+
     # Reset any stale "processing" states from previous crashes
     try:
         from httpx import AsyncClient

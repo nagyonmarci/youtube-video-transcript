@@ -28,6 +28,7 @@ MEMBERS_ONLY_PHRASES = (
     "members-only",
     "join this channel",
     "members only",
+    "requested format is not available",
 )
 
 

@@ -61,16 +61,35 @@ class DirectusClient:
     # ---- Video queries ----
 
     async def get_no_transcript_videos(self, limit: int = 50) -> list:
-        """Fetch videos with status 'no_transcript' and no whisper processing yet."""
+        """Fetch videos with status 'no_transcript' and no whisper processing yet.
+        Excludes videos with 'MEMBERS' in the title (members-only content)."""
         params = (
             "?filter[status][_eq]=no_transcript"
             "&filter[whisper_status][_null]=true"
+            "&filter[title][_ncontains]=MEMBERS"
             "&sort=processed_at"
             f"&limit={limit}"
             "&fields=id,video_id,title,url,duration_seconds"
         )
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
+
+    async def mark_members_only_videos(self) -> int:
+        """Bulk-mark all no_transcript videos with 'MEMBERS' in title as members_only."""
+        params = (
+            "?filter[status][_eq]=no_transcript"
+            "&filter[whisper_status][_null]=true"
+            "&filter[title][_contains]=MEMBERS"
+            "&limit=-1"
+            "&fields=id,title"
+        )
+        result = await self._request("GET", f"/items/videos{params}")
+        videos = result.get("data", [])
+        for v in videos:
+            await self.update_video(v["id"], {"whisper_status": "members_only"})
+        if videos:
+            logger.info(f"Marked {len(videos)} MEMBERS videos as members_only")
+        return len(videos)
 
     async def update_video(self, video_id: str, data: dict) -> dict:
         result = await self._request("PATCH", f"/items/videos/{video_id}", json=data)
