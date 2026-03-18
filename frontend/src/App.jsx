@@ -1,14 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getChannels, getVideos, getAllVideos } from './lib/directus.js';
 import { stopProcessing, getStatus } from './lib/fetcher.js';
-import ChannelSidebar from './components/ChannelSidebar.jsx';
+import TopActions from './components/TopActions.jsx';
+import ChannelGrid from './components/ChannelGrid.jsx';
 import VideoTable from './components/VideoTable.jsx';
 import TranscriptModal from './components/TranscriptModal.jsx';
 
 export default function App() {
   const [channels, setChannels] = useState([]);
-  const [selectedChannel, setSelectedChannel] = useState(null); // null = all channels
+  const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState('-uploaded_at');
+  const [search, setSearch] = useState('');
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [fetcherStatus, setFetcherStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -25,16 +30,18 @@ export default function App() {
   const loadVideos = useCallback(async () => {
     setLoading(true);
     try {
-      const data = selectedChannel
-        ? await getVideos(selectedChannel.id)
-        : await getAllVideos();
-      setVideos(data);
+      const opts = { sort, page, search };
+      const result = selectedChannel
+        ? await getVideos(selectedChannel.id, opts)
+        : await getAllVideos(opts);
+      setVideos(result.items);
+      setTotalCount(result.total);
     } catch (e) {
       console.error('Failed to load videos', e);
     } finally {
       setLoading(false);
     }
-  }, [selectedChannel]);
+  }, [selectedChannel, page, sort, search]);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -64,6 +71,23 @@ export default function App() {
     loadStatus();
   }, [loadStatus]);
 
+  // Reset page when channel or search changes
+  function handleSelectChannel(ch) {
+    setSelectedChannel(ch);
+    setPage(1);
+    setSearch('');
+  }
+
+  function handleSearchChange(value) {
+    setSearch(value);
+    setPage(1);
+  }
+
+  function handleSortChange(newSort) {
+    setSort(newSort);
+    setPage(1);
+  }
+
   const handleStop = async () => {
     try {
       await stopProcessing();
@@ -91,25 +115,34 @@ export default function App() {
         )}
       </header>
 
-      <aside className="app-sidebar">
-        <ChannelSidebar
+      <div className="app-content">
+        <TopActions
           channels={channels}
           selectedChannel={selectedChannel}
-          onSelect={(ch) => setSelectedChannel(ch)}
           onChannelsChanged={loadChannels}
-          videos={videos}
         />
-      </aside>
 
-      <main className="app-main">
+        <ChannelGrid
+          channels={channels}
+          selectedChannel={selectedChannel}
+          onSelect={handleSelectChannel}
+          onChannelsChanged={loadChannels}
+        />
+
         <VideoTable
           videos={videos}
+          totalCount={totalCount}
+          page={page}
+          onPageChange={setPage}
+          search={search}
+          onSearchChange={handleSearchChange}
+          sort={sort}
+          onSortChange={handleSortChange}
           loading={loading}
           onSelectVideo={setSelectedVideo}
-          channels={channels}
           selectedChannel={selectedChannel}
         />
-      </main>
+      </div>
 
       {selectedVideo && (
         <TranscriptModal

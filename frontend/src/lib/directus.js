@@ -27,20 +27,48 @@ export async function deleteChannel(id) {
   return req('DELETE', `/items/channels/${id}`);
 }
 
-// ---- Videos ----
+// ---- Videos (paginated) ----
 
-export async function getVideos(channelId, { sort = '-uploaded_at' } = {}) {
+const PAGE_SIZE = 100;
+
+export async function getVideos(channelId, { sort = '-uploaded_at', page = 1, search = '' } = {}) {
+  const params = new URLSearchParams({
+    'filter[channel_id][_eq]': channelId,
+    sort,
+    limit: String(PAGE_SIZE),
+    offset: String((page - 1) * PAGE_SIZE),
+    'meta': 'filter_count',
+    'fields': 'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,whisper_status',
+  });
+  if (search) {
+    params.set('filter[title][_icontains]', search);
+  }
+  const data = await req('GET', `/items/videos?${params}`);
+  return { items: data?.data ?? [], total: data?.meta?.filter_count ?? 0 };
+}
+
+export async function getAllVideos({ sort = '-uploaded_at', page = 1, search = '' } = {}) {
+  const params = new URLSearchParams({
+    sort,
+    limit: String(PAGE_SIZE),
+    offset: String((page - 1) * PAGE_SIZE),
+    'meta': 'filter_count',
+    'fields': 'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,whisper_status',
+  });
+  if (search) {
+    params.set('filter[title][_icontains]', search);
+  }
+  const data = await req('GET', `/items/videos?${params}`);
+  return { items: data?.data ?? [], total: data?.meta?.filter_count ?? 0 };
+}
+
+// Non-paginated fetch for export (all videos for a channel)
+export async function getAllChannelVideos(channelId, { sort = '-uploaded_at' } = {}) {
   const params = new URLSearchParams({
     'filter[channel_id][_eq]': channelId,
     sort,
     limit: '-1',
   });
-  const data = await req('GET', `/items/videos?${params}`);
-  return data?.data ?? [];
-}
-
-export async function getAllVideos({ sort = '-uploaded_at' } = {}) {
-  const params = new URLSearchParams({ sort, limit: '-1' });
   const data = await req('GET', `/items/videos?${params}`);
   return data?.data ?? [];
 }
