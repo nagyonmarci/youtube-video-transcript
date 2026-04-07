@@ -1,79 +1,76 @@
 # YouTube Transcript Downloader
 
-YouTube csatornák és videók transzkriptjének letöltője. Directus backend, Astro + React frontend.
+Helyi eszköz YouTube csatornák és videók feliratainak letöltésére és keresésére. Ha egy videónak nincs elérhető felirata, a Whisper.cpp speech-to-text modell automatikusan legenerálja.
 
 ## Stack
 
-- **Backend adatbázis/API:** Directus v11 (headless CMS) + PostgreSQL
-- **Transcript fetcher:** Python FastAPI mikroszerviz (yt-dlp + youtube-transcript-api)
-- **Frontend:** Astro v6 + React + TanStack Table
-- **Infra:** Docker Compose
+- **Frontend:** Astro + React, Caddy reverse proxy
+- **Fetcher:** Python FastAPI – yt-dlp + youtube-transcript-api
+- **Whisper:** Whisper.cpp (ggml-large-v3) – automatikus átírás
+- **Adatbázis:** Directus v11 + PostgreSQL
 
-## Funkciók
-
-- Csatornák hozzáadása: txt/csv fájl feltöltés, textarea, egyedi URL
-- Egyedi videó hozzáadás YouTube linkkel
-- Transzkript letöltés rate limitinggel (~60s/videó, randomizált)
-- Napi automatikus csatorna-frissítés (új videók)
-- Rendezhető táblázat: cím (link), feltöltés dátuma, hossz, státusz
-- Transzkript megjelenítés modal ablakban
-- Export: videónként, csatornánként, összesítve – TXT vagy MD formátum
-
-## Gyors indítás
+## Indítás
 
 ```bash
 cp .env.example .env
-# Szerkeszd a .env fájlt (jelszavak, token)
-docker compose up -d
+docker compose up
 ```
 
-Szolgáltatások:
-- **Frontend:** http://localhost:4321
-- **Directus admin:** http://localhost:8055 (admin / .env ADMIN_PASSWORD)
-- **Fetcher API:** http://localhost:8000
+Böngészőben: **http://yt.test**
 
-## .env változók
+> **Első indításnál** a Whisper letölti a `ggml-large-v3.bin` modellt (~3 GB). Ez csak egyszer történik, a modell Docker volume-ban tárolódik.
 
-| Változó | Leírás |
-|---|---|
-| `POSTGRES_PASSWORD` | PostgreSQL jelszó |
-| `DIRECTUS_SECRET` | Directus titkos kulcs (JWT signing) |
-| `DIRECTUS_ADMIN_EMAIL` | Admin e-mail |
-| `DIRECTUS_ADMIN_PASSWORD` | Admin jelszó |
-| `DIRECTUS_ADMIN_TOKEN` | Statikus API token (frontend + fetcher) |
-| `PUBLIC_DIRECTUS_URL` | Directus URL a böngészőből (default: http://localhost:8055) |
-| `PUBLIC_FETCHER_URL` | Fetcher URL a böngészőből (default: http://localhost:8000) |
-| `REFRESH_CRON` | Napi frissítés cron (default: `0 2 * * *` = éjjel 2:00) |
+## Előfeltételek
 
-## Csatorna feltöltési formátumok
+- Docker + Docker Compose
+- dnsmasq a `*.test` domain helyi feloldásához
 
-**txt fájl** (soronként egy URL):
-```
-https://www.youtube.com/@channelname
-@anotherhandle
-UCxxxxxxxxxxxxxx
+### dnsmasq telepítés (Mac, egyszeri)
+
+```bash
+brew install dnsmasq
+echo 'address=/.test/127.0.0.1' >> $(brew --prefix)/etc/dnsmasq.conf
+sudo brew services start dnsmasq
+sudo mkdir -p /etc/resolver
+echo 'nameserver 127.0.0.1' | sudo tee /etc/resolver/test
 ```
 
-**csv fájl** (az URL-t tartalmazó oszlop automatikusan felismert):
-```
-name,url
-Channel Name,https://www.youtube.com/@handle
-```
+## Konfiguráció (.env)
+
+| Változó | Leírás | Alapértelmezett |
+|---|---|---|
+| `POSTGRES_PASSWORD` | PostgreSQL jelszó | `directus` |
+| `DIRECTUS_ADMIN_TOKEN` | Directus admin token | `admin-token-change-me` |
+| `REFRESH_CRON` | Csatornák automatikus frissítése | `0 2 * * *` |
+| `WHISPER_THREADS` | Whisper CPU szálak száma | `4` |
+| `WHISPER_LANGUAGE` | Felismerési nyelv | `auto` |
+| `WHISPER_BATCH_CRON` | Whisper batch futtatása | `0 3 * * *` |
+| `WHISPER_BATCH_LIMIT` | Max videó egy batch-ben | `50` |
+
+## Funkciók
+
+- **Csatorna hozzáadása** – URL, `@handle`, vagy `.txt`/`.csv` fájl feltöltés
+- **Egyedi videó hozzáadása** – csatorna automatikus felismerésével
+- **Whisper átírás** – automatikus napi batch, vagy manuális indítás a headerből
+- **Hiányzó dátumok frissítése** – feltöltési dátum pótlása yt-dlp-vel
+- **Keresés és rendezés** – cím, dátum, hossz, státusz szerint
+- **Export** – videónként, csatornánként, összesítve – TXT vagy MD formátum
+- **Napi automatikus frissítés** – új videók letöltése (hajnali 2)
 
 ## Rate limiting
 
-- Transzkriptek között: 45-75 másodperc (véletlenszerű, átlag ~60s)
-- Csatorna videólista lekérések között: 5-15 másodperc
+- Transzkriptek között: 45–75 másodperc (véletlenszerű)
+- Csatorna videólista lekérések között: 5–15 másodperc
 - Soros feldolgozás (nincs párhuzamos letöltés)
-- 429/403 hibára exponenciális backoff (max 120s)
 
 ## Architektúra
 
 ```
-Frontend (Astro+React) ──► Directus REST API ──► PostgreSQL
-         │
-         └──► Fetcher (Python FastAPI)
-                   │
-                   ├─ yt-dlp (videólista, metaadat)
-                   └─ youtube-transcript-api (transzkript)
+http://yt.test
+      │
+   Caddy ──► Frontend (Astro+React, :4321)
+                  │  Vite proxy
+                  ├─ /admin  ──► Directus (:8055) ──► PostgreSQL
+                  ├─ /api    ──► Fetcher (:8000)
+                  └─ /whisper──► Whisper (:8001)
 ```
