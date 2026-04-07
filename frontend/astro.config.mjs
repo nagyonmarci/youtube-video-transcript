@@ -7,12 +7,8 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 4321,
-    allowedHosts: ['yt.suliweb.org'],
   },
   vite: {
-    define: {
-      'import.meta.env.PUBLIC_DIRECTUS_TOKEN': JSON.stringify(process.env.PUBLIC_DIRECTUS_TOKEN || 'admin-token-change-me'),
-    },
     server: {
       proxy: {
         '/admin':   { target: `http://${process.env.DIRECTUS_HOST || 'localhost'}:8055`, rewrite: path => path.replace(/^\/admin/, '') },

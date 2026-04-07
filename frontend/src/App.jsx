@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getChannels, getVideos, getAllVideos, logout } from './lib/directus.js';
+import { getChannels, getVideos, getAllVideos } from './lib/directus.js';
 import {
   stopProcessing, getStatus,
   getWhisperStatus, startWhisperBatch, stopWhisper, resumeWhisper,
@@ -10,13 +10,7 @@ import VideoTable from './components/VideoTable.jsx';
 import TranscriptModal from './components/TranscriptModal.jsx';
 
 export default function App() {
-  // Redirect to login if no token
-  useEffect(() => {
-    const token = localStorage.getItem('directus_token');
-    if (!token) window.location.href = '/login';
-  }, []);
-
-  const [channels, setChannels] = useState([]);
+const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -140,13 +134,6 @@ export default function App() {
         <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>YouTube Transcript Downloader</h1>
 
         <div className="header-status">
-          <button
-            onClick={logout}
-            style={{ padding: '0.25rem 0.6rem', fontSize: '0.78rem', marginLeft: '0.5rem' }}
-            title="Kijelentkezés"
-          >
-            Kilépés
-          </button>
           {/* Fetcher status */}
           {fetcherStatus && fetcherStatus.queue_size > 0 && (
             <span className="header-status-item">
