@@ -49,6 +49,7 @@ class DirectusClient:
                                 {"text": "Processing", "value": "processing"},
                                 {"text": "Done", "value": "done"},
                                 {"text": "Error", "value": "error"},
+                                {"text": "Members Only", "value": "members_only"},
                             ]
                         },
                     },
