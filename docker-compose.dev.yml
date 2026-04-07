@@ -16,3 +16,11 @@ services:
   whisper:
     ports:
       - "8001:8001"
+
+  frontend:
+    ports:
+      - "4321:4321"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/astro.config.mjs:/app/astro.config.mjs
