@@ -40,6 +40,12 @@ export async function getStatus() {
   return res.json();
 }
 
+export async function refreshDates() {
+  const res = await fetch(`${FETCHER_URL}/refresh-dates`, { method: 'POST' });
+  if (!res.ok) throw new Error(`refresh-dates → ${res.status}`);
+  return res.json();
+}
+
 // ---- Whisper service ----
 
 const WHISPER_URL = '/whisper';

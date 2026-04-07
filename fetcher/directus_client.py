@@ -150,6 +150,11 @@ class DirectusClient:
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
+    async def get_videos_missing_date(self) -> list:
+        params = '?filter[uploaded_at][_null]=true&limit=-1&fields=id,video_id'
+        result = await self._request("GET", f"/items/videos{params}")
+        return result.get("data", [])
+
     async def find_video_by_yt_id(self, yt_video_id: str) -> Optional[dict]:
         params = f'?filter[video_id][_eq]={yt_video_id}&limit=1'
         result = await self._request("GET", f"/items/videos{params}")

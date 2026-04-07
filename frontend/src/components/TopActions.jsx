@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { fetchChannels, fetchVideo } from '../lib/fetcher.js';
+import { fetchChannels, fetchVideo, refreshDates } from '../lib/fetcher.js';
 import { getAllChannelVideos } from '../lib/directus.js';
 import {
   channelToTxt, channelToMd, allChannelsToTxt, allChannelsToMd,
@@ -137,6 +137,27 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
           <button onClick={() => handleExportAll('txt')} style={{ flex: 1 }}>TXT</button>
           <button onClick={() => handleExportAll('md')} style={{ flex: 1 }}>MD</button>
         </div>
+      </div>
+
+      {/* Refresh dates */}
+      <div className="card top-action-card">
+        <h3 className="card-title">Hiányzó dátumok</h3>
+        <button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await refreshDates();
+              showMsg('Dátum frissítés sorba állítva');
+            } catch (e) {
+              showMsg('Hiba: ' + e.message, true);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Frissítés
+        </button>
       </div>
 
       {/* Status message */}

@@ -67,6 +67,8 @@ async def worker_loop():
                 await process_single_video_task(task)
             elif task_type == "refresh":
                 await process_refresh_task(task)
+            elif task_type == "refresh_dates":
+                await process_refresh_dates_task()
         except Exception as e:
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
         finally:
@@ -284,6 +286,61 @@ async def process_refresh_task(task: dict):
     })
 
 
+async def process_refresh_dates_task():
+    """Fetch upload date for videos that are missing it."""
+    global current_task_info
+    videos = await directus.get_videos_missing_date()
+    if not videos:
+        logger.info("No videos with missing dates")
+        return
+
+    logger.info(f"Refreshing dates for {len(videos)} videos")
+    loop = asyncio.get_event_loop()
+
+    import subprocess, json as json_mod
+    for i, video in enumerate(videos):
+        if stop_flag:
+            break
+
+        yt_id = video["video_id"]
+        current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{len(videos)}", "video": yt_id}
+
+        def get_date():
+            cmd = ["yt-dlp", "--dump-json", "--skip-download", "--no-warnings",
+                   f"https://www.youtube.com/watch?v={yt_id}"]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.stdout.strip():
+                    return json_mod.loads(result.stdout)
+            except Exception:
+                pass
+            return {}
+
+        info = await loop.run_in_executor(None, get_date)
+        if not info:
+            continue
+
+        from datetime import datetime as dt
+        uploaded_at = None
+        upload_date = info.get("upload_date")
+        if isinstance(upload_date, str) and len(upload_date) == 8:
+            try:
+                uploaded_at = dt(int(upload_date[:4]), int(upload_date[4:6]),
+                                 int(upload_date[6:8]), tzinfo=timezone.utc).isoformat()
+            except ValueError:
+                pass
+        if not uploaded_at:
+            ts = info.get("timestamp") or info.get("release_timestamp")
+            if isinstance(ts, (int, float)):
+                uploaded_at = dt.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+        if uploaded_at:
+            await directus.update_video(video["id"], {"uploaded_at": uploaded_at})
+            logger.info(f"Updated date for {yt_id}: {uploaded_at}")
+
+    logger.info("Date refresh complete")
+
+
 async def daily_refresh():
     """Automatically refresh all channels once a day."""
     logger.info("Starting daily channel refresh")
@@ -451,6 +508,13 @@ async def refresh_channel(channel_id: str):
 
     await task_queue.put({"type": "refresh", "channel_id": channel_id})
     return {"queued": True, "channel_id": channel_id}
+
+
+@app.post("/refresh-dates")
+async def refresh_dates():
+    """Queue a task to fetch missing upload dates for all videos."""
+    await task_queue.put({"type": "refresh_dates"})
+    return {"queued": True}
 
 
 @app.post("/stop")
