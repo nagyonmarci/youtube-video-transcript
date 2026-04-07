@@ -104,9 +104,9 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
             if not yt_id:
                 continue
 
-            # Parse upload date YYYYMMDD
+            # Parse upload date – try multiple fields yt-dlp may return
             uploaded_at = None
-            upload_date = info.get("upload_date") or info.get("timestamp")
+            upload_date = info.get("upload_date")
             if isinstance(upload_date, str) and len(upload_date) == 8:
                 try:
                     uploaded_at = datetime(
@@ -117,8 +117,10 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
                     ).isoformat()
                 except ValueError:
                     pass
-            elif isinstance(upload_date, (int, float)):
-                uploaded_at = datetime.fromtimestamp(upload_date, tz=timezone.utc).isoformat()
+            if not uploaded_at:
+                ts = info.get("timestamp") or info.get("release_timestamp")
+                if isinstance(ts, (int, float)):
+                    uploaded_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
             duration = info.get("duration")
             duration_seconds = int(duration) if duration else None
