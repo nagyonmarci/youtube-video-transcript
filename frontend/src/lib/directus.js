@@ -1,4 +1,4 @@
-const DIRECTUS_URL = import.meta.env.PUBLIC_DIRECTUS_URL || 'http://localhost:8055';
+const DIRECTUS_URL = '/admin';
 
 function getToken() {
   return localStorage.getItem('directus_token') || import.meta.env.PUBLIC_DIRECTUS_TOKEN || 'admin-token-change-me';

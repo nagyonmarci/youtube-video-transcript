@@ -11,10 +11,14 @@ export default defineConfig({
   },
   vite: {
     define: {
-      'import.meta.env.PUBLIC_DIRECTUS_URL': JSON.stringify(process.env.PUBLIC_DIRECTUS_URL || 'http://localhost:8055'),
       'import.meta.env.PUBLIC_DIRECTUS_TOKEN': JSON.stringify(process.env.PUBLIC_DIRECTUS_TOKEN || 'admin-token-change-me'),
-      'import.meta.env.PUBLIC_FETCHER_URL': JSON.stringify(process.env.PUBLIC_FETCHER_URL || 'http://localhost:8000'),
-      'import.meta.env.PUBLIC_WHISPER_URL': JSON.stringify(process.env.PUBLIC_WHISPER_URL || 'http://localhost:8001'),
+    },
+    server: {
+      proxy: {
+        '/admin': { target: 'http://localhost:8055', rewrite: path => path.replace(/^\/admin/, '') },
+        '/api':   { target: 'http://localhost:8000', rewrite: path => path.replace(/^\/api/, '') },
+        '/whisper': { target: 'http://localhost:8001', rewrite: path => path.replace(/^\/whisper/, '') },
+      },
     },
   },
 });

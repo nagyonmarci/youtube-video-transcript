@@ -117,10 +117,7 @@ services:
       - "traefik.http.routers.yt-frontend.tls.certresolver=myresolver"
       - "traefik.http.services.yt-frontend.loadbalancer.server.port=4321"
     environment:
-      PUBLIC_DIRECTUS_URL: ${PUBLIC_DIRECTUS_URL:-http://localhost:8055}
       PUBLIC_DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
-      PUBLIC_FETCHER_URL: ${PUBLIC_FETCHER_URL:-http://localhost:8000}
-      PUBLIC_WHISPER_URL: ${PUBLIC_WHISPER_URL:-http://localhost:8001}
 
 networks:
   app-network:

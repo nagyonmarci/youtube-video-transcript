@@ -1,4 +1,4 @@
-const FETCHER_URL = import.meta.env.PUBLIC_FETCHER_URL || 'http://localhost:8000';
+const FETCHER_URL = '/api';
 
 export async function fetchChannels(urls) {
   const res = await fetch(`${FETCHER_URL}/fetch-channels`, {
@@ -42,7 +42,7 @@ export async function getStatus() {
 
 // ---- Whisper service ----
 
-const WHISPER_URL = import.meta.env.PUBLIC_WHISPER_URL || 'http://localhost:8001';
+const WHISPER_URL = '/whisper';
 
 export async function getWhisperStatus() {
   const res = await fetch(`${WHISPER_URL}/status`);
