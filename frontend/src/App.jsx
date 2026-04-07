@@ -31,8 +31,8 @@ const [channels, setChannels] = useState([]);
     }
   }, []);
 
-  const loadVideos = useCallback(async () => {
-    setLoading(true);
+  const loadVideos = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       const opts = { sort, page, search };
       const result = selectedChannel
@@ -43,7 +43,7 @@ const [channels, setChannels] = useState([]);
     } catch (e) {
       console.error('Failed to load videos', e);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [selectedChannel, page, sort, search]);
 
@@ -72,8 +72,8 @@ const [channels, setChannels] = useState([]);
   }, [loadChannels, loadStatus]);
 
   useEffect(() => {
-    loadVideos();
-    const interval = setInterval(loadVideos, 15000);
+    loadVideos(true);
+    const interval = setInterval(() => loadVideos(false), 15000);
     return () => clearInterval(interval);
   }, [loadVideos]);
 
