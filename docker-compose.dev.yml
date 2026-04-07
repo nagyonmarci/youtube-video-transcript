@@ -20,6 +20,10 @@ services:
   frontend:
     ports:
       - "4321:4321"
+    environment:
+      DIRECTUS_HOST: directus
+      FETCHER_HOST: fetcher
+      WHISPER_HOST: whisper
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
