@@ -24,8 +24,6 @@ services:
         condition: service_healthy
     networks:
       - app-network
-    ports:
-      - "8055:8055"
     environment:
       SECRET: ${DIRECTUS_SECRET:-change-me-in-production}
       DB_CLIENT: pg
@@ -37,7 +35,7 @@ services:
       ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-admin}
       ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
-      PUBLIC_URL: http://localhost:8055
+      PUBLIC_URL: http://directus:8055
       CORS_ENABLED: "true"
       CORS_ORIGIN: "true"
       WEBSOCKETS_ENABLED: "false"
@@ -52,8 +50,6 @@ services:
       - directus
     networks:
       - app-network
-    ports:
-      - "8000:8000"
     environment:
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
@@ -66,8 +62,6 @@ services:
       - directus
     networks:
       - app-network
-    ports:
-      - "8001:8001"
     environment:
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
@@ -87,12 +81,21 @@ services:
       - fetcher
     networks:
       - app-network
-    ports:
-      - "4321:4321"
     environment:
       DIRECTUS_HOST: directus
       FETCHER_HOST: fetcher
       WHISPER_HOST: whisper
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks:
+      - app-network
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
 
 networks:
   app-network:
@@ -102,3 +105,4 @@ volumes:
   directus_uploads:
   directus_extensions:
   whisper_models:
+  caddy_data:
