@@ -2,6 +2,8 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    networks:
+      - app-network
     environment:
       POSTGRES_USER: directus
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
@@ -20,8 +22,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "8055:8055"
+    networks:
+      - app-network
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yt-directus.rule=Host(`yt.suliweb.org`) && PathPrefix(`/admin`)"
+      - "traefik.http.routers.yt-directus.entrypoints=websecure"
+      - "traefik.http.routers.yt-directus.tls.certresolver=myresolver"
+      - "traefik.http.routers.yt-directus.middlewares=yt-admin-strip"
+      - "traefik.http.middlewares.yt-admin-strip.stripprefix.prefixes=/admin"
+      - "traefik.http.services.yt-directus.loadbalancer.server.port=8055"
     environment:
       SECRET: ${DIRECTUS_SECRET:-change-me-in-production}
       DB_CLIENT: pg
@@ -46,8 +57,17 @@ services:
     restart: unless-stopped
     depends_on:
       - directus
-    ports:
-      - "8000:8000"
+    networks:
+      - app-network
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yt-fetcher.rule=Host(`yt.suliweb.org`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.yt-fetcher.entrypoints=websecure"
+      - "traefik.http.routers.yt-fetcher.tls.certresolver=myresolver"
+      - "traefik.http.routers.yt-fetcher.middlewares=yt-api-strip"
+      - "traefik.http.middlewares.yt-api-strip.stripprefix.prefixes=/api"
+      - "traefik.http.services.yt-fetcher.loadbalancer.server.port=8000"
     environment:
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
@@ -61,8 +81,17 @@ services:
     restart: unless-stopped
     depends_on:
       - directus
-    ports:
-      - "8001:8001"
+    networks:
+      - app-network
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yt-whisper.rule=Host(`yt.suliweb.org`) && PathPrefix(`/whisper`)"
+      - "traefik.http.routers.yt-whisper.entrypoints=websecure"
+      - "traefik.http.routers.yt-whisper.tls.certresolver=myresolver"
+      - "traefik.http.routers.yt-whisper.middlewares=yt-whisper-strip"
+      - "traefik.http.middlewares.yt-whisper-strip.stripprefix.prefixes=/whisper"
+      - "traefik.http.services.yt-whisper.loadbalancer.server.port=8001"
     environment:
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
@@ -70,7 +99,7 @@ services:
       WHISPER_THREADS: ${WHISPER_THREADS:-4}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
       BATCH_CRON: ${WHISPER_BATCH_CRON:-0 3 * * *}
-      BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-5000}
+      BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-50}
 
   frontend:
     build: ./frontend
@@ -78,12 +107,26 @@ services:
     depends_on:
       - directus
       - fetcher
-    ports:
-      - "4321:4321"
+    networks:
+      - app-network
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yt-frontend.rule=Host(`yt.suliweb.org`)"
+      - "traefik.http.routers.yt-frontend.entrypoints=websecure"
+      - "traefik.http.routers.yt-frontend.tls.certresolver=myresolver"
+      - "traefik.http.services.yt-frontend.loadbalancer.server.port=4321"
     environment:
       PUBLIC_DIRECTUS_URL: ${PUBLIC_DIRECTUS_URL:-http://localhost:8055}
       PUBLIC_DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
       PUBLIC_FETCHER_URL: ${PUBLIC_FETCHER_URL:-http://localhost:8000}
+      PUBLIC_WHISPER_URL: ${PUBLIC_WHISPER_URL:-http://localhost:8001}
+
+networks:
+  app-network:
+    internal: true
+  traefik_proxy:
+    external: true
 
 volumes:
   postgres_data:
