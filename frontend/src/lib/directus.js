@@ -1,19 +1,32 @@
 const DIRECTUS_URL = import.meta.env.PUBLIC_DIRECTUS_URL || 'http://localhost:8055';
-const DIRECTUS_TOKEN = import.meta.env.PUBLIC_DIRECTUS_TOKEN || 'admin-token-change-me';
 
-const headers = {
-  'Authorization': `Bearer ${DIRECTUS_TOKEN}`,
-  'Content-Type': 'application/json',
-};
+function getToken() {
+  return localStorage.getItem('directus_token') || import.meta.env.PUBLIC_DIRECTUS_TOKEN || 'admin-token-change-me';
+}
 
 async function req(method, path, body) {
   const res = await fetch(`${DIRECTUS_URL}${path}`, {
     method,
-    headers,
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+      'Content-Type': 'application/json',
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('directus_token');
+    localStorage.removeItem('directus_refresh_token');
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
   if (!res.ok) throw new Error(`${method} ${path} → ${res.status}`);
   return res.status === 204 ? null : res.json();
+}
+
+export function logout() {
+  localStorage.removeItem('directus_token');
+  localStorage.removeItem('directus_refresh_token');
+  window.location.href = '/login';
 }
 
 // ---- Channels ----
