@@ -74,10 +74,7 @@ services:
       REFRESH_CRON: ${REFRESH_CRON:-0 2 * * *}
 
   whisper:
-    build:
-      context: ./whisper
-      args:
-        WHISPER_MODEL: ggml-large-v3.bin
+    build: ./whisper
     restart: unless-stopped
     depends_on:
       - directus
@@ -100,6 +97,8 @@ services:
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
       BATCH_CRON: ${WHISPER_BATCH_CRON:-0 3 * * *}
       BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-50}
+    volumes:
+      - whisper_models:/app/models
 
   frontend:
     build: ./frontend
@@ -129,3 +128,4 @@ volumes:
   postgres_data:
   directus_uploads:
   directus_extensions:
+  whisper_models:

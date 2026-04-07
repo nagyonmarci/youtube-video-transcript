@@ -31,11 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy whisper.cpp binary
 COPY --from=builder /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 
-# Download model at build time
-ARG WHISPER_MODEL=ggml-large-v3.bin
-RUN mkdir -p /app/models && \
-    curl -L -o /app/models/${WHISPER_MODEL} \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL}
+RUN mkdir -p /app/models
 
 # Python dependencies
 COPY requirements.txt .
@@ -43,6 +39,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8001
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["/app/entrypoint.sh"]
