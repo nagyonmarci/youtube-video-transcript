@@ -90,34 +90,246 @@ import App from '../App.jsx';
   .badge-error { background: rgba(244,67,54,0.2); color: #f88; }
 
   .app-layout {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    grid-template-rows: auto 1fr;
-    height: 100vh;
-    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
   }
 
   .app-header {
-    grid-column: 1 / -1;
     display: flex;
     align-items: center;
     gap: 1rem;
     padding: 0.75rem 1.25rem;
     background: var(--bg2);
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .header-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .header-status-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .badge-whisper {
+    background: rgba(156,39,176,0.2);
+    color: #ce93d8;
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .whisper-btn {
+    background: rgba(156,39,176,0.2);
+    border-color: rgba(156,39,176,0.4);
+    color: #ce93d8;
+    font-weight: 600;
+  }
+  .whisper-btn:hover {
+    background: rgba(156,39,176,0.35);
   }
 
-  .app-sidebar {
-    border-right: 1px solid var(--border);
+  .app-content {
+    flex: 1;
     overflow-y: auto;
-    padding: 0.75rem;
+    padding: 0.75rem 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 0.75rem;
   }
 
-  .app-main {
-    overflow-y: auto;
-    padding: 0.75rem;
+  /* --- Top Actions (3 cards in a row, always equal width) --- */
+  .top-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+  .top-actions .status-msg {
+    grid-column: 1 / -1;
+  }
+  .card-title {
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+    color: var(--text2);
+  }
+
+  .status-msg {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    width: 100%;
+  }
+  .status-success { background: rgba(76,175,80,0.2); color: #6fcf73; }
+  .status-error { background: rgba(244,67,54,0.2); color: #f88; }
+
+  /* --- Channel Grid --- */
+  .channel-section {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+  }
+  .channel-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .channel-search {
+    width: 160px;
+  }
+  .channel-sort {
+    width: 150px;
+  }
+  .channel-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .channel-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    min-width: 140px;
+    max-width: 220px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .channel-card:hover { border-color: #555; }
+  .channel-card-selected {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+  }
+  .channel-card-name {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 0.2rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .channel-card-meta {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+  }
+  .channel-card-actions {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .channel-card-actions button {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.4rem;
+  }
+
+  /* --- Video Section --- */
+  .video-section {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+  }
+  .video-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .video-title {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .video-search {
+    width: 250px;
+    max-width: 100%;
+  }
+  .video-empty {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+  }
+  .table-scroll {
+    overflow-x: auto;
+  }
+  .video-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .video-table {
+    table-layout: fixed;
+  }
+  .video-table th {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text2);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .video-table td {
+    padding: 0.5rem 0.75rem;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .video-table td:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .video-table .clickable-row { cursor: pointer; }
+  .video-table .clickable-row:hover { background: rgba(255,255,255,0.04); }
+  .video-link {
+    color: #64b5f6;
+    text-decoration: none;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .video-link:hover { text-decoration: underline; }
+  .btn-sm {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  /* --- Pagination --- */
+  .pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border);
+    margin-top: 0.5rem;
+  }
+  .page-info {
+    font-size: 0.85rem;
+    color: var(--text2);
+  }
+
+  /* --- Responsive --- */
+  @media (max-width: 768px) {
+    .app-content { padding: 0.5rem; }
+    .top-actions { grid-template-columns: 1fr; }
+    .channel-card { min-width: 100px; max-width: 160px; }
+    .video-header { flex-direction: column; align-items: flex-start; }
+    .video-search { width: 100%; }
+    .app-header h1 { font-size: 0.95rem; }
+  }
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .channel-card { max-width: 180px; }
   }
 </style>

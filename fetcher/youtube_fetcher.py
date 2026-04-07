@@ -80,7 +80,6 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
         "--flat-playlist",
         "--dump-json",
         "--no-warnings",
-        "--playlist-end", "500",  # cap to avoid huge channels
         videos_url,
     ]
     logger.info(f"Fetching video list: {videos_url}")
@@ -89,7 +88,7 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=600,
         )
     except subprocess.TimeoutExpired:
         logger.error("yt-dlp timed out fetching channel video list")
@@ -191,21 +190,22 @@ def fetch_transcript(video_id: str) -> Optional[str]:
     try:
         import tempfile, os
         with tempfile.TemporaryDirectory() as tmpdir:
-            cmd = [
-                "yt-dlp",
-                "--write-auto-sub",
-                "--sub-format", "vtt",
-                "--skip-download",
-                "--no-warnings",
-                "-o", f"{tmpdir}/%(id)s",
-                f"https://www.youtube.com/watch?v={video_id}",
-            ]
-            subprocess.run(cmd, capture_output=True, timeout=60)
-            # Find the vtt file
-            for fname in os.listdir(tmpdir):
-                if fname.endswith(".vtt"):
-                    with open(os.path.join(tmpdir, fname), "r", encoding="utf-8") as f:
-                        return _parse_vtt(f.read())
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            # Use -f mhtml as fallback format so yt-dlp can access metadata/subs
+            # even when regular video formats are unavailable (bot-detected env)
+            for fmt_args in [[], ["-f", "mhtml"]]:
+                cmd = [
+                    "yt-dlp",
+                    "--write-auto-sub",
+                    "--sub-format", "vtt",
+                    "--skip-download",
+                    "--no-warnings",
+                ] + fmt_args + ["-o", f"{tmpdir}/%(id)s", video_url]
+                subprocess.run(cmd, capture_output=True, timeout=60)
+                for fname in os.listdir(tmpdir):
+                    if fname.endswith(".vtt"):
+                        with open(os.path.join(tmpdir, fname), "r", encoding="utf-8") as f:
+                            return _parse_vtt(f.read())
     except Exception as e:
         logger.warning(f"yt-dlp subtitle fallback failed for {video_id}: {e}")
 
