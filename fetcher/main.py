@@ -10,17 +10,21 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from ai_notes import generate_ai_notes
 from directus_client import DirectusClient
 from youtube_fetcher import (
     fetch_channel_videos,
     fetch_channel_name,
-    fetch_transcript,
+    fetch_video_info,
+    fetch_transcript_variants,
+    parse_uploaded_at,
     parse_channel_input,
     extract_handle_from_url,
     rate_limited_sleep_transcript,
@@ -32,7 +36,10 @@ logger = logging.getLogger(__name__)
 
 DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
 DIRECTUS_TOKEN = os.environ.get("DIRECTUS_TOKEN", "admin-token-change-me")
-REFRESH_CRON = os.environ.get("REFRESH_CRON", "0 2 * * *")
+REFRESH_CRON = os.environ.get("REFRESH_CRON", "0 7 * * *")
+SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
+AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "true").lower() in {"1", "true", "yes", "on"}
+AI_NOTES_BATCH_LIMIT = int(os.environ.get("AI_NOTES_BATCH_LIMIT", "10"))
 
 directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
 
@@ -42,6 +49,67 @@ worker_task: Optional[asyncio.Task] = None
 stop_flag = False
 current_task_info: dict = {}
 scheduler: Optional[AsyncIOScheduler] = None
+
+
+def get_scheduler_timezone():
+    try:
+        return ZoneInfo(SCHEDULER_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        logger.warning(f"Unknown scheduler timezone '{SCHEDULER_TIMEZONE}', falling back to UTC")
+        return timezone.utc
+
+
+def validate_schedule(cron: str, timezone_name: str):
+    cron_parts = cron.split()
+    if len(cron_parts) != 5:
+        raise ValueError("A cron kifejezésnek pontosan 5 mezőből kell állnia")
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Ismeretlen időzóna: {timezone_name}") from exc
+    return cron_parts
+
+
+async def load_schedule_settings():
+    global REFRESH_CRON, SCHEDULER_TIMEZONE
+    try:
+        stored_cron = await directus.get_setting("refresh_cron")
+        stored_timezone = await directus.get_setting("scheduler_timezone")
+        if stored_cron:
+            REFRESH_CRON = stored_cron
+        if stored_timezone:
+            SCHEDULER_TIMEZONE = stored_timezone
+        validate_schedule(REFRESH_CRON, SCHEDULER_TIMEZONE)
+    except Exception as e:
+        logger.warning(f"Could not load stored schedule settings, using current values: {e}")
+
+
+async def save_schedule_settings(cron: str, timezone_name: str):
+    await directus.set_setting("refresh_cron", cron)
+    await directus.set_setting("scheduler_timezone", timezone_name)
+
+
+def start_refresh_scheduler():
+    global scheduler
+    if scheduler:
+        scheduler.shutdown(wait=False)
+
+    cron_parts = validate_schedule(REFRESH_CRON, SCHEDULER_TIMEZONE)
+    minute, hour, day, month, day_of_week = cron_parts
+    scheduler = AsyncIOScheduler(timezone=get_scheduler_timezone())
+    scheduler.add_job(
+        daily_refresh,
+        "cron",
+        id="daily_refresh",
+        replace_existing=True,
+        minute=minute,
+        hour=hour,
+        day=day,
+        month=month,
+        day_of_week=day_of_week,
+    )
+    scheduler.start()
+    logger.info(f"Daily refresh scheduled: {REFRESH_CRON} ({SCHEDULER_TIMEZONE})")
 
 
 # ---- Worker ----
@@ -69,6 +137,10 @@ async def worker_loop():
                 await process_refresh_task(task)
             elif task_type == "refresh_dates":
                 await process_refresh_dates_task()
+            elif task_type == "ai_notes":
+                await process_ai_notes_task(task)
+            elif task_type == "ai_note_video":
+                await process_single_ai_note_task(task)
         except Exception as e:
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
         finally:
@@ -127,6 +199,15 @@ async def process_channel_task(task: dict):
             }
 
             # Create video record as pending
+            if not video.get("uploaded_at"):
+                info = await loop.run_in_executor(None, fetch_video_info, video["video_id"])
+                uploaded_at = parse_uploaded_at(info) if info else None
+                if uploaded_at:
+                    video["uploaded_at"] = uploaded_at
+                    if not video.get("duration_seconds") and info.get("duration"):
+                        video["duration_seconds"] = info.get("duration")
+                    logger.info(f"Filled upload date for {video['video_id']}: {uploaded_at}")
+
             video_record = {**video, "channel_id": channel_id, "status": "pending"}
             created = await directus.create_video(video_record)
             directus_video_id = created.get("id")
@@ -136,17 +217,20 @@ async def process_channel_task(task: dict):
                 await rate_limited_sleep_transcript()
 
             # Fetch transcript
-            transcript = await asyncio.get_event_loop().run_in_executor(
-                None, fetch_transcript, video["video_id"]
+            transcript, transcript_timed = await asyncio.get_event_loop().run_in_executor(
+                None, fetch_transcript_variants, video["video_id"]
             )
 
             update_data = {
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "status": "done" if transcript else "no_transcript",
                 "transcript": transcript or "",
+                "transcript_timed": transcript_timed or "",
             }
             if directus_video_id:
                 await directus.update_video(directus_video_id, update_data)
+                if transcript and AI_NOTES_AUTO:
+                    await generate_and_store_ai_notes(directus_video_id, {**video_record, **update_data})
 
             logger.info(f"Video {video['video_id']}: {'done' if transcript else 'no_transcript'}")
 
@@ -190,31 +274,8 @@ async def process_single_video_task(task: dict):
     # Get video metadata via yt-dlp
     loop = asyncio.get_event_loop()
 
-    import subprocess, json as json_mod
-    def get_video_info():
-        # Try without format selector first; fall back to -f mhtml (storyboard)
-        # which is always available and contains all metadata we need
-        for fmt_args in [[], ["-f", "mhtml"]]:
-            cmd = ["yt-dlp", "--dump-json", "--no-warnings", "--skip-download"] + fmt_args + [video_url]
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                if result.stdout.strip():
-                    return json_mod.loads(result.stdout)
-            except Exception:
-                pass
-        return {}
-
-    info = await loop.run_in_executor(None, get_video_info)
-
-    from datetime import datetime as dt
-    upload_date = info.get("upload_date", "")
-    uploaded_at = None
-    if len(upload_date) == 8:
-        try:
-            uploaded_at = dt(int(upload_date[:4]), int(upload_date[4:6]), int(upload_date[6:8]),
-                              tzinfo=timezone.utc).isoformat()
-        except ValueError:
-            pass
+    info = await loop.run_in_executor(None, fetch_video_info, video_url)
+    uploaded_at = parse_uploaded_at(info) if info else None
 
     # Resolve channel: use passed channel_id, or detect from yt-dlp metadata
     channel_id = task.get("channel_id")
@@ -255,15 +316,18 @@ async def process_single_video_task(task: dict):
     directus_video_id = created.get("id")
 
     # Fetch transcript
-    transcript = await loop.run_in_executor(None, fetch_transcript, yt_id)
+    transcript, transcript_timed = await loop.run_in_executor(None, fetch_transcript_variants, yt_id)
 
     update_data = {
         "processed_at": datetime.now(timezone.utc).isoformat(),
         "status": "done" if transcript else "no_transcript",
         "transcript": transcript or "",
+        "transcript_timed": transcript_timed or "",
     }
     if directus_video_id:
         await directus.update_video(directus_video_id, update_data)
+        if transcript and AI_NOTES_AUTO:
+            await generate_and_store_ai_notes(directus_video_id, {**video_data, **update_data})
 
     logger.info(f"Single video {yt_id}: {'done' if transcript else 'no_transcript'}")
 
@@ -297,7 +361,6 @@ async def process_refresh_dates_task():
     logger.info(f"Refreshing dates for {len(videos)} videos")
     loop = asyncio.get_event_loop()
 
-    import subprocess, json as json_mod
     for i, video in enumerate(videos):
         if stop_flag:
             break
@@ -305,40 +368,109 @@ async def process_refresh_dates_task():
         yt_id = video["video_id"]
         current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{len(videos)}", "video": yt_id}
 
-        def get_date():
-            cmd = ["yt-dlp", "--dump-json", "--skip-download", "--no-warnings",
-                   f"https://www.youtube.com/watch?v={yt_id}"]
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                if result.stdout.strip():
-                    return json_mod.loads(result.stdout)
-            except Exception:
-                pass
-            return {}
-
-        info = await loop.run_in_executor(None, get_date)
+        info = await loop.run_in_executor(None, fetch_video_info, yt_id)
         if not info:
             continue
 
-        from datetime import datetime as dt
-        uploaded_at = None
-        upload_date = info.get("upload_date")
-        if isinstance(upload_date, str) and len(upload_date) == 8:
-            try:
-                uploaded_at = dt(int(upload_date[:4]), int(upload_date[4:6]),
-                                 int(upload_date[6:8]), tzinfo=timezone.utc).isoformat()
-            except ValueError:
-                pass
-        if not uploaded_at:
-            ts = info.get("timestamp") or info.get("release_timestamp")
-            if isinstance(ts, (int, float)):
-                uploaded_at = dt.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        uploaded_at = parse_uploaded_at(info)
 
         if uploaded_at:
             await directus.update_video(video["id"], {"uploaded_at": uploaded_at})
             logger.info(f"Updated date for {yt_id}: {uploaded_at}")
 
     logger.info("Date refresh complete")
+
+
+async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bool:
+    """Generate and persist AI notebook fields for a single Directus video."""
+    await directus.update_video(directus_video_id, {
+        "ai_notes_status": "pending",
+        "ai_notes_error": None,
+    })
+    try:
+        notes = await generate_ai_notes(video)
+        if not notes:
+            await directus.update_video(directus_video_id, {
+                "ai_notes_status": "error",
+                "ai_notes_error": "No transcript available for AI notes",
+            })
+            return False
+
+        await directus.update_video(directus_video_id, {
+            **notes,
+            "ai_notes_status": "done",
+            "ai_notes_error": None,
+            "ai_notes_generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info(f"AI notes generated for {video.get('video_id') or directus_video_id}")
+        return True
+    except asyncio.CancelledError:
+        logger.info(f"AI notes stopped for {video.get('video_id') or directus_video_id}")
+        try:
+            await asyncio.shield(directus.update_video(directus_video_id, {
+                "ai_notes_status": "error",
+                "ai_notes_error": "Stopped by user",
+            }))
+        except Exception as update_error:
+            logger.warning(f"Could not persist stopped AI note status: {update_error}")
+        raise
+    except Exception as e:
+        error_message = str(e) or repr(e)
+        logger.warning(f"AI notes failed for {video.get('video_id') or directus_video_id}: {error_message}")
+        await directus.update_video(directus_video_id, {
+            "ai_notes_status": "error",
+            "ai_notes_error": error_message[:1000],
+        })
+        return False
+
+
+async def process_ai_notes_task(task: dict):
+    """Generate AI notes for videos that have transcripts but no summary."""
+    global current_task_info
+    limit = max(1, min(int(task.get("limit") or AI_NOTES_BATCH_LIMIT), 100))
+    videos = await directus.get_videos_missing_ai_notes(limit)
+    logger.info(f"Generating AI notes for {len(videos)} videos")
+
+    done = 0
+    failed = 0
+    for i, video in enumerate(videos):
+        if stop_flag:
+            break
+        current_task_info = {
+            "type": "ai_notes",
+            "phase": f"{i+1}/{len(videos)}",
+            "video": video.get("title") or video.get("video_id"),
+        }
+        ok = await generate_and_store_ai_notes(video["id"], video)
+        if ok:
+            done += 1
+        else:
+            failed += 1
+
+    logger.info(f"AI notes batch complete: {done} done, {failed} failed")
+
+
+async def process_single_ai_note_task(task: dict):
+    """Generate AI notes for a selected video."""
+    global current_task_info
+    video_id = task["video_id"]
+    video = await directus.get_video(video_id)
+    if not video:
+        logger.warning(f"AI notes video not found: {video_id}")
+        return
+    if not (video.get("transcript") or video.get("transcript_timed")):
+        await directus.update_video(video_id, {
+            "ai_notes_status": "error",
+            "ai_notes_error": "No transcript available for AI notes",
+        })
+        return
+
+    current_task_info = {
+        "type": "ai_note_video",
+        "phase": "generating",
+        "video": video.get("title") or video.get("video_id"),
+    }
+    await generate_and_store_ai_notes(video_id, video)
 
 
 async def daily_refresh():
@@ -373,26 +505,13 @@ async def lifespan(app: FastAPI):
         await directus.ensure_schema()
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
+    await load_schedule_settings()
 
     # Start background worker
     worker_task = asyncio.create_task(worker_loop())
 
     # Start scheduler for daily refresh
-    scheduler = AsyncIOScheduler()
-    cron_parts = REFRESH_CRON.split()
-    if len(cron_parts) == 5:
-        minute, hour, day, month, day_of_week = cron_parts
-        scheduler.add_job(
-            daily_refresh,
-            "cron",
-            minute=minute,
-            hour=hour,
-            day=day,
-            month=month,
-            day_of_week=day_of_week,
-        )
-    scheduler.start()
-    logger.info(f"Daily refresh scheduled: {REFRESH_CRON}")
+    start_refresh_scheduler()
 
     yield
 
@@ -424,6 +543,15 @@ class FetchVideoRequest(BaseModel):
     channel_id: Optional[str] = None
 
 
+class ScheduleRequest(BaseModel):
+    cron: str
+    timezone: str
+
+
+class AiNotesRequest(BaseModel):
+    limit: int = AI_NOTES_BATCH_LIMIT
+
+
 # ---- API Endpoints ----
 
 @app.get("/health")
@@ -437,7 +565,33 @@ async def status():
         "queue_size": task_queue.qsize(),
         "stop_flag": stop_flag,
         "current_task": current_task_info,
+        "schedule": {
+            "cron": REFRESH_CRON,
+            "timezone": SCHEDULER_TIMEZONE,
+        },
     }
+
+
+@app.get("/schedule")
+async def get_schedule():
+    return {"cron": REFRESH_CRON, "timezone": SCHEDULER_TIMEZONE}
+
+
+@app.patch("/schedule")
+async def update_schedule(request: ScheduleRequest):
+    global REFRESH_CRON, SCHEDULER_TIMEZONE
+    cron = request.cron.strip()
+    timezone_name = request.timezone.strip()
+    try:
+        validate_schedule(cron, timezone_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    REFRESH_CRON = cron
+    SCHEDULER_TIMEZONE = timezone_name
+    start_refresh_scheduler()
+    await save_schedule_settings(cron, timezone_name)
+    return {"cron": REFRESH_CRON, "timezone": SCHEDULER_TIMEZONE}
 
 
 @app.post("/fetch-channels")
@@ -517,11 +671,41 @@ async def refresh_dates():
     return {"queued": True}
 
 
+@app.post("/ai-notes")
+async def ai_notes(request: AiNotesRequest):
+    """Queue AI note generation for videos that have transcripts but no summary."""
+    limit = max(1, min(request.limit, 100))
+    await task_queue.put({"type": "ai_notes", "limit": limit})
+    return {"queued": True, "limit": limit}
+
+
+@app.post("/ai-notes/{video_id}")
+async def ai_note_video(video_id: str):
+    """Queue AI note generation for one selected Directus video."""
+    video = await directus.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if not (video.get("transcript") or video.get("transcript_timed")):
+        raise HTTPException(status_code=400, detail="Video has no transcript")
+
+    await directus.update_video(video_id, {
+        "ai_notes_status": "pending",
+        "ai_notes_error": None,
+    })
+    await task_queue.put({"type": "ai_note_video", "video_id": video_id})
+    return {"queued": True, "video_id": video_id}
+
+
 @app.post("/stop")
 async def stop_processing():
-    """Clear the task queue and stop current processing."""
-    global stop_flag
+    """Clear the task queue, cancel current processing, then keep the worker ready."""
+    global stop_flag, worker_task
     stop_flag = True
+    cancelled_current = False
+
+    if worker_task and not worker_task.done():
+        worker_task.cancel()
+        cancelled_current = True
 
     # Drain queue
     drained = 0
@@ -533,12 +717,16 @@ async def stop_processing():
         except asyncio.QueueEmpty:
             break
 
-    return {"stopped": True, "drained": drained}
+    stop_flag = False
+    worker_task = asyncio.create_task(worker_loop())
+    return {"stopped": True, "drained": drained, "cancelled_current": cancelled_current}
 
 
 @app.post("/resume")
 async def resume_processing():
     """Resume processing after stop."""
-    global stop_flag
+    global stop_flag, worker_task
     stop_flag = False
+    if not worker_task or worker_task.done():
+        worker_task = asyncio.create_task(worker_loop())
     return {"resumed": True}

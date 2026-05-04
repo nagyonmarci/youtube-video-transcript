@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react';
-import { deleteChannel, getVideos } from '../lib/directus.js';
+import { deleteChannel, getAllChannelVideos } from '../lib/directus.js';
 import { fetchChannels, fetchVideo, refreshChannel } from '../lib/fetcher.js';
 import {
-  channelToTxt, channelToMd, allChannelsToTxt, allChannelsToMd,
+  channelToTxt, channelToMd, channelToObsidianMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
 
@@ -95,27 +95,38 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
     }
   }
 
-  async function handleExportChannel(ch, fmt) {
+  async function handleExportChannel(ch, fmt, timed = false) {
     try {
-      const chVideos = await getVideos(ch.id);
+      const chVideos = await getAllChannelVideos(ch.id);
       const name = ch.name || ch.channel_handle || 'channel';
-      const content = fmt === 'md' ? channelToMd(name, chVideos) : channelToTxt(name, chVideos);
-      downloadFile(content, `${sanitizeFilename(name)}.${fmt}`);
+      if (fmt === 'obsidian') {
+        downloadFile(channelToObsidianMd(ch, chVideos, { timed: true }), `${sanitizeFilename(name)}_obsidian.md`);
+        return;
+      }
+      const options = { timed };
+      const content = fmt === 'md' ? channelToMd(name, chVideos, options) : channelToTxt(name, chVideos, options);
+      downloadFile(content, `${sanitizeFilename(name)}${timed ? '_idovel' : ''}.${fmt}`);
     } catch (e) {
       showMsg('Export hiba: ' + e.message, true);
     }
   }
 
-  async function handleExportAll(fmt) {
+  async function handleExportAll(fmt, timed = false) {
     try {
       const groups = await Promise.all(
         channels.map(async ch => ({
           channel: ch,
-          videos: await getVideos(ch.id),
+          videos: await getAllChannelVideos(ch.id),
         }))
       );
-      const content = fmt === 'md' ? allChannelsToMd(groups) : allChannelsToTxt(groups);
-      downloadFile(content, `osszes_transkript.${fmt}`);
+      if (fmt === 'obsidian') {
+        const content = allChannelsToObsidianMd(groups, { timed: true });
+        downloadFile(content, 'youtube_tudasbazis_obsidian.md');
+        return;
+      }
+      const options = { timed };
+      const content = fmt === 'md' ? allChannelsToMd(groups, options) : allChannelsToTxt(groups, options);
+      downloadFile(content, `osszes_transkript${timed ? '_idovel' : ''}.${fmt}`);
     } catch (e) {
       showMsg('Export hiba: ' + e.message, true);
     }
@@ -184,9 +195,12 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       {/* Export all */}
       <div className="card">
         <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>Összes export</h3>
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
           <button onClick={() => handleExportAll('txt')} style={{ flex: 1 }}>TXT</button>
           <button onClick={() => handleExportAll('md')} style={{ flex: 1 }}>MD</button>
+          <button onClick={() => handleExportAll('txt', true)} style={{ flex: 1 }}>TXT idővel</button>
+          <button onClick={() => handleExportAll('md', true)} style={{ flex: 1 }}>MD idővel</button>
+          <button onClick={() => handleExportAll('obsidian')} style={{ flex: 1 }}>Obsidian</button>
         </div>
       </div>
 
@@ -252,6 +266,18 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
                 >
                   MD
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); handleExportChannel(ch, 'obsidian'); }}
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                >
+                  Obsidian
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); handleExportChannel(ch, 'txt', true); }}
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                >
+                  TXT idővel
                 </button>
                 <button
                   className="danger"

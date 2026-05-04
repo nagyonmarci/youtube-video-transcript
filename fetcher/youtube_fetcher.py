@@ -52,6 +52,59 @@ def normalize_to_videos_url(url: str) -> str:
     return url
 
 
+def parse_uploaded_at(info: dict) -> Optional[str]:
+    """Return an ISO timestamp from the date fields yt-dlp may expose."""
+    for field in ("upload_date", "release_date"):
+        value = info.get(field)
+        if isinstance(value, int):
+            value = str(value)
+        if isinstance(value, str) and len(value) == 8 and value.isdigit():
+            try:
+                return datetime(
+                    int(value[:4]),
+                    int(value[4:6]),
+                    int(value[6:8]),
+                    tzinfo=timezone.utc,
+                ).isoformat()
+            except ValueError:
+                pass
+
+    for field in ("timestamp", "release_timestamp"):
+        value = info.get(field)
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+            except (OSError, OverflowError, ValueError):
+                pass
+
+    return None
+
+
+def fetch_video_info(video_url_or_id: str) -> dict:
+    """Fetch full metadata for one video, using a low-bandwidth fallback format."""
+    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_url_or_id):
+        video_url = f"https://www.youtube.com/watch?v={video_url_or_id}"
+    else:
+        video_url = video_url_or_id
+
+    for fmt_args in [[], ["-f", "mhtml"]]:
+        cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--no-warnings",
+            "--skip-download",
+        ] + fmt_args + [video_url]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                return json.loads(result.stdout)
+        except Exception as e:
+            logger.debug(f"yt-dlp metadata fetch failed for {video_url}: {e}")
+    return {}
+
+
 def extract_handle_from_url(url: str) -> str:
     """Extract a human-readable handle from a YouTube channel URL."""
     # @handle
@@ -104,24 +157,6 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
             if not yt_id:
                 continue
 
-            # Parse upload date – try multiple fields yt-dlp may return
-            uploaded_at = None
-            upload_date = info.get("upload_date")
-            if isinstance(upload_date, str) and len(upload_date) == 8:
-                try:
-                    uploaded_at = datetime(
-                        int(upload_date[:4]),
-                        int(upload_date[4:6]),
-                        int(upload_date[6:8]),
-                        tzinfo=timezone.utc,
-                    ).isoformat()
-                except ValueError:
-                    pass
-            if not uploaded_at:
-                ts = info.get("timestamp") or info.get("release_timestamp")
-                if isinstance(ts, (int, float)):
-                    uploaded_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-
             duration = info.get("duration")
             duration_seconds = int(duration) if duration else None
 
@@ -130,7 +165,7 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
                 "title": info.get("title", ""),
                 "url": f"https://www.youtube.com/watch?v={yt_id}",
                 "duration_seconds": duration_seconds,
-                "uploaded_at": uploaded_at,
+                "uploaded_at": parse_uploaded_at(info),
             })
         except (json.JSONDecodeError, KeyError, TypeError):
             continue
@@ -159,11 +194,40 @@ def fetch_channel_name(channel_url: str) -> str:
     return ""
 
 
-def fetch_transcript(video_id: str) -> Optional[str]:
+def format_transcript_timestamp(seconds: float) -> str:
+    """Format transcript seconds as H:MM:SS or M:SS."""
+    total = max(0, int(seconds))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def transcript_entries_to_plain(entries: list[dict]) -> str:
+    return " ".join(entry.get("text", "") for entry in entries).strip()
+
+
+def transcript_entries_to_timed(entries: list[dict]) -> str:
+    lines = []
+    for entry in entries:
+        text = entry.get("text", "").strip()
+        if not text:
+            continue
+        start = entry.get("start", 0)
+        try:
+            timestamp = format_transcript_timestamp(float(start))
+        except (TypeError, ValueError):
+            timestamp = "0:00"
+        lines.append(f"[{timestamp}] {text}")
+    return "\n".join(lines).strip()
+
+
+def fetch_transcript_variants(video_id: str) -> tuple[Optional[str], Optional[str]]:
     """
-    Try to fetch transcript using youtube-transcript-api.
-    Falls back to yt-dlp auto-subtitles.
-    Returns plain text or None.
+    Fetch transcript and return (plain_text, timestamped_text).
+    The timestamped text is best-effort and may be None for some fallbacks.
     """
     # Primary: youtube-transcript-api
     try:
@@ -171,20 +235,22 @@ def fetch_transcript(video_id: str) -> Optional[str]:
             video_id,
             languages=["hu", "en", "a.hu", "a.en"],
         )
-        text = " ".join(entry["text"] for entry in transcript_list)
-        return text.strip()
+        plain = transcript_entries_to_plain(transcript_list)
+        timed = transcript_entries_to_timed(transcript_list)
+        return plain or None, timed or None
     except NoTranscriptFound:
         pass
     except TranscriptsDisabled:
-        return None
+        return None, None
     except Exception as e:
         logger.warning(f"youtube-transcript-api failed for {video_id}: {e}")
 
     # Fallback: try any available language
     try:
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        text = " ".join(entry["text"] for entry in transcript)
-        return text.strip()
+        plain = transcript_entries_to_plain(transcript)
+        timed = transcript_entries_to_timed(transcript)
+        return plain or None, timed or None
     except Exception:
         pass
 
@@ -207,11 +273,22 @@ def fetch_transcript(video_id: str) -> Optional[str]:
                 for fname in os.listdir(tmpdir):
                     if fname.endswith(".vtt"):
                         with open(os.path.join(tmpdir, fname), "r", encoding="utf-8") as f:
-                            return _parse_vtt(f.read())
+                            vtt = f.read()
+                        return _parse_vtt(vtt), _parse_vtt_with_timestamps(vtt)
     except Exception as e:
         logger.warning(f"yt-dlp subtitle fallback failed for {video_id}: {e}")
 
-    return None
+    return None, None
+
+
+def fetch_transcript(video_id: str) -> Optional[str]:
+    """
+    Try to fetch transcript using youtube-transcript-api.
+    Falls back to yt-dlp auto-subtitles.
+    Returns plain text or None.
+    """
+    plain, _timed = fetch_transcript_variants(video_id)
+    return plain
 
 
 def _parse_vtt(vtt_content: str) -> str:
@@ -236,6 +313,53 @@ def _parse_vtt(vtt_content: str) -> str:
             deduped.append(t)
             prev = t
     return " ".join(deduped).strip()
+
+
+def _parse_vtt_with_timestamps(vtt_content: str) -> Optional[str]:
+    """Parse WebVTT content into timestamped plain-text lines."""
+    lines = vtt_content.splitlines()
+    timed_lines = []
+    current_timestamp = None
+    prev_text = None
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("WEBVTT") or line.isdigit():
+            continue
+        if "-->" in line:
+            start = line.split("-->", 1)[0].strip()
+            current_timestamp = _format_vtt_timestamp(start)
+            continue
+
+        clean = re.sub(r'<[^>]+>', '', line).strip()
+        if clean and clean != prev_text:
+            prefix = f"[{current_timestamp}] " if current_timestamp else ""
+            timed_lines.append(f"{prefix}{clean}")
+            prev_text = clean
+
+    return "\n".join(timed_lines).strip() or None
+
+
+def _format_vtt_timestamp(value: str) -> str:
+    value = value.replace(",", ".")
+    parts = value.split(":")
+    try:
+        if len(parts) == 3:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(float(parts[2]))
+        elif len(parts) == 2:
+            hours = 0
+            minutes = int(parts[0])
+            seconds = int(float(parts[1]))
+        else:
+            return "0:00"
+    except ValueError:
+        return "0:00"
+
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
 
 
 async def rate_limited_sleep_transcript():

@@ -25,9 +25,19 @@ export async function deleteChannel(id) {
   return req('DELETE', `/items/channels/${id}`);
 }
 
+export async function updateChannel(id, data) {
+  const result = await req('PATCH', `/items/channels/${id}`, data);
+  return result?.data ?? {};
+}
+
 // ---- Videos (paginated) ----
 
 const PAGE_SIZE = 100;
+const VIDEO_FIELDS = [
+  'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,transcript_timed,whisper_status',
+  'summary,topics,takeaways,questions,obsidian_note,ai_notes_status,ai_notes_generated_at,ai_notes_error',
+  'channel_id.id,channel_id.name,channel_id.channel_handle',
+].join(',');
 
 export async function getVideos(channelId, { sort = '-uploaded_at', page = 1, search = '' } = {}) {
   const params = new URLSearchParams({
@@ -36,7 +46,7 @@ export async function getVideos(channelId, { sort = '-uploaded_at', page = 1, se
     limit: String(PAGE_SIZE),
     offset: String((page - 1) * PAGE_SIZE),
     'meta': 'filter_count',
-    'fields': 'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,whisper_status',
+    'fields': VIDEO_FIELDS,
   });
   if (search) {
     params.set('filter[title][_icontains]', search);
@@ -51,7 +61,7 @@ export async function getAllVideos({ sort = '-uploaded_at', page = 1, search = '
     limit: String(PAGE_SIZE),
     offset: String((page - 1) * PAGE_SIZE),
     'meta': 'filter_count',
-    'fields': 'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,whisper_status',
+    'fields': VIDEO_FIELDS,
   });
   if (search) {
     params.set('filter[title][_icontains]', search);
@@ -66,6 +76,7 @@ export async function getAllChannelVideos(channelId, { sort = '-uploaded_at' } =
     'filter[channel_id][_eq]': channelId,
     sort,
     limit: '-1',
+    'fields': VIDEO_FIELDS,
   });
   const data = await req('GET', `/items/videos?${params}`);
   return data?.data ?? [];

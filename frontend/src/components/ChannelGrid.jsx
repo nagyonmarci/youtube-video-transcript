@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { deleteChannel, getAllChannelVideos } from '../lib/directus.js';
 import { refreshChannel } from '../lib/fetcher.js';
 import {
-  channelToTxt, channelToMd,
+  channelToTxt, channelToMd, channelToObsidianMd,
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
 
@@ -75,6 +75,10 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
     try {
       const chVideos = await getAllChannelVideos(ch.id);
       const name = ch.name || ch.channel_handle || 'channel';
+      if (fmt === 'obsidian') {
+        downloadFile(channelToObsidianMd(ch, chVideos, { timed: true }), `${sanitizeFilename(name)}_obsidian.md`);
+        return;
+      }
       const content = fmt === 'md' ? channelToMd(name, chVideos) : channelToTxt(name, chVideos);
       downloadFile(content, `${sanitizeFilename(name)}.${fmt}`);
     } catch (err) {
@@ -149,6 +153,7 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
                   <button onClick={e => handleRefresh(e, ch)} disabled={busy}>Frissít</button>
                   <button onClick={e => handleExport(e, ch, 'txt')}>TXT</button>
                   <button onClick={e => handleExport(e, ch, 'md')}>MD</button>
+                  <button onClick={e => handleExport(e, ch, 'obsidian')}>Obsidian</button>
                   <button className="danger" onClick={e => handleDelete(e, ch)}>Töröl</button>
                 </div>
               )}

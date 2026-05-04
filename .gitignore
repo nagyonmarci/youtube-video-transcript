@@ -4,6 +4,7 @@
 !.env.example
 cookie.txt
 *.cookies
+certs/
 
 # Python
 __pycache__/

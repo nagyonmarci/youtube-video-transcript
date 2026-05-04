@@ -8,9 +8,10 @@ import TopActions from './components/TopActions.jsx';
 import ChannelGrid from './components/ChannelGrid.jsx';
 import VideoTable from './components/VideoTable.jsx';
 import TranscriptModal from './components/TranscriptModal.jsx';
+import ChannelAdminPanel from './components/ChannelAdminPanel.jsx';
 
 export default function App() {
-const [channels, setChannels] = useState([]);
+  const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -21,11 +22,16 @@ const [channels, setChannels] = useState([]);
   const [fetcherStatus, setFetcherStatus] = useState(null);
   const [whisperStatus, setWhisperStatus] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const loadChannels = useCallback(async () => {
     try {
       const data = await getChannels();
       setChannels(data);
+      setSelectedChannel(prev => {
+        if (!prev) return prev;
+        return data.find(ch => ch.id === prev.id) || null;
+      });
     } catch (e) {
       console.error('Failed to load channels', e);
     }
@@ -126,6 +132,9 @@ const [channels, setChannels] = useState([]);
   };
 
   const whisperRunning = whisperStatus && (whisperStatus.queue_size > 0 || whisperStatus.batch_running);
+  const fetcherRunning = fetcherStatus && (
+    fetcherStatus.queue_size > 0 || Boolean(fetcherStatus.current_task?.type)
+  );
 
   return (
     <div className="app-layout">
@@ -134,12 +143,17 @@ const [channels, setChannels] = useState([]);
         <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>YouTube Transcript Downloader</h1>
 
         <div className="header-status">
+          <button onClick={() => setAdminOpen(true)} style={{ padding: '0.25rem 0.6rem' }}>
+            Csatorna admin
+          </button>
+
           {/* Fetcher status */}
-          {fetcherStatus && fetcherStatus.queue_size > 0 && (
+          {fetcherRunning && (
             <span className="header-status-item">
               <span className="badge badge-processing">
                 Feldolgozás: {fetcherStatus.queue_size} a sorban
                 {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
+                {fetcherStatus.current_task?.video && ` • ${fetcherStatus.current_task.video}`}
               </span>
               <button className="danger" onClick={handleStop} style={{ padding: '0.25rem 0.6rem' }}>
                 Stop
@@ -180,22 +194,36 @@ const [channels, setChannels] = useState([]);
           channels={channels}
           selectedChannel={selectedChannel}
           onSelect={handleSelectChannel}
-          onChannelsChanged={loadChannels}
+          onChannelsChanged={async () => {
+            await loadChannels();
+            await loadVideos(false);
+          }}
         />
 
-        <VideoTable
-          videos={videos}
-          totalCount={totalCount}
-          page={page}
-          onPageChange={setPage}
-          search={search}
-          onSearchChange={handleSearchChange}
-          sort={sort}
-          onSortChange={handleSortChange}
-          loading={loading}
-          onSelectVideo={setSelectedVideo}
-          selectedChannel={selectedChannel}
-        />
+        {adminOpen ? (
+          <ChannelAdminPanel
+            channels={channels}
+            onClose={() => setAdminOpen(false)}
+            onChanged={async () => {
+              await loadChannels();
+              await loadVideos(false);
+            }}
+          />
+        ) : (
+          <VideoTable
+            videos={videos}
+            totalCount={totalCount}
+            page={page}
+            onPageChange={setPage}
+            search={search}
+            onSearchChange={handleSearchChange}
+            sort={sort}
+            onSortChange={handleSortChange}
+            loading={loading}
+            onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
+            selectedChannel={selectedChannel}
+          />
+        )}
       </div>
 
       {selectedVideo && (

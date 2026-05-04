@@ -33,7 +33,7 @@ class DirectusClient:
     # ---- Schema bootstrap ----
 
     async def ensure_whisper_fields(self):
-        """Add whisper_status field to videos collection if it doesn't exist."""
+        """Add whisper-related fields to videos collection if they don't exist."""
         try:
             result = await self._request("GET", "/fields/videos")
             existing = {f["field"] for f in result.get("data", [])}
@@ -56,6 +56,14 @@ class DirectusClient:
                     "schema": {"max_length": 50, "is_nullable": True},
                 })
                 logger.info("Added 'whisper_status' field to videos collection")
+            if "transcript_timed" not in existing:
+                await self._request("POST", "/fields/videos", json={
+                    "field": "transcript_timed",
+                    "type": "text",
+                    "meta": {"interface": "input-multiline", "width": "full"},
+                    "schema": {"is_nullable": True},
+                })
+                logger.info("Added 'transcript_timed' field to videos collection")
         except Exception as e:
             logger.warning(f"Could not ensure whisper fields: {e}")
 

@@ -52,7 +52,86 @@ collections:
     schema:
       name: videos
 
+  - collection: app_settings
+    meta:
+      collection: app_settings
+      icon: settings
+      note: Application settings
+      display_template: "{{key}}"
+      hidden: false
+      singleton: false
+      translations: null
+      archive_field: null
+      archive_app_filter: true
+      archive_value: null
+      unarchive_value: null
+      sort_field: null
+      accountability: all
+      color: null
+      item_duplication_fields: null
+      sort: 3
+      group: null
+      collapse: open
+      preview_url: null
+      versioning: false
+    schema:
+      name: app_settings
+
 fields:
+  # app_settings fields
+  - collection: app_settings
+    field: id
+    type: uuid
+    schema:
+      name: id
+      table: app_settings
+      data_type: uuid
+      default_value: null
+      is_nullable: false
+      is_primary_key: true
+      has_auto_increment: false
+    meta:
+      collection: app_settings
+      field: id
+      special:
+        - uuid
+      interface: input
+      readonly: true
+      hidden: true
+
+  - collection: app_settings
+    field: key
+    type: string
+    schema:
+      name: key
+      table: app_settings
+      data_type: character varying
+      max_length: 100
+      is_nullable: false
+      is_unique: true
+    meta:
+      collection: app_settings
+      field: key
+      interface: input
+      hidden: false
+      width: half
+
+  - collection: app_settings
+    field: value
+    type: text
+    schema:
+      name: value
+      table: app_settings
+      data_type: text
+      is_nullable: true
+    meta:
+      collection: app_settings
+      field: value
+      interface: input-multiline
+      display: raw
+      hidden: false
+      width: full
+
   # channels fields
   - collection: channels
     field: id
@@ -364,6 +443,161 @@ fields:
       field: transcript
       interface: input-multiline
       display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: transcript_timed
+    type: text
+    schema:
+      name: transcript_timed
+      table: videos
+      data_type: text
+      is_nullable: true
+    meta:
+      collection: videos
+      field: transcript_timed
+      interface: input-multiline
+      display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: summary
+    type: text
+    schema:
+      name: summary
+      table: videos
+      data_type: text
+      is_nullable: true
+    meta:
+      collection: videos
+      field: summary
+      interface: input-multiline
+      display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: topics
+    type: json
+    schema:
+      name: topics
+      table: videos
+      data_type: json
+      is_nullable: true
+    meta:
+      collection: videos
+      field: topics
+      interface: list
+      display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: takeaways
+    type: json
+    schema:
+      name: takeaways
+      table: videos
+      data_type: json
+      is_nullable: true
+    meta:
+      collection: videos
+      field: takeaways
+      interface: list
+      display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: questions
+    type: json
+    schema:
+      name: questions
+      table: videos
+      data_type: json
+      is_nullable: true
+    meta:
+      collection: videos
+      field: questions
+      interface: list
+      display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: obsidian_note
+    type: text
+    schema:
+      name: obsidian_note
+      table: videos
+      data_type: text
+      is_nullable: true
+    meta:
+      collection: videos
+      field: obsidian_note
+      interface: input-multiline
+      display: raw
+      hidden: false
+      width: full
+
+  - collection: videos
+    field: ai_notes_status
+    type: string
+    schema:
+      name: ai_notes_status
+      table: videos
+      data_type: character varying
+      max_length: 50
+      is_nullable: true
+    meta:
+      collection: videos
+      field: ai_notes_status
+      interface: select-dropdown
+      display: labels
+      options:
+        choices:
+          - text: Pending
+            value: pending
+          - text: Done
+            value: done
+          - text: Error
+            value: error
+      hidden: false
+      width: half
+
+  - collection: videos
+    field: ai_notes_generated_at
+    type: timestamp
+    schema:
+      name: ai_notes_generated_at
+      table: videos
+      data_type: timestamp with time zone
+      is_nullable: true
+    meta:
+      collection: videos
+      field: ai_notes_generated_at
+      interface: datetime
+      display: datetime
+      readonly: true
+      hidden: false
+      width: half
+
+  - collection: videos
+    field: ai_notes_error
+    type: text
+    schema:
+      name: ai_notes_error
+      table: videos
+      data_type: text
+      is_nullable: true
+    meta:
+      collection: videos
+      field: ai_notes_error
+      interface: input-multiline
+      display: raw
+      readonly: true
       hidden: false
       width: full
 

@@ -46,6 +46,52 @@ export async function refreshDates() {
   return res.json();
 }
 
+export async function generateAiNotes(limit = 10) {
+  const res = await fetch(`${FETCHER_URL}/ai-notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit }),
+  });
+  if (!res.ok) throw new Error(`ai-notes → ${res.status}`);
+  return res.json();
+}
+
+export async function generateAiNoteForVideo(videoId) {
+  const res = await fetch(`${FETCHER_URL}/ai-notes/${videoId}`, { method: 'POST' });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`ai-notes/${videoId} → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
+export async function getSchedule() {
+  const res = await fetch(`${FETCHER_URL}/schedule`);
+  if (!res.ok) throw new Error(`schedule → ${res.status}`);
+  return res.json();
+}
+
+export async function updateSchedule(cron, timezone) {
+  const res = await fetch(`${FETCHER_URL}/schedule`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cron, timezone }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`schedule → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
 // ---- Whisper service ----
 
 const WHISPER_URL = '/whisper';

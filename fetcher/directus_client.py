@@ -6,6 +6,17 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+AI_NOTE_FIELDS = [
+    {"field": "summary", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "topics", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "takeaways", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "questions", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "obsidian_note", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "ai_notes_status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True}},
+    {"field": "ai_notes_generated_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+    {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
+]
+
 
 class DirectusClient:
     def __init__(self, base_url: str, token: str):
@@ -43,6 +54,11 @@ class DirectusClient:
             logger.info("Created 'videos' collection")
             await self._create_videos_channel_relation()
             logger.info("Created videos→channels relation")
+        else:
+            await self._ensure_videos_fields()
+        if "app_settings" not in existing:
+            await self._create_app_settings_collection()
+            logger.info("Created 'app_settings' collection")
 
     async def _get_existing_collections(self) -> set:
         try:
@@ -84,11 +100,39 @@ class DirectusClient:
                 {"field": "duration_seconds", "type": "integer", "meta": {"interface": "input", "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "uploaded_at", "type": "timestamp", "meta": {"interface": "datetime", "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "transcript", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "transcript_timed", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "summary", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "topics", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "takeaways", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "questions", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "obsidian_note", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "ai_notes_status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True}},
+                {"field": "ai_notes_generated_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+                {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
                 {"field": "status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "No Transcript", "value": "no_transcript"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True, "default_value": "pending"}},
                 {"field": "processed_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
             ],
         }
         await self._request("POST", "/collections", json=payload)
+
+    async def _ensure_videos_fields(self):
+        try:
+            result = await self._request("GET", "/fields/videos")
+            existing = {f["field"] for f in result.get("data", [])}
+            if "transcript_timed" not in existing:
+                await self._request("POST", "/fields/videos", json={
+                    "field": "transcript_timed",
+                    "type": "text",
+                    "meta": {"interface": "input-multiline", "width": "full"},
+                    "schema": {"is_nullable": True},
+                })
+                logger.info("Added 'transcript_timed' field to videos collection")
+            for field in AI_NOTE_FIELDS:
+                if field["field"] not in existing:
+                    await self._request("POST", "/fields/videos", json=field)
+                    logger.info(f"Added '{field['field']}' field to videos collection")
+        except Exception as e:
+            logger.warning(f"Could not ensure videos fields: {e}")
 
     async def _create_videos_channel_relation(self):
         payload = {
@@ -107,6 +151,37 @@ class DirectusClient:
             await self._request("POST", "/relations", json=payload)
         except Exception as e:
             logger.warning(f"Relation may already exist: {e}")
+
+    async def _create_app_settings_collection(self):
+        payload = {
+            "collection": "app_settings",
+            "meta": {"icon": "settings", "display_template": "{{key}}"},
+            "schema": {},
+            "fields": [
+                {"field": "id", "type": "uuid", "meta": {"special": ["uuid"], "hidden": True, "readonly": True}, "schema": {"is_primary_key": True, "is_nullable": False}},
+                {"field": "key", "type": "string", "meta": {"interface": "input", "width": "half"}, "schema": {"max_length": 100, "is_nullable": False, "is_unique": True}},
+                {"field": "value", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+            ],
+        }
+        await self._request("POST", "/collections", json=payload)
+
+    # ---- App settings ----
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        params = f"?filter[key][_eq]={key}&limit=1&fields=id,key,value"
+        result = await self._request("GET", f"/items/app_settings{params}")
+        items = result.get("data", [])
+        return items[0].get("value") if items else None
+
+    async def set_setting(self, key: str, value: str) -> dict:
+        params = f"?filter[key][_eq]={key}&limit=1&fields=id"
+        result = await self._request("GET", f"/items/app_settings{params}")
+        items = result.get("data", [])
+        if items:
+            updated = await self._request("PATCH", f"/items/app_settings/{items[0]['id']}", json={"value": value})
+            return updated.get("data", {})
+        created = await self._request("POST", "/items/app_settings", json={"key": key, "value": value})
+        return created.get("data", {})
 
     # ---- Channel CRUD ----
 
@@ -145,6 +220,23 @@ class DirectusClient:
         result = await self._request("PATCH", f"/items/videos/{video_id}", json=data)
         return result.get("data", {})
 
+    async def get_video(self, video_id: str) -> Optional[dict]:
+        fields = ",".join([
+            "id",
+            "video_id",
+            "title",
+            "url",
+            "uploaded_at",
+            "duration_seconds",
+            "transcript",
+            "transcript_timed",
+        ])
+        try:
+            result = await self._request("GET", f"/items/videos/{video_id}?fields={fields}")
+            return result.get("data")
+        except Exception:
+            return None
+
     async def get_videos_by_channel(self, channel_id: str) -> list:
         params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=video_id'
         result = await self._request("GET", f"/items/videos{params}")
@@ -152,6 +244,18 @@ class DirectusClient:
 
     async def get_videos_missing_date(self) -> list:
         params = '?filter[uploaded_at][_null]=true&limit=-1&fields=id,video_id'
+        result = await self._request("GET", f"/items/videos{params}")
+        return result.get("data", [])
+
+    async def get_videos_missing_ai_notes(self, limit: int = 10) -> list:
+        params = (
+            "?filter[_and][0][transcript][_nnull]=true"
+            "&filter[_and][1][_or][0][summary][_null]=true"
+            "&filter[_and][1][_or][1][ai_notes_status][_eq]=error"
+            f"&limit={limit}"
+            "&sort=-uploaded_at"
+            "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"
+        )
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { videoToTxt, videoToMd, downloadFile, sanitizeFilename } from '../lib/export.js';
+import { generateAiNoteForVideo } from '../lib/fetcher.js';
+import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 
 function formatDuration(seconds) {
   if (!seconds) return '—';
@@ -23,6 +24,12 @@ const STATUS_MAP = {
   error: { icon: '⚠️', label: 'Hiba' },
 };
 
+const AI_STATUS_MAP = {
+  done: 'AI kész',
+  pending: 'AI folyamatban',
+  error: 'AI hiba',
+};
+
 const PAGE_SIZE = 100;
 
 export default function VideoTable({
@@ -40,6 +47,7 @@ export default function VideoTable({
 }) {
   const searchInputRef = useRef();
   const [localSearch, setLocalSearch] = useState(search);
+  const [aiBusyId, setAiBusyId] = useState(null);
   const debounceRef = useRef(null);
 
   // Sync local search with prop
@@ -72,6 +80,18 @@ export default function VideoTable({
   function renderSortIcon(field) {
     if (field !== sortField) return null;
     return sortDesc ? ' ↓' : ' ↑';
+  }
+
+  async function handleGenerateAiNote(e, video) {
+    e.stopPropagation();
+    setAiBusyId(video.id);
+    try {
+      await generateAiNoteForVideo(video.id);
+    } catch (err) {
+      alert('AI jegyzet hiba: ' + err.message);
+    } finally {
+      setAiBusyId(null);
+    }
   }
 
   return (
@@ -147,6 +167,15 @@ export default function VideoTable({
                         <span className={`badge badge-${video.status}`}>
                           {st.icon} {st.label}
                         </span>
+                        {video.ai_notes_status && (
+                          <span
+                            className={`badge badge-${video.ai_notes_status}`}
+                            title={video.ai_notes_error || ''}
+                            style={{ marginLeft: '0.35rem' }}
+                          >
+                            {AI_STATUS_MAP[video.ai_notes_status] || video.ai_notes_status}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '0.3rem' }}>
@@ -156,6 +185,16 @@ export default function VideoTable({
                               onClick={e => { e.stopPropagation(); onSelectVideo(video); }}
                             >
                               Transzkript
+                            </button>
+                          )}
+                          {video.transcript && (
+                            <button
+                              className="btn-sm"
+                              disabled={aiBusyId === video.id || video.ai_notes_status === 'pending'}
+                              title="AI összefoglaló, témák, tanulságok, kérdések és Obsidian jegyzet generálása"
+                              onClick={e => handleGenerateAiNote(e, video)}
+                            >
+                              {video.ai_notes_status === 'done' ? 'AI újra' : 'AI jegyzet'}
                             </button>
                           )}
                           <button
@@ -175,6 +214,18 @@ export default function VideoTable({
                             }}
                           >
                             MD
+                          </button>
+                          <button
+                            className="btn-sm"
+                            onClick={e => {
+                              e.stopPropagation();
+                              downloadFile(
+                                videoToObsidianMd(video, { channel: selectedChannel, timed: true }),
+                                obsidianFilename(video, { channel: selectedChannel })
+                              );
+                            }}
+                          >
+                            Obsidian
                           </button>
                         </div>
                       </td>

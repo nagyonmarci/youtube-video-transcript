@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -105,8 +106,8 @@ def run_whisper(
     language: str = "auto",
     threads: int = 4,
     duration_seconds: int = 0,
-) -> Optional[str]:
-    """Run whisper.cpp on a WAV file and return the transcript text."""
+) -> Optional[tuple[str, str]]:
+    """Run whisper.cpp on a WAV file and return (plain_text, timestamped_text)."""
     timeout = max(600, int(duration_seconds * 3)) if duration_seconds else 3600
 
     cmd = [
@@ -114,7 +115,6 @@ def run_whisper(
         "-m", model_path,
         "-f", wav_path,
         "-t", str(threads),
-        "--no-timestamps",
         "-otxt",
     ]
     if language != "auto":
@@ -143,7 +143,22 @@ def run_whisper(
         logger.warning("Whisper produced empty output")
         return None
 
-    return text
+    plain = strip_whisper_timestamps(text)
+    return plain, text
+
+
+def strip_whisper_timestamps(text: str) -> str:
+    """Remove whisper.cpp timestamp prefixes from transcript text."""
+    lines = []
+    for line in text.splitlines():
+        clean = re.sub(
+            r"^\s*\[[0-9:.]+\s*-->\s*[0-9:.]+\]\s*",
+            "",
+            line,
+        ).strip()
+        if clean:
+            lines.append(clean)
+    return " ".join(lines).strip()
 
 
 def transcribe_video(
@@ -152,7 +167,7 @@ def transcribe_video(
     model_path: str = "/app/models/ggml-large-v3.bin",
     language: str = "auto",
     threads: int = 4,
-) -> Optional[str]:
+) -> Optional[tuple[str, str]]:
     """Full pipeline: download audio -> convert to WAV -> run whisper.cpp."""
     # Check duration limit
     if duration_seconds and duration_seconds > MAX_DURATION_SECONDS:

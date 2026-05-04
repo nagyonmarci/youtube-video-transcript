@@ -98,7 +98,7 @@ async def process_transcription_task(task: dict):
     loop = asyncio.get_event_loop()
     now = datetime.now(timezone.utc).isoformat()
     try:
-        transcript = await loop.run_in_executor(
+        transcript_result = await loop.run_in_executor(
             None,
             transcribe_video,
             video_id,
@@ -115,9 +115,11 @@ async def process_transcription_task(task: dict):
         logger.info(f"Members-only video, skipped: {video_id}")
         return
 
-    if transcript:
+    if transcript_result:
+        transcript, transcript_timed = transcript_result
         await directus.update_video(directus_id, {
             "transcript": transcript,
+            "transcript_timed": transcript_timed,
             "status": "done",
             "whisper_status": "done",
             "processed_at": now,

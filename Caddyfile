@@ -1,3 +1,27 @@
 http://yt.test {
 	reverse_proxy frontend:4321
 }
+
+http://suliweb.test {
+	redir https://suliweb.test{uri} permanent
+}
+
+https://suliweb.test {
+	tls /etc/caddy/certs/suliweb.test.pem /etc/caddy/certs/suliweb.test-key.pem
+
+	handle /api/* {
+		reverse_proxy suliweb-backend:8080
+	}
+	handle /find/* {
+		reverse_proxy suliweb-backend:8080
+	}
+	handle /pst/* {
+		reverse_proxy suliweb-backend:8080
+	}
+	handle /pdf/* {
+		reverse_proxy suliweb-backend:8080
+	}
+	handle {
+		reverse_proxy suliweb-frontend:80
+	}
+}
