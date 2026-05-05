@@ -782,6 +782,10 @@ class AiNotesRequest(BaseModel):
     limit: int = AI_NOTES_BATCH_LIMIT
 
 
+class ChannelAiNotesRequest(BaseModel):
+    limit: int = 500
+
+
 class JobMoveRequest(BaseModel):
     direction: str
 
@@ -1054,6 +1058,42 @@ async def ai_note_video(video_id: str):
 
     await enqueue_ai_note(video_id)
     return {"queued": True, "video_id": video_id}
+
+
+@app.post("/channels/{channel_id}/ai-notes")
+async def ai_notes_for_channel(channel_id: str, request: ChannelAiNotesRequest):
+    """Queue AI note generation for all missing AI notes in one channel."""
+    channel = await directus.get_channel(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    limit = max(1, min(request.limit, 1000))
+    videos = await directus.get_channel_videos_missing_ai_notes(channel_id, limit)
+    active_video_ids = await directus.get_ai_note_job_video_ids()
+    queued = []
+    skipped_active = 0
+
+    for video in videos:
+        video_id = video["id"]
+        if video_id in active_video_ids:
+            skipped_active += 1
+            continue
+        await directus.update_video(video_id, {
+            "ai_notes_status": "pending",
+            "ai_notes_error": None,
+        })
+        job = await enqueue_ai_job({"type": "ai_note_video", "video_id": video_id})
+        active_video_ids.add(video_id)
+        queued.append({"video_id": video_id, "title": video.get("title"), "job_id": job.get("id")})
+
+    return {
+        "queued": True,
+        "channel_id": channel_id,
+        "count": len(queued),
+        "skipped_active": skipped_active,
+        "limit": limit,
+        "items": queued,
+    }
 
 
 @app.delete("/ai-notes/{video_id}")

@@ -17,6 +17,14 @@ import {
 import ChannelAdminPanel from './ChannelAdminPanel.jsx';
 import TopActions from './TopActions.jsx';
 
+function sameData(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function keepIfSame(prev, next) {
+  return sameData(prev, next) ? prev : next;
+}
+
 function cronToDailyTime(cron) {
   const parts = (cron || '').trim().split(/\s+/);
   if (parts.length !== 5 || parts[2] !== '*' || parts[3] !== '*' || parts[4] !== '*') return '07:00';
@@ -164,11 +172,14 @@ export default function AdminDashboard({
         getSchedule(),
         getJobs(),
       ]);
-      setStats(nextStats);
-      setJobs(jobData.jobs || []);
-      setScheduleCron(schedule.cron || '0 7 * * *');
-      setScheduleTime(cronToDailyTime(schedule.cron || '0 7 * * *'));
-      setScheduleTimezone(schedule.timezone || 'Europe/Budapest');
+      const nextCron = schedule.cron || '0 7 * * *';
+      const nextTime = cronToDailyTime(nextCron);
+      const nextTimezone = schedule.timezone || 'Europe/Budapest';
+      setStats(prev => keepIfSame(prev, nextStats));
+      setJobs(prev => keepIfSame(prev, jobData.jobs || []));
+      setScheduleCron(prev => (prev === nextCron ? prev : nextCron));
+      setScheduleTime(prev => (prev === nextTime ? prev : nextTime));
+      setScheduleTimezone(prev => (prev === nextTimezone ? prev : nextTimezone));
     } catch (e) {
       setMsg({ text: 'Admin adatok betöltési hiba: ' + e.message, isError: true });
     }

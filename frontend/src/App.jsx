@@ -10,6 +10,14 @@ import TranscriptModal from './components/TranscriptModal.jsx';
 import DailyUpdatesPage from './components/DailyUpdatesPage.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 
+function sameData(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function keepIfSame(prev, next) {
+  return sameData(prev, next) ? prev : next;
+}
+
 export default function App() {
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
@@ -23,14 +31,17 @@ export default function App() {
   const [whisperStatus, setWhisperStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState('home');
+  const selectedChannelId = selectedChannel?.id ?? null;
 
   const loadChannels = useCallback(async () => {
     try {
       const data = await getChannels();
-      setChannels(data);
+      setChannels(prev => keepIfSame(prev, data));
       setSelectedChannel(prev => {
         if (!prev) return prev;
-        return data.find(ch => ch.id === prev.id) || null;
+        const next = data.find(ch => ch.id === prev.id) || null;
+        if (!next) return null;
+        return sameData(prev, next) ? prev : next;
       });
     } catch (e) {
       console.error('Failed to load channels', e);
@@ -41,30 +52,30 @@ export default function App() {
     if (showLoading) setLoading(true);
     try {
       const opts = { sort, page, search };
-      const result = selectedChannel
-        ? await getVideos(selectedChannel.id, opts)
+      const result = selectedChannelId
+        ? await getVideos(selectedChannelId, opts)
         : await getAllVideos(opts);
-      setVideos(result.items);
-      setTotalCount(result.total);
+      setVideos(prev => keepIfSame(prev, result.items));
+      setTotalCount(prev => (prev === result.total ? prev : result.total));
     } catch (e) {
       console.error('Failed to load videos', e);
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [selectedChannel, page, sort, search]);
+  }, [selectedChannelId, page, sort, search]);
 
   const loadStatus = useCallback(async () => {
     try {
       const s = await getStatus();
-      setFetcherStatus(s);
+      setFetcherStatus(prev => keepIfSame(prev, s));
     } catch {
-      setFetcherStatus(null);
+      setFetcherStatus(prev => (prev === null ? prev : null));
     }
     try {
       const w = await getWhisperStatus();
-      setWhisperStatus(w);
+      setWhisperStatus(prev => keepIfSame(prev, w));
     } catch {
-      setWhisperStatus(null);
+      setWhisperStatus(prev => (prev === null ? prev : null));
     }
   }, []);
 
@@ -78,10 +89,11 @@ export default function App() {
   }, [loadChannels, loadStatus]);
 
   useEffect(() => {
+    if (view !== 'home') return undefined;
     loadVideos(true);
     const interval = setInterval(() => loadVideos(false), 15000);
     return () => clearInterval(interval);
-  }, [loadVideos]);
+  }, [loadVideos, view]);
 
   useEffect(() => {
     loadStatus();

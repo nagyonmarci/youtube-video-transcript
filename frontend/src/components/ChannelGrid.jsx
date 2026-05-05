@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { deleteChannel, getAllChannelVideos } from '../lib/directus.js';
-import { refreshChannel } from '../lib/fetcher.js';
+import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
 import {
   channelToTxt, channelToMd, channelToObsidianMd,
   downloadFile, sanitizeFilename,
@@ -57,6 +57,19 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
       showMsg('Frissítés sorba állítva');
     } catch (err) {
       showMsg('Hiba: ' + err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGenerateChannelAi(e, ch) {
+    e.stopPropagation();
+    setBusy(true);
+    try {
+      const result = await generateAiNotesForChannel(ch.id);
+      showMsg(`${result.count} AI jegyzet sorba állítva`);
+    } catch (err) {
+      showMsg('AI jegyzet hiba: ' + err.message, true);
     } finally {
       setBusy(false);
     }
@@ -151,6 +164,7 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
               {isSelected && (
                 <div className="channel-card-actions">
                   <button onClick={e => handleRefresh(e, ch)} disabled={busy}>Frissít</button>
+                  <button onClick={e => handleGenerateChannelAi(e, ch)} disabled={busy}>AI jegyzetek</button>
                   <button onClick={e => handleExport(e, ch, 'txt')}>TXT</button>
                   <button onClick={e => handleExport(e, ch, 'md')}>MD</button>
                   <button onClick={e => handleExport(e, ch, 'obsidian')}>Obsidian</button>

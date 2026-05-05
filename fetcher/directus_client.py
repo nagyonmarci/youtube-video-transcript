@@ -420,6 +420,19 @@ class DirectusClient:
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
+    async def get_channel_videos_missing_ai_notes(self, channel_id: str, limit: int = 500) -> list:
+        params = (
+            f"?filter[_and][0][channel_id][_eq]={channel_id}"
+            "&filter[_and][1][transcript][_nnull]=true"
+            "&filter[_and][2][_or][0][summary][_null]=true"
+            "&filter[_and][2][_or][1][ai_notes_status][_eq]=error"
+            f"&limit={limit}"
+            "&sort=-uploaded_at"
+            "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"
+        )
+        result = await self._request("GET", f"/items/videos{params}")
+        return result.get("data", [])
+
     async def get_videos_with_ai_status(self, status: str) -> list:
         params = f"?filter[ai_notes_status][_eq]={status}&limit=-1&fields=id,video_id,title,ai_notes_status"
         result = await self._request("GET", f"/items/videos{params}")

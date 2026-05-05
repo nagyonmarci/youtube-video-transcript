@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { deleteChannel, updateChannel } from '../lib/directus.js';
-import { refreshChannel } from '../lib/fetcher.js';
+import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: 'Várakozik' },
@@ -78,6 +78,19 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
       await onChanged();
     } catch (e) {
       showMsg('Frissítési hiba: ' + e.message, true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleGenerateChannelAi(ch) {
+    setBusyId(ch.id);
+    try {
+      const result = await generateAiNotesForChannel(ch.id);
+      showMsg(`${result.count} AI jegyzet sorba állítva`);
+      await onChanged();
+    } catch (e) {
+      showMsg('AI jegyzet hiba: ' + e.message, true);
     } finally {
       setBusyId(null);
     }
@@ -172,6 +185,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
                     <div className="admin-row-actions">
                       <button onClick={() => handleSave(ch)} disabled={busy}>Mentés</button>
                       <button onClick={() => handleRefresh(ch)} disabled={busy}>Frissít</button>
+                      <button onClick={() => handleGenerateChannelAi(ch)} disabled={busy}>AI jegyzetek</button>
                       <button className="danger" onClick={() => handleDelete(ch)} disabled={busy}>Töröl</button>
                     </div>
                   </td>

@@ -108,6 +108,23 @@ export async function generateAiNotes(limit = 10) {
   return res.json();
 }
 
+export async function generateAiNotesForChannel(channelId, limit = 500) {
+  const res = await fetch(`${FETCHER_URL}/channels/${channelId}/ai-notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`channels/${channelId}/ai-notes → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
 export async function generateAiNoteForVideo(videoId) {
   const res = await fetch(`${FETCHER_URL}/ai-notes/${videoId}`, { method: 'POST' });
   if (!res.ok) {
