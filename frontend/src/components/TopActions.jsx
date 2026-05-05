@@ -40,7 +40,7 @@ function scheduleLabel(cron, timezone) {
   return `${cron || 'nincs beállítva'} (${timezone || 'Europe/Budapest'})`;
 }
 
-export default function TopActions({ channels, selectedChannel, onChannelsChanged }) {
+export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }) {
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -250,64 +250,65 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
         </button>
       </div>
 
-      {/* Refresh schedule */}
-      <div className="card top-action-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-          <div>
-            <h3 className="card-title" style={{ marginBottom: '0.15rem' }}>Automatikus frissítés</h3>
-            <div style={{ fontSize: '0.78rem', color: '#aaa' }}>{scheduleLabel(scheduleCron, scheduleTimezone)}</div>
-          </div>
-          <button type="button" onClick={() => setScheduleOpen(v => !v)} style={{ whiteSpace: 'nowrap' }}>
-            {scheduleOpen ? 'Bezár' : 'Beállítás'}
-          </button>
-        </div>
-
-        {scheduleOpen && (
-          <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
-              Napi frissítés ideje
-              <input
-                type="time"
-                value={scheduleTime}
-                onChange={e => {
-                  setScheduleTime(e.target.value);
-                  if (!advancedSchedule) setScheduleCron(dailyTimeToCron(e.target.value));
-                }}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
-              Időzóna
-              <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
-                <option value="Europe/Budapest">Europe/Budapest</option>
-                <option value="UTC">UTC</option>
-                <option value="Europe/London">Europe/London</option>
-                <option value="Europe/Berlin">Europe/Berlin</option>
-                <option value="America/New_York">America/New_York</option>
-              </select>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: '#aaa' }}>
-              <input
-                type="checkbox"
-                checked={advancedSchedule}
-                onChange={e => setAdvancedSchedule(e.target.checked)}
-              />
-              Haladó cron
-            </label>
-            {advancedSchedule && (
-              <input
-                value={scheduleCron}
-                onChange={e => setScheduleCron(e.target.value)}
-                placeholder="0 7 * * *"
-                spellCheck={false}
-                style={{ fontFamily: 'monospace' }}
-              />
-            )}
-            <button type="submit" disabled={busy || !scheduleTimezone.trim() || (advancedSchedule ? !scheduleCron.trim() : !scheduleTime)}>
-              Mentés
+      {showSchedule && (
+        <div className="card top-action-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+            <div>
+              <h3 className="card-title" style={{ marginBottom: '0.15rem' }}>Automatikus frissítés</h3>
+              <div style={{ fontSize: '0.78rem', color: '#aaa' }}>{scheduleLabel(scheduleCron, scheduleTimezone)}</div>
+            </div>
+            <button type="button" onClick={() => setScheduleOpen(v => !v)} style={{ whiteSpace: 'nowrap' }}>
+              {scheduleOpen ? 'Bezár' : 'Beállítás'}
             </button>
-          </form>
-        )}
-      </div>
+          </div>
+
+          {scheduleOpen && (
+            <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
+                Napi frissítés ideje
+                <input
+                  type="time"
+                  value={scheduleTime}
+                  onChange={e => {
+                    setScheduleTime(e.target.value);
+                    if (!advancedSchedule) setScheduleCron(dailyTimeToCron(e.target.value));
+                  }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
+                Időzóna
+                <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
+                  <option value="Europe/Budapest">Europe/Budapest</option>
+                  <option value="UTC">UTC</option>
+                  <option value="Europe/London">Europe/London</option>
+                  <option value="Europe/Berlin">Europe/Berlin</option>
+                  <option value="America/New_York">America/New_York</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: '#aaa' }}>
+                <input
+                  type="checkbox"
+                  checked={advancedSchedule}
+                  onChange={e => setAdvancedSchedule(e.target.checked)}
+                />
+                Haladó cron
+              </label>
+              {advancedSchedule && (
+                <input
+                  value={scheduleCron}
+                  onChange={e => setScheduleCron(e.target.value)}
+                  placeholder="0 7 * * *"
+                  spellCheck={false}
+                  style={{ fontFamily: 'monospace' }}
+                />
+              )}
+              <button type="submit" disabled={busy || !scheduleTimezone.trim() || (advancedSchedule ? !scheduleCron.trim() : !scheduleTime)}>
+                Mentés
+              </button>
+            </form>
+          )}
+        </div>
+      )}
 
       {/* Status message */}
       {msg && (

@@ -33,6 +33,7 @@ from youtube_fetcher import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
 DIRECTUS_TOKEN = os.environ.get("DIRECTUS_TOKEN", "admin-token-change-me")
@@ -51,6 +52,8 @@ ai_worker_task: Optional[asyncio.Task] = None
 stop_flag = False
 current_task_info: dict = {}
 current_ai_task_info: dict = {}
+current_job_id: Optional[str] = None
+current_ai_job_id: Optional[str] = None
 scheduler: Optional[AsyncIOScheduler] = None
 
 
@@ -119,19 +122,31 @@ def start_refresh_scheduler():
 
 async def worker_loop():
     """Main background worker that processes queued tasks."""
-    global stop_flag, current_task_info
+    global stop_flag, current_task_info, current_job_id
     while True:
-        try:
-            task = await asyncio.wait_for(task_queue.get(), timeout=1.0)
-        except asyncio.TimeoutError:
-            continue
-
         if stop_flag:
-            task_queue.task_done()
+            await asyncio.sleep(1)
+            continue
+        try:
+            job = await directus.get_next_job("fetch")
+        except Exception as e:
+            logger.warning(f"Could not poll fetch jobs: {e}")
+            await asyncio.sleep(2)
             continue
 
+        if not job:
+            await asyncio.sleep(1)
+            continue
+
+        task = job.get("payload") or {}
         task_type = task.get("type")
+        current_job_id = job["id"]
         try:
+            await directus.update_job(job["id"], {
+                "status": "running",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": None,
+            })
             if task_type == "channel":
                 await process_channel_task(task)
             elif task_type == "video":
@@ -140,37 +155,85 @@ async def worker_loop():
                 await process_refresh_task(task)
             elif task_type == "refresh_dates":
                 await process_refresh_dates_task()
+            else:
+                raise ValueError(f"Unknown fetch job type: {task_type}")
+            await directus.update_job(job["id"], {
+                "status": "done",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except asyncio.CancelledError:
+            await directus.update_job(job["id"], {
+                "status": "cancelled",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": "Stopped by user",
+            })
+            raise
         except Exception as e:
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
+            await directus.update_job(job["id"], {
+                "status": "error",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": str(e)[:1000],
+            })
         finally:
-            task_queue.task_done()
             current_task_info = {}
+            current_job_id = None
 
 
 async def ai_worker_loop():
     """Background worker for AI notes so LLM calls do not block fetching."""
-    global stop_flag, current_ai_task_info
+    global stop_flag, current_ai_task_info, current_ai_job_id
     while True:
-        try:
-            task = await asyncio.wait_for(ai_task_queue.get(), timeout=1.0)
-        except asyncio.TimeoutError:
-            continue
-
         if stop_flag:
-            ai_task_queue.task_done()
+            await asyncio.sleep(1)
+            continue
+        try:
+            job = await directus.get_next_job("ai")
+        except Exception as e:
+            logger.warning(f"Could not poll AI jobs: {e}")
+            await asyncio.sleep(2)
             continue
 
+        if not job:
+            await asyncio.sleep(1)
+            continue
+
+        task = job.get("payload") or {}
         task_type = task.get("type")
+        current_ai_job_id = job["id"]
         try:
+            await directus.update_job(job["id"], {
+                "status": "running",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": None,
+            })
             if task_type == "ai_notes":
                 await process_ai_notes_task(task)
             elif task_type == "ai_note_video":
                 await process_single_ai_note_task(task)
+            else:
+                raise ValueError(f"Unknown AI job type: {task_type}")
+            await directus.update_job(job["id"], {
+                "status": "done",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except asyncio.CancelledError:
+            await directus.update_job(job["id"], {
+                "status": "cancelled",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": "Stopped by user",
+            })
+            raise
         except Exception as e:
             logger.error(f"AI worker error on task {task}: {e}", exc_info=True)
+            await directus.update_job(job["id"], {
+                "status": "error",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": str(e)[:1000],
+            })
         finally:
-            ai_task_queue.task_done()
             current_ai_task_info = {}
+            current_ai_job_id = None
 
 
 async def process_channel_task(task: dict):
@@ -519,7 +582,17 @@ async def enqueue_ai_note(video_id: str):
         "ai_notes_status": "pending",
         "ai_notes_error": None,
     })
-    await ai_task_queue.put({"type": "ai_note_video", "video_id": video_id})
+    return await directus.create_job("ai", {"type": "ai_note_video", "video_id": video_id})
+
+
+async def enqueue_fetch_job(task: dict, label: Optional[str] = None):
+    """Create a persistent fetch job."""
+    return await directus.create_job("fetch", task, label=label)
+
+
+async def enqueue_ai_job(task: dict, label: Optional[str] = None):
+    """Create a persistent AI job."""
+    return await directus.create_job("ai", task, label=label)
 
 
 async def clear_ai_notes(video_id: str) -> dict:
@@ -556,6 +629,26 @@ async def drain_queue(queue: asyncio.Queue, predicate=None) -> int:
     return removed
 
 
+async def cancel_jobs(queue: Optional[str] = None, predicate=None) -> int:
+    """Mark queued/paused jobs as cancelled. Return count."""
+    removed = 0
+    for job in await directus.list_jobs():
+        if queue and job.get("queue") != queue:
+            continue
+        if job.get("status") not in {"queued", "paused"}:
+            continue
+        task = job.get("payload") or {}
+        if predicate and not predicate(task):
+            continue
+        await directus.update_job(job["id"], {
+            "status": "cancelled",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error_message": "Cancelled by user",
+        })
+        removed += 1
+    return removed
+
+
 async def restart_ai_worker():
     """Cancel and recreate the AI worker."""
     global ai_worker_task
@@ -575,7 +668,7 @@ async def daily_refresh():
     for channel in channels:
         if channel.get("status") == "processing":
             continue
-        await task_queue.put({"type": "refresh", "channel_id": channel["id"]})
+        await enqueue_fetch_job({"type": "refresh", "channel_id": channel["id"]})
         await rate_limited_sleep_channel()
     logger.info(f"Queued {len(channels)} channels for daily refresh")
 
@@ -598,6 +691,9 @@ async def lifespan(app: FastAPI):
     # Bootstrap schema
     try:
         await directus.ensure_schema()
+        cancelled = await directus.mark_stale_running_jobs_cancelled()
+        if cancelled:
+            logger.info(f"Marked {cancelled} stale running jobs as cancelled")
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
     await load_schedule_settings()
@@ -650,26 +746,146 @@ class AiNotesRequest(BaseModel):
     limit: int = AI_NOTES_BATCH_LIMIT
 
 
+class JobMoveRequest(BaseModel):
+    direction: str
+
+
 # ---- API Endpoints ----
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "queue_size": task_queue.qsize(), "ai_queue_size": ai_task_queue.qsize()}
+    return {
+        "status": "ok",
+        "queue_size": await directus.count_jobs("fetch", "queued"),
+        "ai_queue_size": await directus.count_jobs("ai", "queued"),
+    }
 
 
 @app.get("/status")
 async def status():
     return {
-        "queue_size": task_queue.qsize(),
-        "ai_queue_size": ai_task_queue.qsize(),
+        "queue_size": await directus.count_jobs("fetch", "queued"),
+        "ai_queue_size": await directus.count_jobs("ai", "queued"),
         "stop_flag": stop_flag,
-        "current_task": current_task_info,
-        "current_ai_task": current_ai_task_info,
+        "current_task": {**current_task_info, **({"job_id": current_job_id} if current_job_id else {})},
+        "current_ai_task": {**current_ai_task_info, **({"job_id": current_ai_job_id} if current_ai_job_id else {})},
         "schedule": {
             "cron": REFRESH_CRON,
             "timezone": SCHEDULER_TIMEZONE,
         },
     }
+
+
+@app.get("/jobs")
+async def list_jobs():
+    jobs = await directus.list_jobs()
+    return {
+        "jobs": jobs,
+        "counts": {
+            "fetch": await directus.count_jobs("fetch", "queued"),
+            "ai": await directus.count_jobs("ai", "queued"),
+        },
+        "current": {
+            "fetch": current_job_id,
+            "ai": current_ai_job_id,
+        },
+    }
+
+
+@app.post("/jobs/{job_id}/pause")
+async def pause_job(job_id: str):
+    job = await directus.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") == "running":
+        raise HTTPException(status_code=400, detail="Running jobs cannot be paused; use stop")
+    if job.get("status") in {"done", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Completed jobs cannot be paused")
+    return await directus.update_job(job_id, {"status": "paused"})
+
+
+@app.post("/jobs/{job_id}/resume")
+async def resume_job(job_id: str):
+    job = await directus.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") not in {"paused", "error", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Only paused, error, or cancelled jobs can be resumed")
+    return await directus.update_job(job_id, {
+        "status": "queued",
+        "started_at": None,
+        "finished_at": None,
+        "error_message": None,
+    })
+
+
+@app.post("/jobs/{job_id}/start")
+async def start_job_now(job_id: str):
+    job = await directus.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") == "running":
+        return job
+    return await directus.update_job(job_id, {
+        "status": "queued",
+        "sort_order": 0,
+        "started_at": None,
+        "finished_at": None,
+        "error_message": None,
+    })
+
+
+@app.post("/jobs/{job_id}/move")
+async def move_job(job_id: str, request: JobMoveRequest):
+    direction = request.direction.lower().strip()
+    if direction not in {"up", "down"}:
+        raise HTTPException(status_code=400, detail="direction must be up or down")
+    job = await directus.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") == "running":
+        raise HTTPException(status_code=400, detail="Running jobs cannot be reordered")
+
+    jobs = [
+        item for item in await directus.list_jobs()
+        if item.get("queue") == job.get("queue") and item.get("status") in {"queued", "paused"}
+    ]
+    index = next((i for i, item in enumerate(jobs) if item["id"] == job_id), -1)
+    if index < 0:
+        raise HTTPException(status_code=400, detail="Job is not reorderable")
+    target_index = index - 1 if direction == "up" else index + 1
+    if target_index < 0 or target_index >= len(jobs):
+        return job
+
+    current = jobs[index]
+    target = jobs[target_index]
+    await directus.update_job(current["id"], {"sort_order": target.get("sort_order") or 0})
+    await directus.update_job(target["id"], {"sort_order": current.get("sort_order") or 0})
+    return {"moved": True, "job_id": job_id, "direction": direction}
+
+
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    global worker_task, ai_worker_task
+    job = await directus.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    cancelled_current = False
+    if job_id == current_job_id and worker_task and not worker_task.done():
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+        worker_task = asyncio.create_task(worker_loop())
+        cancelled_current = True
+    if job_id == current_ai_job_id and ai_worker_task and not ai_worker_task.done():
+        await restart_ai_worker()
+        cancelled_current = True
+
+    await directus.delete_job(job_id)
+    return {"deleted": True, "job_id": job_id, "cancelled_current": cancelled_current}
 
 
 @app.get("/schedule")
@@ -714,7 +930,7 @@ async def fetch_channels(request: FetchChannelsRequest):
         if existing:
             channel_id = existing["id"]
             # Queue a refresh instead
-            await task_queue.put({"type": "refresh", "channel_id": channel_id})
+            await enqueue_fetch_job({"type": "refresh", "channel_id": channel_id})
             queued.append({"url": channel_url, "action": "refresh", "id": channel_id})
         else:
             # Create channel record
@@ -728,7 +944,7 @@ async def fetch_channels(request: FetchChannelsRequest):
             channel_id = channel_record.get("id")
 
             # Try to get real name asynchronously (don't block)
-            await task_queue.put({
+            await enqueue_fetch_job({
                 "type": "channel",
                 "channel_url": channel_url,
                 "channel_id": channel_id,
@@ -745,7 +961,7 @@ async def fetch_video(request: FetchVideoRequest):
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
 
-    await task_queue.put({
+    await enqueue_fetch_job({
         "type": "video",
         "video_url": url,
         "channel_id": request.channel_id,
@@ -760,14 +976,14 @@ async def refresh_channel(channel_id: str):
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    await task_queue.put({"type": "refresh", "channel_id": channel_id})
+    await enqueue_fetch_job({"type": "refresh", "channel_id": channel_id})
     return {"queued": True, "channel_id": channel_id}
 
 
 @app.post("/refresh-dates")
 async def refresh_dates():
     """Queue a task to fetch missing upload dates for all videos."""
-    await task_queue.put({"type": "refresh_dates"})
+    await enqueue_fetch_job({"type": "refresh_dates"})
     return {"queued": True}
 
 
@@ -775,7 +991,7 @@ async def refresh_dates():
 async def ai_notes(request: AiNotesRequest):
     """Queue AI note generation for videos that have transcripts but no summary."""
     limit = max(1, min(request.limit, 100))
-    await ai_task_queue.put({"type": "ai_notes", "limit": limit})
+    await enqueue_ai_job({"type": "ai_notes", "limit": limit})
     return {"queued": True, "limit": limit}
 
 
@@ -799,8 +1015,8 @@ async def delete_ai_note_video(video_id: str):
     video = await directus.get_video(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    removed = await drain_queue(
-        ai_task_queue,
+    removed = await cancel_jobs(
+        "ai",
         lambda task: task.get("type") == "ai_note_video" and task.get("video_id") == video_id,
     )
     cancelled_current = False
@@ -826,9 +1042,9 @@ async def stop_processing():
         ai_worker_task.cancel()
         cancelled_ai_current = True
 
-    # Drain queue
-    drained = await drain_queue(task_queue)
-    ai_drained = await drain_queue(ai_task_queue)
+    # Cancel queued persistent jobs
+    drained = await cancel_jobs("fetch")
+    ai_drained = await cancel_jobs("ai")
 
     stop_flag = False
     worker_task = asyncio.create_task(worker_loop())

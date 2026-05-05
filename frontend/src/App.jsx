@@ -4,11 +4,11 @@ import {
   stopProcessing, getStatus,
   getWhisperStatus, startWhisperBatch, stopWhisper, resumeWhisper,
 } from './lib/fetcher.js';
-import TopActions from './components/TopActions.jsx';
 import ChannelGrid from './components/ChannelGrid.jsx';
 import VideoTable from './components/VideoTable.jsx';
 import TranscriptModal from './components/TranscriptModal.jsx';
-import ChannelAdminPanel from './components/ChannelAdminPanel.jsx';
+import DailyUpdatesPage from './components/DailyUpdatesPage.jsx';
+import AdminDashboard from './components/AdminDashboard.jsx';
 
 export default function App() {
   const [channels, setChannels] = useState([]);
@@ -22,7 +22,7 @@ export default function App() {
   const [fetcherStatus, setFetcherStatus] = useState(null);
   const [whisperStatus, setWhisperStatus] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
+  const [view, setView] = useState('home');
 
   const loadChannels = useCallback(async () => {
     try {
@@ -145,11 +145,13 @@ export default function App() {
         <span style={{ fontSize: '1.4rem' }}>▶</span>
         <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>YouTube Transcript Downloader</h1>
 
-        <div className="header-status">
-          <button onClick={() => setAdminOpen(true)} style={{ padding: '0.25rem 0.6rem' }}>
-            Csatorna admin
-          </button>
+        <nav className="main-nav">
+          <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>Főoldal</button>
+          <button className={view === 'daily' ? 'active' : ''} onClick={() => setView('daily')}>Napi frissítések</button>
+          <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
+        </nav>
 
+        <div className="header-status">
           {/* Fetcher status */}
           {fetcherRunning && (
             <span className="header-status-item">
@@ -190,44 +192,51 @@ export default function App() {
       </header>
 
       <div className="app-content">
-        <TopActions
-          channels={channels}
-          selectedChannel={selectedChannel}
-          onChannelsChanged={loadChannels}
-        />
+        {view === 'home' && (
+          <>
+            <ChannelGrid
+              channels={channels}
+              selectedChannel={selectedChannel}
+              onSelect={handleSelectChannel}
+              onChannelsChanged={async () => {
+                await loadChannels();
+                await loadVideos(false);
+              }}
+            />
 
-        <ChannelGrid
-          channels={channels}
-          selectedChannel={selectedChannel}
-          onSelect={handleSelectChannel}
-          onChannelsChanged={async () => {
-            await loadChannels();
-            await loadVideos(false);
-          }}
-        />
+            <VideoTable
+              videos={videos}
+              totalCount={totalCount}
+              page={page}
+              onPageChange={setPage}
+              search={search}
+              onSearchChange={handleSearchChange}
+              sort={sort}
+              onSortChange={handleSortChange}
+              loading={loading}
+              onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
+              selectedChannel={selectedChannel}
+            />
+          </>
+        )}
 
-        {adminOpen ? (
-          <ChannelAdminPanel
+        {view === 'daily' && (
+          <DailyUpdatesPage
+            onSelectVideo={video => setSelectedVideo({ ...video, channel: video.channel_id })}
+          />
+        )}
+
+        {view === 'admin' && (
+          <AdminDashboard
             channels={channels}
-            onClose={() => setAdminOpen(false)}
-            onChanged={async () => {
+            selectedChannel={selectedChannel}
+            fetcherStatus={fetcherStatus}
+            whisperStatus={whisperStatus}
+            onStatusChanged={loadStatus}
+            onChannelsChanged={async () => {
               await loadChannels();
               await loadVideos(false);
             }}
-          />
-        ) : (
-          <VideoTable
-            videos={videos}
-            totalCount={totalCount}
-            page={page}
-            onPageChange={setPage}
-            search={search}
-            onSearchChange={handleSearchChange}
-            sort={sort}
-            onSortChange={handleSortChange}
-            loading={loading}
-            onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
-            selectedChannel={selectedChannel}
           />
         )}
       </div>

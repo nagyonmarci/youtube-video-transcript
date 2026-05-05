@@ -103,6 +103,10 @@ docker compose up -d fetcher
 
 Az AI jegyzetek külön háttérsoron futnak. A transzkript letöltése után a videó csak bekerül az AI sorba, ezért a fetcher tovább tud dolgozni a következő videókon. A frontend státuszsávja külön mutatja a normál sort és az `AI sor` állapotát; a `Stop` gomb mindkét sort leállítja és kiüríti.
 
+Az AI jegyzetgenerálás angol munkanyelvű: a `summary`, `topics`, `takeaways`, `questions` és `obsidian_note` mezők angolul készülnek akkor is, ha a videó transzkriptje más nyelvű.
+
+Az admin felület a feldolgozási sort Directus `jobs` collectionben kezeli. A sor így látható és szerkeszthető: queued/paused/running/error/cancelled állapot, sorrend módosítás, pause/resume, azonnali indítás és törlés.
+
 ## Rate limiting
 
 - Transzkriptek között: 45–75 másodperc (véletlenszerű)

@@ -59,6 +59,9 @@ class DirectusClient:
         if "app_settings" not in existing:
             await self._create_app_settings_collection()
             logger.info("Created 'app_settings' collection")
+        if "jobs" not in existing:
+            await self._create_jobs_collection()
+            logger.info("Created 'jobs' collection")
 
     async def _get_existing_collections(self) -> set:
         try:
@@ -165,6 +168,27 @@ class DirectusClient:
         }
         await self._request("POST", "/collections", json=payload)
 
+    async def _create_jobs_collection(self):
+        payload = {
+            "collection": "jobs",
+            "meta": {"icon": "pending_actions", "display_template": "{{label}}"},
+            "schema": {},
+            "fields": [
+                {"field": "id", "type": "uuid", "meta": {"special": ["uuid"], "hidden": True, "readonly": True}, "schema": {"is_primary_key": True, "is_nullable": False}},
+                {"field": "queue", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Fetch", "value": "fetch"}, {"text": "AI", "value": "ai"}, {"text": "Whisper", "value": "whisper"}]}}, "schema": {"max_length": 50, "is_nullable": False}},
+                {"field": "type", "type": "string", "meta": {"interface": "input", "width": "half"}, "schema": {"max_length": 100, "is_nullable": False}},
+                {"field": "label", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
+                {"field": "status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Queued", "value": "queued"}, {"text": "Running", "value": "running"}, {"text": "Paused", "value": "paused"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}, {"text": "Cancelled", "value": "cancelled"}]}}, "schema": {"max_length": 50, "is_nullable": False, "default_value": "queued"}},
+                {"field": "sort_order", "type": "integer", "meta": {"interface": "input", "width": "half"}, "schema": {"is_nullable": True, "default_value": 0}},
+                {"field": "payload", "type": "json", "meta": {"interface": "input-code", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "created_at", "type": "timestamp", "meta": {"special": ["date-created"], "interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True, "default_value": "now()"}},
+                {"field": "started_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+                {"field": "finished_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+                {"field": "error_message", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
+            ],
+        }
+        await self._request("POST", "/collections", json=payload)
+
     # ---- App settings ----
 
     async def get_setting(self, key: str) -> Optional[str]:
@@ -182,6 +206,115 @@ class DirectusClient:
             return updated.get("data", {})
         created = await self._request("POST", "/items/app_settings", json={"key": key, "value": value})
         return created.get("data", {})
+
+    # ---- Jobs ----
+
+    async def create_job(self, queue: str, task: dict, label: Optional[str] = None, sort_order: Optional[int] = None) -> dict:
+        if sort_order is None:
+            sort_order = await self.next_job_sort_order(queue)
+        payload = {
+            "queue": queue,
+            "type": task.get("type"),
+            "label": label or await self.job_label(task),
+            "status": "queued",
+            "sort_order": sort_order,
+            "payload": task,
+        }
+        result = await self._request("POST", "/items/jobs", json=payload)
+        return result.get("data", {})
+
+    async def job_label(self, task: dict) -> str:
+        task_type = task.get("type") or "job"
+        if task_type == "channel":
+            channel = await self.get_channel(task.get("channel_id")) if task.get("channel_id") else None
+            name = (channel or {}).get("name") or (channel or {}).get("channel_handle") or task.get("channel_url") or task.get("channel_id") or ""
+            return f"Csatorna letöltés: {name}".strip()
+        if task_type == "refresh":
+            channel = await self.get_channel(task.get("channel_id")) if task.get("channel_id") else None
+            name = (channel or {}).get("name") or (channel or {}).get("channel_handle") or task.get("channel_id") or ""
+            return f"Csatorna frissítés: {name}".strip()
+        if task_type == "video":
+            return f"Videó letöltés: {task.get('video_url') or ''}".strip()
+        if task_type == "refresh_dates":
+            return "Hiányzó dátumok frissítése"
+        if task_type == "ai_notes":
+            return f"Hiányzó AI jegyzetek: {task.get('limit') or ''}".strip()
+        if task_type == "ai_note_video":
+            video = await self.get_video(task.get("video_id")) if task.get("video_id") else None
+            title = (video or {}).get("title") or (video or {}).get("video_id") or task.get("video_id") or ""
+            return f"AI jegyzet: {title}".strip()
+        return task_type
+
+    async def next_job_sort_order(self, queue: str) -> int:
+        params = (
+            f"?filter[queue][_eq]={queue}"
+            "&filter[status][_in]=queued,paused"
+            "&sort=-sort_order"
+            "&limit=1"
+            "&fields=sort_order"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        items = result.get("data", [])
+        if not items:
+            return 1000
+        return int(items[0].get("sort_order") or 0) + 1000
+
+    async def get_next_job(self, queue: str) -> Optional[dict]:
+        params = (
+            f"?filter[queue][_eq]={queue}"
+            "&filter[status][_eq]=queued"
+            "&sort=sort_order,created_at"
+            "&limit=1"
+            "&fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        items = result.get("data", [])
+        return items[0] if items else None
+
+    async def list_jobs(self, limit: int = 200) -> list:
+        params = (
+            f"?limit={limit}"
+            "&sort=queue,sort_order,created_at"
+            "&fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        return result.get("data", [])
+
+    async def count_jobs(self, queue: str, statuses: str = "queued") -> int:
+        params = (
+            f"?filter[queue][_eq]={queue}"
+            f"&filter[status][_in]={statuses}"
+            "&limit=1"
+            "&meta=filter_count"
+            "&fields=id"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        return result.get("meta", {}).get("filter_count", 0)
+
+    async def get_job(self, job_id: str) -> Optional[dict]:
+        try:
+            result = await self._request("GET", f"/items/jobs/{job_id}?fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message")
+            return result.get("data")
+        except Exception:
+            return None
+
+    async def update_job(self, job_id: str, data: dict) -> dict:
+        result = await self._request("PATCH", f"/items/jobs/{job_id}", json=data)
+        return result.get("data", {})
+
+    async def delete_job(self, job_id: str) -> None:
+        await self._request("DELETE", f"/items/jobs/{job_id}")
+
+    async def mark_stale_running_jobs_cancelled(self) -> int:
+        result = await self._request("GET", "/items/jobs?filter[status][_eq]=running&limit=-1&fields=id")
+        items = result.get("data", [])
+        for item in items:
+            await self.update_job(item["id"], {
+                "status": "cancelled",
+                "finished_at": None,
+                "error_message": "Fetcher restarted while this job was running",
+            })
+        return len(items)
 
     # ---- Channel CRUD ----
 

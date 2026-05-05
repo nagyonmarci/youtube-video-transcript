@@ -86,6 +86,10 @@ import App from '../App.jsx';
   .badge-done { background: rgba(76,175,80,0.2); color: #6fcf73; }
   .badge-pending { background: rgba(255,193,7,0.2); color: #ffc107; }
   .badge-processing { background: rgba(33,150,243,0.2); color: #64b5f6; }
+  .badge-queued { background: rgba(33,150,243,0.2); color: #64b5f6; }
+  .badge-running { background: rgba(33,150,243,0.2); color: #64b5f6; }
+  .badge-paused { background: rgba(255,193,7,0.2); color: #ffc107; }
+  .badge-cancelled { background: rgba(158,158,158,0.2); color: #bbb; }
   .badge-no_transcript { background: rgba(158,158,158,0.2); color: #bbb; }
   .badge-error { background: rgba(244,67,54,0.2); color: #f88; }
 
@@ -110,6 +114,21 @@ import App from '../App.jsx';
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
+  }
+  .main-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .main-nav button {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.82rem;
+  }
+  .main-nav button.active {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+    color: #fff;
   }
   .header-status-item {
     display: flex;
@@ -142,6 +161,293 @@ import App from '../App.jsx';
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+  }
+
+  .view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.75rem;
+  }
+  .view-header h2 {
+    font-size: 1rem;
+    font-weight: 700;
+  }
+  .view-header p {
+    color: var(--text2);
+    font-size: 0.82rem;
+    margin-top: 0.15rem;
+  }
+
+  /* --- Daily Updates --- */
+  .daily-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .daily-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .daily-controls input[type="date"],
+  .daily-controls select {
+    width: auto;
+    min-width: 150px;
+  }
+  .daily-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .daily-channel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .daily-channel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .daily-channel-header h3 {
+    font-size: 0.95rem;
+  }
+  .daily-channel-header span {
+    color: var(--text2);
+    font-size: 0.8rem;
+  }
+  .daily-video-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 0.75rem;
+  }
+  .daily-video-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.85rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem;
+    min-width: 0;
+  }
+  .daily-video-main {
+    min-width: 0;
+    flex: 1;
+  }
+  .daily-video-title {
+    color: #64b5f6;
+    font-weight: 700;
+    font-size: 0.92rem;
+    text-decoration: none;
+    line-height: 1.35;
+  }
+  .daily-video-title:hover { text-decoration: underline; }
+  .daily-video-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    color: var(--text2);
+    font-size: 0.75rem;
+    margin-top: 0.45rem;
+  }
+  .daily-summary {
+    margin-top: 0.65rem;
+    color: #ddd;
+    font-size: 0.86rem;
+    line-height: 1.55;
+  }
+  .daily-muted {
+    color: var(--text2);
+    font-style: italic;
+  }
+  .topic-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.65rem;
+  }
+  .topic-row span {
+    border: 1px solid rgba(100,181,246,0.35);
+    color: #90caf9;
+    border-radius: 999px;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.72rem;
+  }
+  .daily-list {
+    margin: 0.65rem 0 0;
+    padding-left: 1.1rem;
+    color: #ddd;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .daily-video-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 96px;
+    align-self: flex-start;
+  }
+  .daily-video-actions button {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.45rem;
+  }
+
+  /* --- Admin Dashboard --- */
+  .admin-dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(130px, 1fr));
+    gap: 0.75rem;
+  }
+  .metric-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem;
+  }
+  .metric-card span {
+    display: block;
+    color: var(--text2);
+    font-size: 0.78rem;
+    margin-bottom: 0.3rem;
+  }
+  .metric-card strong {
+    font-size: 1.35rem;
+  }
+  .admin-section {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+  }
+  .admin-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+  }
+  .admin-section-header h3 {
+    font-size: 0.95rem;
+  }
+  .admin-section-header span {
+    color: var(--text2);
+    font-size: 0.8rem;
+  }
+  .admin-section-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .process-panel {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .process-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.8rem;
+    min-width: 0;
+  }
+  .process-line h4 {
+    font-size: 0.86rem;
+    margin-bottom: 0.25rem;
+  }
+  .process-line p {
+    color: var(--text2);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .process-actions {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+    flex-shrink: 0;
+  }
+  .schedule-form {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .schedule-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: var(--text2);
+    font-size: 0.78rem;
+  }
+  .schedule-form input,
+  .schedule-form select {
+    width: 190px;
+  }
+  .job-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg2);
+  }
+  .job-table {
+    width: 100%;
+    min-width: 960px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.82rem;
+  }
+  .job-table th {
+    color: var(--text2);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.55rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .job-table td {
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    vertical-align: middle;
+  }
+  .job-table th:nth-child(1), .job-table td:nth-child(1) { width: 9%; }
+  .job-table th:nth-child(2), .job-table td:nth-child(2) { width: 43%; }
+  .job-table th:nth-child(3), .job-table td:nth-child(3) { width: 12%; }
+  .job-table th:nth-child(4), .job-table td:nth-child(4) { width: 13%; }
+  .job-table th:nth-child(5), .job-table td:nth-child(5) { width: 23%; }
+  .job-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .job-error {
+    color: #f88;
+    font-size: 0.74rem;
+    margin-top: 0.2rem;
+    overflow-wrap: anywhere;
+  }
+  .job-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+  }
+  .job-actions button {
+    font-size: 0.72rem;
+    padding: 0.18rem 0.42rem;
   }
 
   /* --- Top Actions (3 cards in a row, always equal width) --- */
@@ -403,7 +709,13 @@ import App from '../App.jsx';
   /* --- Responsive --- */
   @media (max-width: 768px) {
     .app-content { padding: 0.5rem; }
+    .app-header { align-items: flex-start; flex-wrap: wrap; }
+    .header-status { margin-left: 0; width: 100%; }
     .top-actions { grid-template-columns: 1fr; }
+    .metric-grid, .process-panel { grid-template-columns: 1fr; }
+    .daily-video-list { grid-template-columns: 1fr; }
+    .daily-video-card { flex-direction: column; }
+    .daily-video-actions { flex-direction: row; flex-wrap: wrap; }
     .channel-card { min-width: 100px; max-width: 160px; }
     .video-header { flex-direction: column; align-items: flex-start; }
     .video-search { width: 100%; }

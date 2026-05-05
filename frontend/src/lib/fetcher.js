@@ -40,6 +40,58 @@ export async function getStatus() {
   return res.json();
 }
 
+export async function getJobs() {
+  const res = await fetch(`${FETCHER_URL}/jobs`);
+  if (!res.ok) throw new Error(`jobs → ${res.status}`);
+  return res.json();
+}
+
+async function jobAction(jobId, action, body = null) {
+  const res = await fetch(`${FETCHER_URL}/jobs/${jobId}/${action}`, {
+    method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`jobs/${jobId}/${action} → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
+export function pauseJob(jobId) {
+  return jobAction(jobId, 'pause');
+}
+
+export function resumeJob(jobId) {
+  return jobAction(jobId, 'resume');
+}
+
+export function startJob(jobId) {
+  return jobAction(jobId, 'start');
+}
+
+export function moveJob(jobId, direction) {
+  return jobAction(jobId, 'move', { direction });
+}
+
+export async function deleteJob(jobId) {
+  const res = await fetch(`${FETCHER_URL}/jobs/${jobId}`, { method: 'DELETE' });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`jobs/${jobId} → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
 export async function refreshDates() {
   const res = await fetch(`${FETCHER_URL}/refresh-dates`, { method: 'POST' });
   if (!res.ok) throw new Error(`refresh-dates → ${res.status}`);

@@ -70,6 +70,70 @@ export async function getAllVideos({ sort = '-uploaded_at', page = 1, search = '
   return { items: data?.data ?? [], total: data?.meta?.filter_count ?? 0 };
 }
 
+export async function getDailyVideos(dateValue) {
+  const start = new Date(`${dateValue}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  const params = new URLSearchParams({
+    'filter[uploaded_at][_gte]': start.toISOString(),
+    'filter[uploaded_at][_lt]': end.toISOString(),
+    sort: '-uploaded_at',
+    limit: '-1',
+    'fields': VIDEO_FIELDS,
+  });
+  const data = await req('GET', `/items/videos?${params}`);
+  return data?.data ?? [];
+}
+
+async function countVideos(extraParams = {}) {
+  const params = new URLSearchParams({
+    limit: '1',
+    'meta': 'filter_count',
+    'fields': 'id',
+    ...extraParams,
+  });
+  const data = await req('GET', `/items/videos?${params}`);
+  return data?.meta?.filter_count ?? 0;
+}
+
+export async function getAdminStats() {
+  const today = new Date();
+  const dateValue = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, '0'),
+    String(today.getDate()).padStart(2, '0'),
+  ].join('-');
+  const start = new Date(`${dateValue}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  const [
+    totalVideos,
+    todayVideos,
+    errorVideos,
+    missingTranscripts,
+    missingAiNotes,
+  ] = await Promise.all([
+    countVideos(),
+    countVideos({
+      'filter[uploaded_at][_gte]': start.toISOString(),
+      'filter[uploaded_at][_lt]': end.toISOString(),
+    }),
+    countVideos({ 'filter[status][_eq]': 'error' }),
+    countVideos({
+      'filter[_or][0][transcript][_null]': 'true',
+      'filter[_or][1][status][_in]': 'pending,no_transcript,error',
+    }),
+    countVideos({
+      'filter[_and][0][transcript][_nnull]': 'true',
+      'filter[_and][1][summary][_null]': 'true',
+    }),
+  ]);
+
+  return { totalVideos, todayVideos, errorVideos, missingTranscripts, missingAiNotes };
+}
+
 // Non-paginated fetch for export (all videos for a channel)
 export async function getAllChannelVideos(channelId, { sort = '-uploaded_at' } = {}) {
   const params = new URLSearchParams({

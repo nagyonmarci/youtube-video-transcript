@@ -104,7 +104,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
           <h2>Csatorna admin</h2>
           <p>{channels.length} csatorna kezelése</p>
         </div>
-        <button onClick={onClose}>Bezár</button>
+        {onClose && <button onClick={onClose}>Bezár</button>}
       </div>
 
       <div className="admin-toolbar">

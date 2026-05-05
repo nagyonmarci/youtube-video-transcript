@@ -49,41 +49,41 @@ def extract_json(text: str) -> dict:
 
 
 def build_prompt(video: dict) -> str:
-    title = video.get("title") or "Ismeretlen cim"
+    title = video.get("title") or "Unknown title"
     url = video.get("url") or ""
     uploaded = video.get("uploaded_at") or ""
     duration = video.get("duration_seconds") or ""
     transcript = compact_transcript(video)
 
     return f"""
-Te egy magyar nyelvu, forrasalapu YouTube tudasgyujto asszisztens vagy.
-Keszits strukturalt jegyzetet az alabbi video transzkriptjebol.
+You are an English-language, source-grounded YouTube knowledge assistant.
+Create structured study notes from the video transcript below.
 
-Szabalyok:
-- Csak a transzkriptben es metaadatokban szereplo informaciokra tamaszkodj.
-- Ne talalj ki tenyallitasokat.
-- Magyarul valaszolj.
-- A valasz KIZAROLAG ervenyes JSON legyen, markdown kodblokk nelkul.
-- A "topics", "takeaways" es "questions" mezok tombok legyenek.
-- Az "obsidian_note" legyen Obsidian-kompatibilis markdown, belso szekciokkal.
-- Ha a transzkript idobelyegeket tartalmaz, a fontos allitasoknal tartsd meg oket zarojelben, pl. (12:34).
+Rules:
+- Work and answer in English, even when the transcript is in another language.
+- Use only information present in the transcript and metadata.
+- Do not invent facts, dates, claims, names, or conclusions.
+- The response must be ONLY valid JSON, without a markdown code block.
+- The "topics", "takeaways", and "questions" fields must be arrays.
+- The "obsidian_note" field must be Obsidian-compatible markdown with internal sections.
+- If the transcript contains timestamps, keep them next to important claims in parentheses, for example (12:34).
 
 JSON schema:
 {{
-  "summary": "5-8 mondatos tomor osszefoglalo",
-  "topics": ["tema 1", "tema 2"],
-  "takeaways": ["legfontosabb tanulsag 1", "legfontosabb tanulsag 2"],
-  "questions": ["jo visszakerdezo vagy tanulasi kerdes 1", "kerdes 2"],
-  "obsidian_note": "## Osszefoglalo\\n...\\n\\n## Temak\\n- ...\\n\\n## Tanulsagok\\n- ...\\n\\n## Kerdesek\\n- ..."
+  "summary": "A concise 5-8 sentence summary",
+  "topics": ["topic 1", "topic 2"],
+  "takeaways": ["key takeaway 1", "key takeaway 2"],
+  "questions": ["useful review or study question 1", "question 2"],
+  "obsidian_note": "## Summary\\n...\\n\\n## Topics\\n- ...\\n\\n## Takeaways\\n- ...\\n\\n## Questions\\n- ..."
 }}
 
 Video:
-Cim: {title}
+Title: {title}
 URL: {url}
-Feltoltve: {uploaded}
-Hossz masodpercben: {duration}
+Uploaded: {uploaded}
+Duration in seconds: {duration}
 
-Transzkript:
+Transcript:
 {transcript}
 """.strip()
 
@@ -96,7 +96,7 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
     messages = [
         {
             "role": "system",
-            "content": "Forrasalapu magyar jegyzetelo asszisztens vagy. Mindig ervenyes JSON-t adsz vissza.",
+            "content": "You are a source-grounded English note-taking assistant. Always return valid JSON only.",
         },
         {"role": "user", "content": build_prompt(video)},
     ]
