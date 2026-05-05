@@ -262,13 +262,13 @@ export default function AdminDashboard({
         <div className="process-panel">
           <StatusLine
             title="Fetcher"
-            queueSize={fetcherStatus?.queue_size ?? 0}
+            queueSize={fetcherStatus?.fetch_active_size ?? fetcherStatus?.queue_size ?? 0}
             current={fetcherStatus?.current_task}
             onStop={() => runAction(stopProcessing, 'Fetcher leállítva')}
           />
           <StatusLine
             title="AI jegyzetek"
-            queueSize={fetcherStatus?.ai_queue_size ?? 0}
+            queueSize={fetcherStatus?.ai_active_size ?? fetcherStatus?.ai_queue_size ?? 0}
             current={fetcherStatus?.current_ai_task}
             onStop={() => runAction(stopProcessing, 'AI sor leállítva')}
           />

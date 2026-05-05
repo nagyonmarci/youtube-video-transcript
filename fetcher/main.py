@@ -649,6 +649,41 @@ async def cancel_jobs(queue: Optional[str] = None, predicate=None) -> int:
     return removed
 
 
+async def cleanup_orphan_ai_pending_videos() -> int:
+    """Clear stale AI pending flags when no queued/running/paused AI job owns them."""
+    active_video_ids = await directus.get_ai_note_job_video_ids()
+    pending_videos = await directus.get_videos_with_ai_status("pending")
+    cleaned = 0
+    for video in pending_videos:
+        if video["id"] in active_video_ids:
+            continue
+        await directus.update_video(video["id"], {
+            "ai_notes_status": None,
+            "ai_notes_error": "AI job was not found; status cleared automatically",
+        })
+        cleaned += 1
+    if cleaned:
+        logger.info(f"Cleared {cleaned} orphan AI pending video statuses")
+    return cleaned
+
+
+async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Optional[str]) -> dict:
+    """Return current in-memory job info, falling back to a persisted running job."""
+    if in_memory_job_id:
+        return {**in_memory, "job_id": in_memory_job_id}
+    running = await directus.get_running_job(queue)
+    if not running:
+        return {}
+    payload = running.get("payload") or {}
+    return {
+        "type": running.get("type") or payload.get("type"),
+        "phase": "running",
+        "video": running.get("label"),
+        "video_id": payload.get("video_id"),
+        "job_id": running.get("id"),
+    }
+
+
 async def restart_ai_worker():
     """Cancel and recreate the AI worker."""
     global ai_worker_task
@@ -694,6 +729,7 @@ async def lifespan(app: FastAPI):
         cancelled = await directus.mark_stale_running_jobs_cancelled()
         if cancelled:
             logger.info(f"Marked {cancelled} stale running jobs as cancelled")
+        await cleanup_orphan_ai_pending_videos()
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
     await load_schedule_settings()
@@ -758,17 +794,23 @@ async def health():
         "status": "ok",
         "queue_size": await directus.count_jobs("fetch", "queued"),
         "ai_queue_size": await directus.count_jobs("ai", "queued"),
+        "fetch_active_size": await directus.count_jobs("fetch", "queued,running,paused"),
+        "ai_active_size": await directus.count_jobs("ai", "queued,running,paused"),
     }
 
 
 @app.get("/status")
 async def status():
+    fetch_current = await current_job_snapshot("fetch", current_task_info, current_job_id)
+    ai_current = await current_job_snapshot("ai", current_ai_task_info, current_ai_job_id)
     return {
         "queue_size": await directus.count_jobs("fetch", "queued"),
         "ai_queue_size": await directus.count_jobs("ai", "queued"),
+        "fetch_active_size": await directus.count_jobs("fetch", "queued,running,paused"),
+        "ai_active_size": await directus.count_jobs("ai", "queued,running,paused"),
         "stop_flag": stop_flag,
-        "current_task": {**current_task_info, **({"job_id": current_job_id} if current_job_id else {})},
-        "current_ai_task": {**current_ai_task_info, **({"job_id": current_ai_job_id} if current_ai_job_id else {})},
+        "current_task": fetch_current,
+        "current_ai_task": ai_current,
         "schedule": {
             "cron": REFRESH_CRON,
             "timezone": SCHEDULER_TIMEZONE,
@@ -790,6 +832,12 @@ async def list_jobs():
             "ai": current_ai_job_id,
         },
     }
+
+
+@app.post("/ai-notes/cleanup-stale")
+async def cleanup_stale_ai_notes():
+    cleaned = await cleanup_orphan_ai_pending_videos()
+    return {"cleaned": cleaned}
 
 
 @app.post("/jobs/{job_id}/pause")

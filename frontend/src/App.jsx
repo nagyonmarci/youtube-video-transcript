@@ -133,7 +133,9 @@ export default function App() {
 
   const whisperRunning = whisperStatus && (whisperStatus.queue_size > 0 || whisperStatus.batch_running);
   const fetcherRunning = fetcherStatus && (
-    fetcherStatus.queue_size > 0
+    fetcherStatus.fetch_active_size > 0
+    || fetcherStatus.ai_active_size > 0
+    || fetcherStatus.queue_size > 0
     || fetcherStatus.ai_queue_size > 0
     || Boolean(fetcherStatus.current_task?.type)
     || Boolean(fetcherStatus.current_ai_task?.type)
@@ -159,7 +161,7 @@ export default function App() {
                 Feldolgozás: {fetcherStatus.queue_size} a sorban
                 {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
                 {fetcherStatus.current_task?.video && ` • ${fetcherStatus.current_task.video}`}
-                {fetcherStatus.ai_queue_size > 0 && ` • AI sor: ${fetcherStatus.ai_queue_size}`}
+                {(fetcherStatus.ai_active_size > 0 || fetcherStatus.ai_queue_size > 0) && ` • AI aktív: ${fetcherStatus.ai_active_size ?? fetcherStatus.ai_queue_size}`}
                 {fetcherStatus.current_ai_task?.phase && ` • ${fetcherStatus.current_ai_task.phase}`}
                 {fetcherStatus.current_ai_task?.video && ` • ${fetcherStatus.current_ai_task.video}`}
               </span>

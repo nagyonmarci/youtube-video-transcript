@@ -291,6 +291,34 @@ class DirectusClient:
         result = await self._request("GET", f"/items/jobs{params}")
         return result.get("meta", {}).get("filter_count", 0)
 
+    async def get_running_job(self, queue: str) -> Optional[dict]:
+        params = (
+            f"?filter[queue][_eq]={queue}"
+            "&filter[status][_eq]=running"
+            "&sort=started_at"
+            "&limit=1"
+            "&fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        items = result.get("data", [])
+        return items[0] if items else None
+
+    async def get_ai_note_job_video_ids(self) -> set[str]:
+        params = (
+            "?filter[queue][_eq]=ai"
+            "&filter[status][_in]=queued,running,paused"
+            "&filter[type][_eq]=ai_note_video"
+            "&limit=-1"
+            "&fields=payload"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        ids = set()
+        for item in result.get("data", []):
+            video_id = (item.get("payload") or {}).get("video_id")
+            if video_id:
+                ids.add(video_id)
+        return ids
+
     async def get_job(self, job_id: str) -> Optional[dict]:
         try:
             result = await self._request("GET", f"/items/jobs/{job_id}?fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message")
@@ -389,6 +417,11 @@ class DirectusClient:
             "&sort=-uploaded_at"
             "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"
         )
+        result = await self._request("GET", f"/items/videos{params}")
+        return result.get("data", [])
+
+    async def get_videos_with_ai_status(self, status: str) -> list:
+        params = f"?filter[ai_notes_status][_eq]={status}&limit=-1&fields=id,video_id,title,ai_notes_status"
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
