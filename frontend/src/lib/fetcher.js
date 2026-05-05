@@ -69,6 +69,19 @@ export async function generateAiNoteForVideo(videoId) {
   return res.json();
 }
 
+export async function deleteAiNoteForVideo(videoId) {
+  const res = await fetch(`${FETCHER_URL}/ai-notes/${videoId}`, { method: 'DELETE' });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`delete ai-notes/${videoId} → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
 export async function getSchedule() {
   const res = await fetch(`${FETCHER_URL}/schedule`);
   if (!res.ok) throw new Error(`schedule → ${res.status}`);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateAiNoteForVideo } from '../lib/fetcher.js';
+import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 
 function formatDuration(seconds) {
@@ -89,6 +89,19 @@ export default function VideoTable({
       await generateAiNoteForVideo(video.id);
     } catch (err) {
       alert('AI jegyzet hiba: ' + err.message);
+    } finally {
+      setAiBusyId(null);
+    }
+  }
+
+  async function handleDeleteAiNote(e, video) {
+    e.stopPropagation();
+    if (!confirm(`Töröljük az AI jegyzetet ehhez a videóhoz?\n\n${video.title || video.video_id}`)) return;
+    setAiBusyId(video.id);
+    try {
+      await deleteAiNoteForVideo(video.id);
+    } catch (err) {
+      alert('AI jegyzet törlés hiba: ' + err.message);
     } finally {
       setAiBusyId(null);
     }
@@ -195,6 +208,16 @@ export default function VideoTable({
                               onClick={e => handleGenerateAiNote(e, video)}
                             >
                               {video.ai_notes_status === 'done' ? 'AI újra' : 'AI jegyzet'}
+                            </button>
+                          )}
+                          {(video.summary || video.ai_notes_status) && (
+                            <button
+                              className="btn-sm danger"
+                              disabled={aiBusyId === video.id}
+                              title="A generált AI jegyzet mezők törlése"
+                              onClick={e => handleDeleteAiNote(e, video)}
+                            >
+                              AI törlés
                             </button>
                           )}
                           <button

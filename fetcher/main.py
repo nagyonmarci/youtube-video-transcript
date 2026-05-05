@@ -45,9 +45,12 @@ directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
 
 # Worker state
 task_queue: asyncio.Queue = asyncio.Queue()
+ai_task_queue: asyncio.Queue = asyncio.Queue()
 worker_task: Optional[asyncio.Task] = None
+ai_worker_task: Optional[asyncio.Task] = None
 stop_flag = False
 current_task_info: dict = {}
+current_ai_task_info: dict = {}
 scheduler: Optional[AsyncIOScheduler] = None
 
 
@@ -137,15 +140,37 @@ async def worker_loop():
                 await process_refresh_task(task)
             elif task_type == "refresh_dates":
                 await process_refresh_dates_task()
-            elif task_type == "ai_notes":
-                await process_ai_notes_task(task)
-            elif task_type == "ai_note_video":
-                await process_single_ai_note_task(task)
         except Exception as e:
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
         finally:
             task_queue.task_done()
             current_task_info = {}
+
+
+async def ai_worker_loop():
+    """Background worker for AI notes so LLM calls do not block fetching."""
+    global stop_flag, current_ai_task_info
+    while True:
+        try:
+            task = await asyncio.wait_for(ai_task_queue.get(), timeout=1.0)
+        except asyncio.TimeoutError:
+            continue
+
+        if stop_flag:
+            ai_task_queue.task_done()
+            continue
+
+        task_type = task.get("type")
+        try:
+            if task_type == "ai_notes":
+                await process_ai_notes_task(task)
+            elif task_type == "ai_note_video":
+                await process_single_ai_note_task(task)
+        except Exception as e:
+            logger.error(f"AI worker error on task {task}: {e}", exc_info=True)
+        finally:
+            ai_task_queue.task_done()
+            current_ai_task_info = {}
 
 
 async def process_channel_task(task: dict):
@@ -230,7 +255,7 @@ async def process_channel_task(task: dict):
             if directus_video_id:
                 await directus.update_video(directus_video_id, update_data)
                 if transcript and AI_NOTES_AUTO:
-                    await generate_and_store_ai_notes(directus_video_id, {**video_record, **update_data})
+                    await enqueue_ai_note(directus_video_id)
 
             logger.info(f"Video {video['video_id']}: {'done' if transcript else 'no_transcript'}")
 
@@ -267,9 +292,11 @@ async def process_single_video_task(task: dict):
 
     # Check if already exists
     existing = await directus.find_video_by_yt_id(yt_id)
-    if existing:
+    if existing and existing.get("transcript"):
         logger.info(f"Video {yt_id} already exists, skipping")
         return
+    if existing:
+        logger.info(f"Video {yt_id} already exists without transcript, retrying existing record")
 
     # Get video metadata via yt-dlp
     loop = asyncio.get_event_loop()
@@ -278,7 +305,7 @@ async def process_single_video_task(task: dict):
     uploaded_at = parse_uploaded_at(info) if info else None
 
     # Resolve channel: use passed channel_id, or detect from yt-dlp metadata
-    channel_id = task.get("channel_id")
+    channel_id = task.get("channel_id") or (existing or {}).get("channel_id")
     if not channel_id and info:
         yt_channel_url = info.get("uploader_url") or info.get("channel_url") or ""
         yt_channel_name = info.get("channel") or info.get("uploader") or ""
@@ -305,15 +332,19 @@ async def process_single_video_task(task: dict):
 
     video_data = {
         "video_id": yt_id,
-        "title": info.get("title", yt_id),
-        "url": video_url,
-        "duration_seconds": info.get("duration"),
-        "uploaded_at": uploaded_at,
+        "title": info.get("title") or (existing or {}).get("title") or yt_id,
+        "url": video_url or (existing or {}).get("url"),
+        "duration_seconds": info.get("duration") or (existing or {}).get("duration_seconds"),
+        "uploaded_at": uploaded_at or (existing or {}).get("uploaded_at"),
         "channel_id": channel_id,
         "status": "pending",
     }
-    created = await directus.create_video(video_data)
-    directus_video_id = created.get("id")
+    if existing:
+        directus_video_id = existing.get("id")
+        await directus.update_video(directus_video_id, video_data)
+    else:
+        created = await directus.create_video(video_data)
+        directus_video_id = created.get("id")
 
     # Fetch transcript
     transcript, transcript_timed = await loop.run_in_executor(None, fetch_transcript_variants, yt_id)
@@ -327,7 +358,7 @@ async def process_single_video_task(task: dict):
     if directus_video_id:
         await directus.update_video(directus_video_id, update_data)
         if transcript and AI_NOTES_AUTO:
-            await generate_and_store_ai_notes(directus_video_id, {**video_data, **update_data})
+            await enqueue_ai_note(directus_video_id)
 
     logger.info(f"Single video {yt_id}: {'done' if transcript else 'no_transcript'}")
 
@@ -383,6 +414,13 @@ async def process_refresh_dates_task():
 
 async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bool:
     """Generate and persist AI notebook fields for a single Directus video."""
+    global current_ai_task_info
+    current_ai_task_info = {
+        "type": "ai_note_video",
+        "phase": "AI jegyzet generálása",
+        "video_id": directus_video_id,
+        "video": video.get("title") or video.get("video_id") or directus_video_id,
+    }
     await directus.update_video(directus_video_id, {
         "ai_notes_status": "pending",
         "ai_notes_error": None,
@@ -426,7 +464,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bo
 
 async def process_ai_notes_task(task: dict):
     """Generate AI notes for videos that have transcripts but no summary."""
-    global current_task_info
+    global current_ai_task_info
     limit = max(1, min(int(task.get("limit") or AI_NOTES_BATCH_LIMIT), 100))
     videos = await directus.get_videos_missing_ai_notes(limit)
     logger.info(f"Generating AI notes for {len(videos)} videos")
@@ -436,9 +474,10 @@ async def process_ai_notes_task(task: dict):
     for i, video in enumerate(videos):
         if stop_flag:
             break
-        current_task_info = {
+        current_ai_task_info = {
             "type": "ai_notes",
             "phase": f"{i+1}/{len(videos)}",
+            "video_id": video.get("id"),
             "video": video.get("title") or video.get("video_id"),
         }
         ok = await generate_and_store_ai_notes(video["id"], video)
@@ -452,7 +491,7 @@ async def process_ai_notes_task(task: dict):
 
 async def process_single_ai_note_task(task: dict):
     """Generate AI notes for a selected video."""
-    global current_task_info
+    global current_ai_task_info
     video_id = task["video_id"]
     video = await directus.get_video(video_id)
     if not video:
@@ -465,12 +504,68 @@ async def process_single_ai_note_task(task: dict):
         })
         return
 
-    current_task_info = {
+    current_ai_task_info = {
         "type": "ai_note_video",
         "phase": "generating",
+        "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
     }
     await generate_and_store_ai_notes(video_id, video)
+
+
+async def enqueue_ai_note(video_id: str):
+    """Mark a video as queued for AI notes and enqueue it on the AI worker."""
+    await directus.update_video(video_id, {
+        "ai_notes_status": "pending",
+        "ai_notes_error": None,
+    })
+    await ai_task_queue.put({"type": "ai_note_video", "video_id": video_id})
+
+
+async def clear_ai_notes(video_id: str) -> dict:
+    """Remove generated AI notebook fields from a video without touching transcript data."""
+    return await directus.update_video(video_id, {
+        "summary": None,
+        "topics": None,
+        "takeaways": None,
+        "questions": None,
+        "obsidian_note": None,
+        "ai_notes_status": None,
+        "ai_notes_generated_at": None,
+        "ai_notes_error": None,
+    })
+
+
+async def drain_queue(queue: asyncio.Queue, predicate=None) -> int:
+    """Drain queued items. Return count of removed items."""
+    removed = 0
+    kept = []
+    while not queue.empty():
+        try:
+            task = queue.get_nowait()
+            if predicate is None or predicate(task):
+                removed += 1
+                queue.task_done()
+            else:
+                kept.append(task)
+                queue.task_done()
+        except asyncio.QueueEmpty:
+            break
+    for task in kept:
+        await queue.put(task)
+    return removed
+
+
+async def restart_ai_worker():
+    """Cancel and recreate the AI worker."""
+    global ai_worker_task
+    if ai_worker_task and not ai_worker_task.done():
+        ai_worker_task.cancel()
+        try:
+            await ai_worker_task
+        except asyncio.CancelledError:
+            pass
+    ai_worker_task = asyncio.create_task(ai_worker_loop())
 
 
 async def daily_refresh():
@@ -489,7 +584,7 @@ async def daily_refresh():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global worker_task, scheduler
+    global worker_task, ai_worker_task, scheduler
 
     # Wait for Directus to be ready
     logger.info("Waiting for Directus...")
@@ -509,6 +604,7 @@ async def lifespan(app: FastAPI):
 
     # Start background worker
     worker_task = asyncio.create_task(worker_loop())
+    ai_worker_task = asyncio.create_task(ai_worker_loop())
 
     # Start scheduler for daily refresh
     start_refresh_scheduler()
@@ -518,6 +614,8 @@ async def lifespan(app: FastAPI):
     # Cleanup
     if worker_task:
         worker_task.cancel()
+    if ai_worker_task:
+        ai_worker_task.cancel()
     if scheduler:
         scheduler.shutdown(wait=False)
 
@@ -556,15 +654,17 @@ class AiNotesRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "queue_size": task_queue.qsize()}
+    return {"status": "ok", "queue_size": task_queue.qsize(), "ai_queue_size": ai_task_queue.qsize()}
 
 
 @app.get("/status")
 async def status():
     return {
         "queue_size": task_queue.qsize(),
+        "ai_queue_size": ai_task_queue.qsize(),
         "stop_flag": stop_flag,
         "current_task": current_task_info,
+        "current_ai_task": current_ai_task_info,
         "schedule": {
             "cron": REFRESH_CRON,
             "timezone": SCHEDULER_TIMEZONE,
@@ -675,7 +775,7 @@ async def refresh_dates():
 async def ai_notes(request: AiNotesRequest):
     """Queue AI note generation for videos that have transcripts but no summary."""
     limit = max(1, min(request.limit, 100))
-    await task_queue.put({"type": "ai_notes", "limit": limit})
+    await ai_task_queue.put({"type": "ai_notes", "limit": limit})
     return {"queued": True, "limit": limit}
 
 
@@ -688,45 +788,67 @@ async def ai_note_video(video_id: str):
     if not (video.get("transcript") or video.get("transcript_timed")):
         raise HTTPException(status_code=400, detail="Video has no transcript")
 
-    await directus.update_video(video_id, {
-        "ai_notes_status": "pending",
-        "ai_notes_error": None,
-    })
-    await task_queue.put({"type": "ai_note_video", "video_id": video_id})
+    await enqueue_ai_note(video_id)
     return {"queued": True, "video_id": video_id}
+
+
+@app.delete("/ai-notes/{video_id}")
+async def delete_ai_note_video(video_id: str):
+    """Delete generated AI note fields for one Directus video."""
+    global ai_worker_task
+    video = await directus.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    removed = await drain_queue(
+        ai_task_queue,
+        lambda task: task.get("type") == "ai_note_video" and task.get("video_id") == video_id,
+    )
+    cancelled_current = False
+    if current_ai_task_info.get("video_id") == video_id and ai_worker_task and not ai_worker_task.done():
+        await restart_ai_worker()
+        cancelled_current = True
+    await clear_ai_notes(video_id)
+    return {"deleted": True, "video_id": video_id, "removed": removed, "cancelled_current": cancelled_current}
 
 
 @app.post("/stop")
 async def stop_processing():
     """Clear the task queue, cancel current processing, then keep the worker ready."""
-    global stop_flag, worker_task
+    global stop_flag, worker_task, ai_worker_task
     stop_flag = True
     cancelled_current = False
+    cancelled_ai_current = False
 
     if worker_task and not worker_task.done():
         worker_task.cancel()
         cancelled_current = True
+    if ai_worker_task and not ai_worker_task.done():
+        ai_worker_task.cancel()
+        cancelled_ai_current = True
 
     # Drain queue
-    drained = 0
-    while not task_queue.empty():
-        try:
-            task_queue.get_nowait()
-            task_queue.task_done()
-            drained += 1
-        except asyncio.QueueEmpty:
-            break
+    drained = await drain_queue(task_queue)
+    ai_drained = await drain_queue(ai_task_queue)
 
     stop_flag = False
     worker_task = asyncio.create_task(worker_loop())
-    return {"stopped": True, "drained": drained, "cancelled_current": cancelled_current}
+    ai_worker_task = asyncio.create_task(ai_worker_loop())
+    return {
+        "stopped": True,
+        "drained": drained,
+        "ai_drained": ai_drained,
+        "cancelled_current": cancelled_current,
+        "cancelled_ai_current": cancelled_ai_current,
+    }
 
 
 @app.post("/resume")
 async def resume_processing():
     """Resume processing after stop."""
-    global stop_flag, worker_task
+    global stop_flag, worker_task, ai_worker_task
     stop_flag = False
     if not worker_task or worker_task.done():
         worker_task = asyncio.create_task(worker_loop())
+    if not ai_worker_task or ai_worker_task.done():
+        ai_worker_task = asyncio.create_task(ai_worker_loop())
     return {"resumed": True}

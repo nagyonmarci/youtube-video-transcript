@@ -78,6 +78,8 @@ A `certs/` könyvtár lokális titkokat tartalmaz, ezért nincs verziókezelve.
 - **Export** – videónként, csatornánként, összesítve – TXT, MD vagy Obsidian-kompatibilis MD formátum
 - **Obsidian tudásgyűjtő export** – YAML frontmatter, YouTube forráslink, csatornatag, jegyzet szekció és kattintható időbélyeges transzkript
 - **AI jegyzetek** – videónként generált összefoglaló, témák, tanulságok, kérdések és Obsidian-kompatibilis jegyzet Ollamával
+- **Külön AI feldolgozási sor** – az LLM jegyzetgenerálás nem blokkolja a videólista/frissítés/transzkript fetch folyamatot
+- **Admin és státusz nézet** – látszik a normál feldolgozási sor, az AI sor és az aktuálisan futó feladat; a futó vagy beragadt munkák leállíthatók
 - **Napi automatikus frissítés** – új videók letöltése, alapból reggel 7-kor Europe/Budapest időzónában
 
 ## Obsidian export
@@ -98,6 +100,8 @@ Modellcsere után indítsd újra a fetchert:
 ```bash
 docker compose up -d fetcher
 ```
+
+Az AI jegyzetek külön háttérsoron futnak. A transzkript letöltése után a videó csak bekerül az AI sorba, ezért a fetcher tovább tud dolgozni a következő videókon. A frontend státuszsávja külön mutatja a normál sort és az `AI sor` állapotát; a `Stop` gomb mindkét sort leállítja és kiüríti.
 
 ## Rate limiting
 
