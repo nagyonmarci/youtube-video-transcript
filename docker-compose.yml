@@ -59,6 +59,7 @@ services:
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-gemma4:31b}
       AI_NOTES_AUTO: ${AI_NOTES_AUTO:-true}
       AI_NOTES_BATCH_LIMIT: ${AI_NOTES_BATCH_LIMIT:-10}
+      AI_NOTES_MAX_BATCH_LIMIT: ${AI_NOTES_MAX_BATCH_LIMIT:-20000}
 
   whisper:
     build: ./whisper

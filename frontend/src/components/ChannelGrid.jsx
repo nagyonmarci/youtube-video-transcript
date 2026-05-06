@@ -13,7 +13,7 @@ const SORT_OPTIONS = [
   { value: 'count_asc',  label: 'Legkevesebb videó' },
 ];
 
-export default function ChannelGrid({ channels, selectedChannel, onSelect, onChannelsChanged }) {
+export default function ChannelGrid({ channels, totalVideos, selectedChannel, onSelect, onChannelsChanged }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [search, setSearch] = useState('');
@@ -99,7 +99,7 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
     }
   }
 
-  const totalVideos = channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
+  const displayedTotalVideos = totalVideos ?? channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
 
   return (
     <div className="channel-section">
@@ -139,7 +139,7 @@ export default function ChannelGrid({ channels, selectedChannel, onSelect, onCha
           <div className="channel-card-name">Összes</div>
           <div className="channel-card-meta">
             <span style={{ fontSize: '0.75rem', color: 'var(--text2)' }}>
-              {totalVideos} videó
+              {displayedTotalVideos} videó
             </span>
           </div>
         </div>

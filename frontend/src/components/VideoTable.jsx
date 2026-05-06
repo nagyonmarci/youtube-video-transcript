@@ -43,6 +43,7 @@ export default function VideoTable({
   onSortChange,
   loading,
   onSelectVideo,
+  onVideosChanged,
   selectedChannel,
 }) {
   const searchInputRef = useRef();
@@ -100,6 +101,7 @@ export default function VideoTable({
     setAiBusyId(video.id);
     try {
       await deleteAiNoteForVideo(video.id);
+      await onVideosChanged?.();
     } catch (err) {
       alert('AI jegyzet törlés hiba: ' + err.message);
     } finally {

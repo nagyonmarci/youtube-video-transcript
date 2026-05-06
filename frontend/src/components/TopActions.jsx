@@ -240,8 +240,11 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
           onClick={async () => {
             setBusy(true);
             try {
-              await generateAiNotes(10);
-              showMsg('AI jegyzet generálás sorba állítva');
+              const result = await generateAiNotes();
+              showMsg(result?.existing
+                ? `AI jegyzet batch már fut (${result.job_id?.slice(0, 8)})`
+                : `${result?.limit ?? ''} AI jegyzet generálás sorba állítva`
+              );
             } catch (e) {
               showMsg('AI jegyzet hiba: ' + e.message, true);
             } finally {

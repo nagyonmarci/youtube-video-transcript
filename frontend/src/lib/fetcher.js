@@ -98,7 +98,7 @@ export async function refreshDates() {
   return res.json();
 }
 
-export async function generateAiNotes(limit = 10) {
+export async function generateAiNotes(limit = 20000) {
   const res = await fetch(`${FETCHER_URL}/ai-notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

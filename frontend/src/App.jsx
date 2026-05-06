@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getChannels, getVideos, getAllVideos } from './lib/directus.js';
+import { getChannels, getVideos, getAllVideos, getTotalVideoCount } from './lib/directus.js';
 import {
   stopProcessing, getStatus,
   getWhisperStatus, startWhisperBatch, stopWhisper, resumeWhisper,
@@ -23,6 +23,7 @@ export default function App() {
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [allVideosCount, setAllVideosCount] = useState(0);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState('-uploaded_at');
   const [search, setSearch] = useState('');
@@ -35,8 +36,12 @@ export default function App() {
 
   const loadChannels = useCallback(async () => {
     try {
-      const data = await getChannels();
+      const [data, total] = await Promise.all([
+        getChannels(),
+        getTotalVideoCount(),
+      ]);
       setChannels(prev => keepIfSame(prev, data));
+      setAllVideosCount(prev => (prev === total ? prev : total));
       setSelectedChannel(prev => {
         if (!prev) return prev;
         const next = data.find(ch => ch.id === prev.id) || null;
@@ -210,6 +215,7 @@ export default function App() {
           <>
             <ChannelGrid
               channels={channels}
+              totalVideos={allVideosCount}
               selectedChannel={selectedChannel}
               onSelect={handleSelectChannel}
               onChannelsChanged={async () => {
@@ -229,6 +235,7 @@ export default function App() {
               onSortChange={handleSortChange}
               loading={loading}
               onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
+              onVideosChanged={() => loadVideos(false)}
               selectedChannel={selectedChannel}
             />
           </>

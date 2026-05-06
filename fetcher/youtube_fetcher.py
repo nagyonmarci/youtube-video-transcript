@@ -105,6 +105,53 @@ def fetch_video_info(video_url_or_id: str) -> dict:
     return {}
 
 
+def fetch_video_date_info(video_url_or_id: str) -> dict:
+    """Fetch only date/duration metadata for one video."""
+    if re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_url_or_id):
+        video_url = f"https://www.youtube.com/watch?v={video_url_or_id}"
+    else:
+        video_url = video_url_or_id
+
+    cmd = [
+        "yt-dlp",
+        "--print",
+        "%(upload_date|)s\t%(release_date|)s\t%(timestamp|)s\t%(release_timestamp|)s\t%(duration|)s",
+        "--no-warnings",
+        "--skip-download",
+        "--no-playlist",
+        video_url,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        logger.debug(f"yt-dlp date metadata fetch failed for {video_url}: {e}")
+        return {}
+
+    if result.returncode != 0:
+        error = (result.stderr or "").strip().splitlines()
+        if error:
+            logger.debug(f"yt-dlp date metadata unavailable for {video_url}: {error[-1]}")
+        return {}
+
+    line = (result.stdout or "").splitlines()
+    if not line:
+        return {}
+
+    upload_date, release_date, timestamp, release_timestamp, duration = (line[-1].split("\t") + [""] * 5)[:5]
+    info = {
+        "upload_date": upload_date or None,
+        "release_date": release_date or None,
+        "timestamp": timestamp or None,
+        "release_timestamp": release_timestamp or None,
+    }
+    if duration:
+        try:
+            info["duration"] = int(float(duration))
+        except ValueError:
+            pass
+    return info
+
+
 def extract_handle_from_url(url: str) -> str:
     """Extract a human-readable handle from a YouTube channel URL."""
     # @handle

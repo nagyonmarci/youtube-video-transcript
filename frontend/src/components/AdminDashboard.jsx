@@ -199,8 +199,8 @@ export default function AdminDashboard({
   async function runAction(action, successText) {
     setBusy(true);
     try {
-      await action();
-      showMsg(successText);
+      const result = await action();
+      showMsg(typeof successText === 'function' ? successText(result) : successText);
       await Promise.all([loadAdminData(), onStatusChanged?.()]);
     } catch (e) {
       showMsg('Hiba: ' + e.message, true);
@@ -223,13 +223,14 @@ export default function AdminDashboard({
 
   const channelCount = channels.length;
   const totalChannelVideos = channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
+  const displayedTotalVideos = stats?.totalVideos ?? totalChannelVideos;
 
   return (
     <section className="admin-dashboard">
       <div className="view-header">
         <div>
           <h2>Admin</h2>
-          <p>{channelCount} csatorna · {totalChannelVideos} videó</p>
+          <p>{channelCount} csatorna · {displayedTotalVideos} videó</p>
         </div>
       </div>
 
@@ -242,7 +243,7 @@ export default function AdminDashboard({
         </div>
         <div className="metric-card">
           <span>Összes videó</span>
-          <strong>{stats?.totalVideos ?? totalChannelVideos}</strong>
+          <strong>{displayedTotalVideos}</strong>
         </div>
         <div className="metric-card">
           <span>Transzkript hiány</span>
@@ -265,7 +266,15 @@ export default function AdminDashboard({
             <button disabled={busy} onClick={() => runAction(refreshDates, 'Dátum frissítés sorba állítva')}>
               Hiányzó dátumok
             </button>
-            <button disabled={busy} onClick={() => runAction(() => generateAiNotes(10), 'AI jegyzetek sorba állítva')}>
+            <button
+              disabled={busy}
+              onClick={() => runAction(
+                () => generateAiNotes(stats?.missingAiNotes || 20000),
+                result => result?.existing
+                  ? `AI jegyzet batch már fut (${result.job_id?.slice(0, 8)})`
+                  : `${result?.limit ?? stats?.missingAiNotes ?? ''} AI jegyzet sorba állítva`
+              )}
+            >
               Hiányzó AI
             </button>
           </div>
