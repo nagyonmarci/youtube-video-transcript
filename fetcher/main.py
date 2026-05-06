@@ -23,6 +23,7 @@ from youtube_fetcher import (
     fetch_channel_videos,
     fetch_channel_name,
     fetch_video_info,
+    fetch_video_date_info,
     fetch_transcript_variants,
     parse_uploaded_at,
     parse_channel_input,
@@ -262,10 +263,10 @@ async def process_channel_task(task: dict):
             return
 
         # Get existing video IDs to avoid duplicates
-        existing = set()
+        existing = {}
         if channel_id:
             existing_videos = await directus.get_videos_by_channel(channel_id)
-            existing = {v["video_id"] for v in existing_videos}
+            existing = {v["video_id"]: v for v in existing_videos}
 
         new_videos = [v for v in videos if v["video_id"] not in existing]
         logger.info(f"Channel {channel_url}: {len(videos)} total, {len(new_videos)} new")
@@ -273,6 +274,22 @@ async def process_channel_task(task: dict):
         # Update video count
         if channel_id:
             await directus.update_channel(channel_id, {"video_count": len(videos)})
+
+        # Backfill upload dates for already stored videos whenever the channel list has them.
+        # This keeps regular channel refreshes from leaving old rows permanently date-less.
+        if existing:
+            by_video_id = {video["video_id"]: video for video in videos}
+            backfilled = 0
+            for yt_id, stored_video in existing.items():
+                if stored_video.get("uploaded_at"):
+                    continue
+                uploaded_at = (by_video_id.get(yt_id) or {}).get("uploaded_at")
+                if not uploaded_at:
+                    continue
+                await directus.update_video(stored_video["id"], {"uploaded_at": uploaded_at})
+                backfilled += 1
+            if backfilled:
+                logger.info(f"Backfilled upload dates for {backfilled} existing videos")
 
         # Process each new video
         for i, video in enumerate(new_videos):
@@ -452,18 +469,25 @@ async def process_refresh_dates_task():
         logger.info("No videos with missing dates")
         return
 
-    logger.info(f"Refreshing dates for {len(videos)} videos")
+    total = len(videos)
+    logger.info(f"Refreshing dates for {total} videos")
     loop = asyncio.get_event_loop()
+
+    updated = 0
+    metadata_missing = 0
+    date_missing = 0
 
     for i, video in enumerate(videos):
         if stop_flag:
             break
 
         yt_id = video["video_id"]
-        current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{len(videos)}", "video": yt_id}
+        current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{total}", "video": yt_id}
 
-        info = await loop.run_in_executor(None, fetch_video_info, yt_id)
+        info = await loop.run_in_executor(None, fetch_video_date_info, yt_id)
         if not info:
+            logger.warning(f"No metadata available for {yt_id} (members-only/private/deleted/geo-blocked)")
+            metadata_missing += 1
             continue
 
         uploaded_at = parse_uploaded_at(info)
@@ -471,8 +495,16 @@ async def process_refresh_dates_task():
         if uploaded_at:
             await directus.update_video(video["id"], {"uploaded_at": uploaded_at})
             logger.info(f"Updated date for {yt_id}: {uploaded_at}")
+            updated += 1
+        else:
+            logger.warning(f"Metadata fetched but no parseable date for {yt_id}")
+            date_missing += 1
 
-    logger.info("Date refresh complete")
+    checked = updated + metadata_missing + date_missing
+    logger.info(
+        f"Date refresh complete: checked={checked} updated={updated} "
+        f"metadata_missing={metadata_missing} date_missing={date_missing}"
+    )
 
 
 async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bool:
@@ -1035,8 +1067,11 @@ async def refresh_channel(channel_id: str):
 @app.post("/refresh-dates")
 async def refresh_dates():
     """Queue a task to fetch missing upload dates for all videos."""
-    await enqueue_fetch_job({"type": "refresh_dates"})
-    return {"queued": True}
+    existing = await directus.get_active_job_by_type("fetch", "refresh_dates")
+    if existing:
+        return {"queued": False, "existing": True, "job_id": existing["id"]}
+    job = await enqueue_fetch_job({"type": "refresh_dates"})
+    return {"queued": True, "job_id": job.get("id")}
 
 
 @app.post("/ai-notes")

@@ -216,8 +216,11 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
           onClick={async () => {
             setBusy(true);
             try {
-              await refreshDates();
-              showMsg('Dátum frissítés sorba állítva');
+              const result = await refreshDates();
+              showMsg(result.job_id
+                ? `Dátum frissítés sorba állítva (${result.job_id.slice(0, 8)})`
+                : 'Dátum frissítés sorba állítva'
+              );
             } catch (e) {
               showMsg('Hiba: ' + e.message, true);
             } finally {

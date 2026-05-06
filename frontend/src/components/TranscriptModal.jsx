@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
+import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 
 function formatDuration(seconds) {
   if (!seconds) return '';
@@ -127,6 +127,15 @@ export default function TranscriptModal({ video, onClose }) {
             >
               Obsidian MD
             </button>
+            {(video.obsidian_note || video.summary) && (
+              <button
+                onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
+                style={{ fontSize: '0.8rem' }}
+                title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+              >
+                Mindmap MD
+              </button>
+            )}
           </div>
         </div>
 

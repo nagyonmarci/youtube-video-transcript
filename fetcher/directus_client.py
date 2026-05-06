@@ -319,6 +319,21 @@ class DirectusClient:
                 ids.add(video_id)
         return ids
 
+    async def get_active_job_by_type(self, queue: str, job_type: str) -> Optional[dict]:
+        params = (
+            f"?filter[_and][0][queue][_eq]={queue}"
+            f"&filter[_and][1][type][_eq]={job_type}"
+            "&filter[_and][2][_or][0][status][_eq]=queued"
+            "&filter[_and][2][_or][1][status][_eq]=running"
+            "&filter[_and][2][_or][2][status][_eq]=paused"
+            "&sort=created_at"
+            "&limit=1"
+            "&fields=id,queue,type,status,created_at,started_at"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        items = result.get("data", [])
+        return items[0] if items else None
+
     async def get_job(self, job_id: str) -> Optional[dict]:
         try:
             result = await self._request("GET", f"/items/jobs/{job_id}?fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message")
@@ -399,7 +414,7 @@ class DirectusClient:
             return None
 
     async def get_videos_by_channel(self, channel_id: str) -> list:
-        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=video_id'
+        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,uploaded_at'
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 

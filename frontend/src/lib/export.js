@@ -170,6 +170,37 @@ export function videoToObsidianMd(video, { channel = null, timed = true } = {}) 
   return lines.filter((line, index) => line !== '' || lines[index - 1] !== '').join('\n');
 }
 
+export function videoToMarkmapMd(video) {
+  const title = video.title || 'Ismeretlen cím';
+  const fm = '---\nmarkmap:\n  colorFreezeLevel: 2\n---';
+
+  let body = (video.obsidian_note || '').trim();
+  if (body) {
+    if (!body.startsWith('# ')) body = `# ${title}\n${body}`;
+  } else {
+    const lines = [`# ${title}`];
+    if (video.summary) {
+      lines.push('## Summary');
+      video.summary.split(/(?<=[.!?])\s+/).filter(Boolean).forEach(s => lines.push(`- ${s.trim()}`));
+    }
+    ['topics', 'takeaways', 'questions'].forEach(key => {
+      if (video[key]?.length) {
+        lines.push(`## ${key.charAt(0).toUpperCase() + key.slice(1)}`);
+        video[key].forEach(t => lines.push(`- ${t}`));
+      }
+    });
+    body = lines.join('\n');
+  }
+  return `${fm}\n\n${body}`;
+}
+
+export function markmapFilename(video, { channel = null } = {}) {
+  const uploaded = isoDate(video.uploaded_at);
+  const prefix = uploaded ? `${uploaded}_` : '';
+  const channelPart = channel ? `${sanitizeFilename(channelName(channel))}_` : '';
+  return `${prefix}${channelPart}${sanitizeFilename(video.title || video.video_id || 'video')}_mindmap.md`;
+}
+
 export function channelToTxt(channelName, videos, options = {}) {
   const parts = [`Csatorna: ${channelName}`, `Videók: ${videos.length}`, '', '='.repeat(60), ''];
   for (const video of videos) {

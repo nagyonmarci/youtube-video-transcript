@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getDailyVideos } from '../lib/directus.js';
 import { generateAiNoteForVideo } from '../lib/fetcher.js';
-import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd } from '../lib/export.js';
+import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.js';
 
 function todayValue() {
   const now = new Date();
@@ -185,6 +185,14 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
                       >
                         Obsidian
                       </button>
+                      {(video.obsidian_note || video.summary) && (
+                        <button
+                          title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+                          onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
+                        >
+                          Mindmap
+                        </button>
+                      )}
                     </div>
                   </article>
                 ))}

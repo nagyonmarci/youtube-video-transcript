@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js';
-import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
+import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 
 function formatDuration(seconds) {
   if (!seconds) return '—';
@@ -250,6 +250,21 @@ export default function VideoTable({
                           >
                             Obsidian
                           </button>
+                          {(video.obsidian_note || video.summary) && (
+                            <button
+                              className="btn-sm"
+                              title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+                              onClick={e => {
+                                e.stopPropagation();
+                                downloadFile(
+                                  videoToMarkmapMd(video),
+                                  markmapFilename(video, { channel: selectedChannel })
+                                );
+                              }}
+                            >
+                              Mindmap
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

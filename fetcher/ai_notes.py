@@ -65,7 +65,7 @@ Rules:
 - Do not invent facts, dates, claims, names, or conclusions.
 - The response must be ONLY valid JSON, without a markdown code block.
 - The "topics", "takeaways", and "questions" fields must be arrays.
-- The "obsidian_note" field must be Obsidian-compatible markdown with internal sections.
+- The "obsidian_note" field must start with "# {{video title}}" as the root heading, followed by "## Section" headings. ALL content must be "- bullet" items — no prose paragraphs. This makes it compatible with the Obsidian markmap plugin for mind map rendering.
 - If the transcript contains timestamps, keep them next to important claims in parentheses, for example (12:34).
 
 JSON schema:
@@ -74,7 +74,7 @@ JSON schema:
   "topics": ["topic 1", "topic 2"],
   "takeaways": ["key takeaway 1", "key takeaway 2"],
   "questions": ["useful review or study question 1", "question 2"],
-  "obsidian_note": "## Summary\\n...\\n\\n## Topics\\n- ...\\n\\n## Takeaways\\n- ...\\n\\n## Questions\\n- ..."
+  "obsidian_note": "# Video Title\\n## Summary\\n- key point 1\\n- key point 2\\n\\n## Topics\\n- topic 1\\n\\n## Takeaways\\n- takeaway 1\\n\\n## Questions\\n- question 1"
 }}
 
 Video:
