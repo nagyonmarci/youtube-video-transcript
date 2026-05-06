@@ -42,6 +42,7 @@ REFRESH_CRON = os.environ.get("REFRESH_CRON", "0 7 * * *")
 SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
 AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "true").lower() in {"1", "true", "yes", "on"}
 AI_NOTES_BATCH_LIMIT = int(os.environ.get("AI_NOTES_BATCH_LIMIT", "10"))
+AI_NOTES_MAX_BATCH_LIMIT = int(os.environ.get("AI_NOTES_MAX_BATCH_LIMIT", "20000"))
 
 directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
 
@@ -560,7 +561,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bo
 async def process_ai_notes_task(task: dict):
     """Generate AI notes for videos that have transcripts but no summary."""
     global current_ai_task_info
-    limit = max(1, min(int(task.get("limit") or AI_NOTES_BATCH_LIMIT), 100))
+    limit = max(1, min(int(task.get("limit") or AI_NOTES_BATCH_LIMIT), AI_NOTES_MAX_BATCH_LIMIT))
     videos = await directus.get_videos_missing_ai_notes(limit)
     logger.info(f"Generating AI notes for {len(videos)} videos")
 
@@ -635,6 +636,7 @@ async def clear_ai_notes(video_id: str) -> dict:
         "takeaways": None,
         "questions": None,
         "obsidian_note": None,
+        "study_guide": None,
         "ai_notes_status": None,
         "ai_notes_generated_at": None,
         "ai_notes_error": None,
@@ -1077,9 +1079,12 @@ async def refresh_dates():
 @app.post("/ai-notes")
 async def ai_notes(request: AiNotesRequest):
     """Queue AI note generation for videos that have transcripts but no summary."""
-    limit = max(1, min(request.limit, 100))
-    await enqueue_ai_job({"type": "ai_notes", "limit": limit})
-    return {"queued": True, "limit": limit}
+    existing = await directus.get_active_job_by_type("ai", "ai_notes")
+    if existing:
+        return {"queued": False, "existing": True, "job_id": existing["id"]}
+    limit = max(1, min(request.limit, AI_NOTES_MAX_BATCH_LIMIT))
+    job = await enqueue_ai_job({"type": "ai_notes", "limit": limit})
+    return {"queued": True, "limit": limit, "job_id": job.get("id")}
 
 
 @app.post("/ai-notes/{video_id}")

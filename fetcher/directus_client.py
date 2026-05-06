@@ -12,6 +12,7 @@ AI_NOTE_FIELDS = [
     {"field": "takeaways", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "questions", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "obsidian_note", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "study_guide", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "ai_notes_status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True}},
     {"field": "ai_notes_generated_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
     {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},

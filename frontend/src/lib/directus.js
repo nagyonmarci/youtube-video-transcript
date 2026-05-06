@@ -18,7 +18,20 @@ async function req(method, path, body) {
 
 export async function getChannels() {
   const data = await req('GET', '/items/channels?sort[]=-added_at&limit=-1');
-  return data?.data ?? [];
+  const channels = data?.data ?? [];
+  const countData = await req(
+    'GET',
+    '/items/videos?aggregate[count]=id&groupBy[]=channel_id&limit=-1'
+  );
+  const counts = new Map(
+    (countData?.data ?? [])
+      .filter(row => row.channel_id)
+      .map(row => [row.channel_id, Number(row.count?.id || 0)])
+  );
+  return channels.map(ch => ({
+    ...ch,
+    video_count: counts.get(ch.id) ?? 0,
+  }));
 }
 
 export async function deleteChannel(id) {
@@ -35,7 +48,7 @@ export async function updateChannel(id, data) {
 const PAGE_SIZE = 100;
 const VIDEO_FIELDS = [
   'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,transcript_timed,whisper_status',
-  'summary,topics,takeaways,questions,obsidian_note,ai_notes_status,ai_notes_generated_at,ai_notes_error',
+  'summary,topics,takeaways,questions,obsidian_note,study_guide,ai_notes_status,ai_notes_generated_at,ai_notes_error',
   'channel_id.id,channel_id.name,channel_id.channel_handle',
 ].join(',');
 
@@ -95,6 +108,10 @@ async function countVideos(extraParams = {}) {
   });
   const data = await req('GET', `/items/videos?${params}`);
   return data?.meta?.filter_count ?? 0;
+}
+
+export function getTotalVideoCount() {
+  return countVideos();
 }
 
 export async function getAdminStats() {

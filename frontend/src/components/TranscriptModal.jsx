@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Transformer } from 'markmap-lib';
+import { Markmap } from 'markmap-view';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
+
+const transformer = new Transformer();
 
 function formatDuration(seconds) {
   if (!seconds) return '';
@@ -26,6 +30,9 @@ function renderList(items) {
 
 export default function TranscriptModal({ video, onClose }) {
   const [showTimed, setShowTimed] = useState(false);
+  const [activeTab, setActiveTab] = useState('transcript');
+  const svgRef = useRef(null);
+  const markmapRef = useRef(null);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -33,9 +40,18 @@ export default function TranscriptModal({ video, onClose }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  useEffect(() => {
+    if (activeTab !== 'mindmap' || !svgRef.current) return;
+    const content = videoToMarkmapMd(video);
+    const { root } = transformer.transform(content);
+    svgRef.current.innerHTML = '';
+    markmapRef.current = Markmap.create(svgRef.current, { duration: 0 }, root);
+  }, [activeTab, video]);
+
   if (!video) return null;
   const visibleTranscript = showTimed && video.transcript_timed ? video.transcript_timed : video.transcript;
   const hasTimedTranscript = Boolean(video.transcript_timed);
+  const hasMindmap = Boolean(video.obsidian_note || video.summary);
 
   async function copyToClipboard() {
     try {
@@ -90,78 +106,120 @@ export default function TranscriptModal({ video, onClose }) {
             </div>
             <button onClick={onClose} style={{ fontSize: '1.2rem', padding: '0.1rem 0.5rem', flexShrink: 0 }}>✕</button>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', gap: '0.25rem', marginRight: '0.25rem' }}>
-              <button
-                onClick={() => setShowTimed(false)}
-                disabled={!showTimed}
-                style={{ fontSize: '0.8rem' }}
-              >
-                Sima
-              </button>
-              <button
-                onClick={() => setShowTimed(true)}
-                disabled={!hasTimedTranscript || showTimed}
-                title={hasTimedTranscript ? 'Időbélyeges transzkript' : 'Ehhez a transzkripthez még nincs időbélyeges változat'}
-                style={{ fontSize: '0.8rem' }}
-              >
-                Idővel
-              </button>
-            </div>
-            <button onClick={copyToClipboard} style={{ fontSize: '0.8rem' }}>Másolás</button>
+
+          {/* Tab sor */}
+          <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.75rem' }}>
             <button
-              onClick={() => downloadFile(videoToTxt(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_idovel' : ''}.txt`)}
+              onClick={() => setActiveTab('transcript')}
+              disabled={activeTab === 'transcript'}
               style={{ fontSize: '0.8rem' }}
             >
-              Letöltés TXT
+              Transzkript
             </button>
-            <button
-              onClick={() => downloadFile(videoToMd(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_idovel' : ''}.md`)}
-              style={{ fontSize: '0.8rem' }}
-            >
-              Letöltés MD
-            </button>
-            <button
-              onClick={() => downloadFile(videoToObsidianMd(video, { timed: true }), obsidianFilename(video))}
-              style={{ fontSize: '0.8rem' }}
-            >
-              Obsidian MD
-            </button>
-            {(video.obsidian_note || video.summary) && (
+            {hasMindmap && (
               <button
-                onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
+                onClick={() => setActiveTab('mindmap')}
+                disabled={activeTab === 'mindmap'}
                 style={{ fontSize: '0.8rem' }}
-                title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
               >
-                Mindmap MD
+                Gondolattérkép
               </button>
             )}
           </div>
+
+          {/* Export gombok — csak transzkript tab alatt */}
+          {activeTab === 'transcript' && (
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.25rem', marginRight: '0.25rem' }}>
+                <button
+                  onClick={() => setShowTimed(false)}
+                  disabled={!showTimed}
+                  style={{ fontSize: '0.8rem' }}
+                >
+                  Sima
+                </button>
+                <button
+                  onClick={() => setShowTimed(true)}
+                  disabled={!hasTimedTranscript || showTimed}
+                  title={hasTimedTranscript ? 'Időbélyeges transzkript' : 'Ehhez a transzkripthez még nincs időbélyeges változat'}
+                  style={{ fontSize: '0.8rem' }}
+                >
+                  Idővel
+                </button>
+              </div>
+              <button onClick={copyToClipboard} style={{ fontSize: '0.8rem' }}>Másolás</button>
+              <button
+                onClick={() => downloadFile(videoToTxt(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_idovel' : ''}.txt`)}
+                style={{ fontSize: '0.8rem' }}
+              >
+                Letöltés TXT
+              </button>
+              <button
+                onClick={() => downloadFile(videoToMd(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_idovel' : ''}.md`)}
+                style={{ fontSize: '0.8rem' }}
+              >
+                Letöltés MD
+              </button>
+              <button
+                onClick={() => downloadFile(videoToObsidianMd(video, { timed: true }), obsidianFilename(video))}
+                style={{ fontSize: '0.8rem' }}
+              >
+                Obsidian MD
+              </button>
+              {hasMindmap && (
+                <button
+                  onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
+                  style={{ fontSize: '0.8rem' }}
+                  title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+                >
+                  Mindmap MD
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: '1rem 1.25rem', overflowY: 'auto', flex: 1 }}>
-          {(video.summary || video.topics?.length || video.takeaways?.length || video.questions?.length) && (
-            <div style={{ marginBottom: '1.2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: '#fff' }}>AI jegyzet</h3>
-              {video.summary && (
-                <p style={{ lineHeight: 1.65, fontSize: '0.9rem', color: '#ddd', marginBottom: '0.8rem' }}>
-                  {video.summary}
-                </p>
+          {activeTab === 'transcript' && (
+            <>
+              {(video.summary || video.topics?.length || video.takeaways?.length || video.questions?.length || video.study_guide) && (
+                <div style={{ marginBottom: '1.2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+                  <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: '#fff' }}>AI jegyzet</h3>
+                  {video.summary && (
+                    <p style={{ lineHeight: 1.65, fontSize: '0.9rem', color: '#ddd', marginBottom: '0.8rem' }}>
+                      {video.summary}
+                    </p>
+                  )}
+                  {video.topics?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Témák</h4>}
+                  {renderList(video.topics)}
+                  {video.takeaways?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Tanulságok</h4>}
+                  {renderList(video.takeaways)}
+                  {video.questions?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Kérdések</h4>}
+                  {renderList(video.questions)}
+                  {video.study_guide && (
+                    <>
+                      <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>Tanulási útmutató</h4>
+                      <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', color: '#ddd', fontFamily: 'inherit', margin: '0.35rem 0 0.8rem', lineHeight: 1.6 }}>
+                        {video.study_guide}
+                      </pre>
+                    </>
+                  )}
+                </div>
               )}
-              {video.topics?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Témák</h4>}
-              {renderList(video.topics)}
-              {video.takeaways?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Tanulságok</h4>}
-              {renderList(video.takeaways)}
-              {video.questions?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Kérdések</h4>}
-              {renderList(video.questions)}
-            </div>
+              {visibleTranscript ? (
+                <p style={{ lineHeight: 1.7, fontSize: '0.9rem', color: '#ddd', whiteSpace: 'pre-wrap' }}>
+                  {visibleTranscript}
+                </p>
+              ) : (
+                <p style={{ color: '#888', fontStyle: 'italic' }}>Ehhez a videóhoz nincs elérhető transzkript.</p>
+              )}
+            </>
           )}
-          {visibleTranscript ? (
-            <p style={{ lineHeight: 1.7, fontSize: '0.9rem', color: '#ddd', whiteSpace: 'pre-wrap' }}>
-              {visibleTranscript}
-            </p>
-          ) : (
-            <p style={{ color: '#888', fontStyle: 'italic' }}>Ehhez a videóhoz nincs elérhető transzkript.</p>
+
+          {activeTab === 'mindmap' && (
+            <div style={{ width: '100%', minHeight: '450px', background: '#fff', borderRadius: '6px', overflow: 'hidden' }}>
+              <svg ref={svgRef} style={{ width: '100%', height: '450px', display: 'block' }} />
+            </div>
           )}
         </div>
       </div>

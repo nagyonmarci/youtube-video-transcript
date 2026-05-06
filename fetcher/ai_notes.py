@@ -66,6 +66,7 @@ Rules:
 - The response must be ONLY valid JSON, without a markdown code block.
 - The "topics", "takeaways", and "questions" fields must be arrays.
 - The "obsidian_note" field must start with "# {{video title}}" as the root heading, followed by "## Section" headings. ALL content must be "- bullet" items — no prose paragraphs. This makes it compatible with the Obsidian markmap plugin for mind map rendering.
+- The "study_guide" field must be structured learning markdown: "## Learning Objectives" (3-5 bullet goals), "## Key Concepts" (- **Term**: definition), "## Content Breakdown" (timestamp-anchored bullets, e.g. "(5:23) Topic: ..."), "## Review" (2-3 practice prompts). English only.
 - If the transcript contains timestamps, keep them next to important claims in parentheses, for example (12:34).
 
 JSON schema:
@@ -74,7 +75,8 @@ JSON schema:
   "topics": ["topic 1", "topic 2"],
   "takeaways": ["key takeaway 1", "key takeaway 2"],
   "questions": ["useful review or study question 1", "question 2"],
-  "obsidian_note": "# Video Title\\n## Summary\\n- key point 1\\n- key point 2\\n\\n## Topics\\n- topic 1\\n\\n## Takeaways\\n- takeaway 1\\n\\n## Questions\\n- question 1"
+  "obsidian_note": "# Video Title\\n## Summary\\n- key point 1\\n- key point 2\\n\\n## Topics\\n- topic 1\\n\\n## Takeaways\\n- takeaway 1\\n\\n## Questions\\n- question 1",
+  "study_guide": "## Learning Objectives\\n- ...\\n\\n## Key Concepts\\n- **Term**: definition\\n\\n## Content Breakdown\\n- (0:00) Introduction: ...\\n- (5:23) Core topic: ...\\n\\n## Review\\n- Try to explain X in your own words"
 }}
 
 Video:
@@ -120,4 +122,5 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
         "takeaways": normalize_list(parsed.get("takeaways")),
         "questions": normalize_list(parsed.get("questions")),
         "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
+        "study_guide": str(parsed.get("study_guide", "")).strip(),
     }
