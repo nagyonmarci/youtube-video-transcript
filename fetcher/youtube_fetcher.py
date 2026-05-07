@@ -82,6 +82,44 @@ def parse_uploaded_at(info: dict) -> Optional[str]:
     return None
 
 
+def best_thumbnail_url(info: dict) -> Optional[str]:
+    """Return the best available thumbnail URL from yt-dlp metadata."""
+    thumbnail = info.get("thumbnail")
+    if isinstance(thumbnail, str) and thumbnail.strip():
+        return thumbnail.strip()
+
+    thumbnails = info.get("thumbnails")
+    if not isinstance(thumbnails, list):
+        return None
+
+    candidates = []
+    for item in thumbnails:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        width = item.get("width") or 0
+        height = item.get("height") or 0
+        preference = item.get("preference") or 0
+        try:
+            score = (int(width) * int(height), int(preference))
+        except (TypeError, ValueError):
+            score = (0, 0)
+        candidates.append((score, url.strip()))
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def youtube_thumbnail_url(video_id: str) -> Optional[str]:
+    """Build a lightweight thumbnail URL from the YouTube video id."""
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_id or ""):
+        return None
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+
 def fetch_video_info(video_url_or_id: str) -> dict:
     """Fetch full metadata for one video, using a low-bandwidth fallback format."""
     if re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_url_or_id):
@@ -213,6 +251,7 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
                 "url": f"https://www.youtube.com/watch?v={yt_id}",
                 "duration_seconds": duration_seconds,
                 "uploaded_at": parse_uploaded_at(info),
+                "thumbnail_url": best_thumbnail_url(info),
             })
         except (json.JSONDecodeError, KeyError, TypeError):
             continue

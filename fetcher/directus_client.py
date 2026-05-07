@@ -3,6 +3,7 @@
 import httpx
 import logging
 from typing import Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -13,11 +14,28 @@ AI_NOTE_FIELDS = [
     {"field": "questions", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "obsidian_note", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "study_guide", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "critique", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+    {"field": "thumbnail_url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 1024, "is_nullable": True}},
     {"field": "ai_notes_status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True}},
     {"field": "ai_notes_generated_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
     {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
 ]
 
+JOB_PROGRESS_FIELDS = [
+    {"field": "dedupe_key", "type": "string", "meta": {"interface": "input", "width": "full", "readonly": True}, "schema": {"max_length": 512, "is_nullable": True}},
+    {"field": "attempts", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True, "default_value": 0}},
+    {"field": "max_attempts", "type": "integer", "meta": {"interface": "input", "width": "half"}, "schema": {"is_nullable": True, "default_value": 3}},
+    {"field": "progress_current", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+    {"field": "progress_total", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+    {"field": "progress_label", "type": "string", "meta": {"interface": "input", "readonly": True, "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
+    {"field": "last_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
+]
+
+JOB_LIST_FIELDS = (
+    "id,queue,type,label,status,sort_order,payload,dedupe_key,attempts,max_attempts,"
+    "progress_current,progress_total,progress_label,created_at,started_at,finished_at,"
+    "error_message,last_error"
+)
 
 class DirectusClient:
     def __init__(self, base_url: str, token: str):
@@ -63,6 +81,8 @@ class DirectusClient:
         if "jobs" not in existing:
             await self._create_jobs_collection()
             logger.info("Created 'jobs' collection")
+        else:
+            await self._ensure_jobs_fields()
 
     async def _get_existing_collections(self) -> set:
         try:
@@ -101,6 +121,7 @@ class DirectusClient:
                 {"field": "channel_id", "type": "uuid", "meta": {"interface": "select-dropdown-m2o", "special": ["m2o"], "width": "half"}, "schema": {"is_nullable": True, "foreign_key_table": "channels", "foreign_key_column": "id"}},
                 {"field": "title", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
                 {"field": "url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
+                {"field": "thumbnail_url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 1024, "is_nullable": True}},
                 {"field": "duration_seconds", "type": "integer", "meta": {"interface": "input", "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "uploaded_at", "type": "timestamp", "meta": {"interface": "datetime", "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "transcript", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
@@ -110,6 +131,8 @@ class DirectusClient:
                 {"field": "takeaways", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
                 {"field": "questions", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
                 {"field": "obsidian_note", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "study_guide", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
+                {"field": "critique", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
                 {"field": "ai_notes_status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True}},
                 {"field": "ai_notes_generated_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
@@ -186,9 +209,21 @@ class DirectusClient:
                 {"field": "started_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "finished_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "error_message", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
+                *JOB_PROGRESS_FIELDS,
             ],
         }
         await self._request("POST", "/collections", json=payload)
+
+    async def _ensure_jobs_fields(self):
+        try:
+            result = await self._request("GET", "/fields/jobs")
+            existing = {f["field"] for f in result.get("data", [])}
+            for field in JOB_PROGRESS_FIELDS:
+                if field["field"] not in existing:
+                    await self._request("POST", "/fields/jobs", json=field)
+                    logger.info(f"Added '{field['field']}' field to jobs collection")
+        except Exception as e:
+            logger.warning(f"Could not ensure jobs fields: {e}")
 
     # ---- App settings ----
 
@@ -210,7 +245,19 @@ class DirectusClient:
 
     # ---- Jobs ----
 
-    async def create_job(self, queue: str, task: dict, label: Optional[str] = None, sort_order: Optional[int] = None) -> dict:
+    async def create_job(
+        self,
+        queue: str,
+        task: dict,
+        label: Optional[str] = None,
+        sort_order: Optional[int] = None,
+        dedupe_key: Optional[str] = None,
+        max_attempts: int = 3,
+    ) -> dict:
+        if dedupe_key:
+            existing = await self.get_active_job_by_dedupe_key(queue, dedupe_key)
+            if existing:
+                return {**existing, "existing": True}
         if sort_order is None:
             sort_order = await self.next_job_sort_order(queue)
         payload = {
@@ -220,8 +267,18 @@ class DirectusClient:
             "status": "queued",
             "sort_order": sort_order,
             "payload": task,
+            "dedupe_key": dedupe_key,
+            "attempts": 0,
+            "max_attempts": max_attempts,
         }
-        result = await self._request("POST", "/items/jobs", json=payload)
+        try:
+            result = await self._request("POST", "/items/jobs", json=payload)
+        except httpx.HTTPStatusError:
+            if dedupe_key:
+                existing = await self.get_active_job_by_dedupe_key(queue, dedupe_key)
+                if existing:
+                    return {**existing, "existing": True}
+            raise
         return result.get("data", {})
 
     async def job_label(self, task: dict) -> str:
@@ -238,6 +295,8 @@ class DirectusClient:
             return f"Videó letöltés: {task.get('video_url') or ''}".strip()
         if task_type == "refresh_dates":
             return "Hiányzó dátumok frissítése"
+        if task_type == "refresh_thumbnails":
+            return "Hiányzó thumbnail képek frissítése"
         if task_type == "ai_notes":
             return f"Hiányzó AI jegyzetek: {task.get('limit') or ''}".strip()
         if task_type == "ai_note_video":
@@ -248,8 +307,9 @@ class DirectusClient:
 
     async def next_job_sort_order(self, queue: str) -> int:
         params = (
-            f"?filter[queue][_eq]={queue}"
-            "&filter[status][_in]=queued,paused"
+            f"?filter[_and][0][queue][_eq]={quote(queue)}"
+            "&filter[_and][1][_or][0][status][_eq]=queued"
+            "&filter[_and][1][_or][1][status][_eq]=paused"
             "&sort=-sort_order"
             "&limit=1"
             "&fields=sort_order"
@@ -262,11 +322,11 @@ class DirectusClient:
 
     async def get_next_job(self, queue: str) -> Optional[dict]:
         params = (
-            f"?filter[queue][_eq]={queue}"
+            f"?filter[queue][_eq]={quote(queue)}"
             "&filter[status][_eq]=queued"
             "&sort=sort_order,created_at"
             "&limit=1"
-            "&fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message"
+            f"&fields={JOB_LIST_FIELDS}"
         )
         result = await self._request("GET", f"/items/jobs{params}")
         items = result.get("data", [])
@@ -276,29 +336,28 @@ class DirectusClient:
         params = (
             f"?limit={limit}"
             "&sort=queue,sort_order,created_at"
-            "&fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message"
+            f"&fields={JOB_LIST_FIELDS}"
         )
         result = await self._request("GET", f"/items/jobs{params}")
         return result.get("data", [])
 
     async def count_jobs(self, queue: str, statuses: str = "queued") -> int:
-        params = (
-            f"?filter[queue][_eq]={queue}"
-            f"&filter[status][_in]={statuses}"
-            "&limit=1"
-            "&meta=filter_count"
-            "&fields=id"
-        )
+        status_parts = [
+            f"&filter[_and][1][_or][{idx}][status][_eq]={status.strip()}"
+            for idx, status in enumerate(statuses.split(","))
+            if status.strip()
+        ]
+        params = f"?filter[_and][0][queue][_eq]={quote(queue)}{''.join(status_parts)}&limit=1&meta=filter_count&fields=id"
         result = await self._request("GET", f"/items/jobs{params}")
         return result.get("meta", {}).get("filter_count", 0)
 
     async def get_running_job(self, queue: str) -> Optional[dict]:
         params = (
-            f"?filter[queue][_eq]={queue}"
+            f"?filter[queue][_eq]={quote(queue)}"
             "&filter[status][_eq]=running"
             "&sort=started_at"
             "&limit=1"
-            "&fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message"
+            f"&fields={JOB_LIST_FIELDS}"
         )
         result = await self._request("GET", f"/items/jobs{params}")
         items = result.get("data", [])
@@ -306,9 +365,11 @@ class DirectusClient:
 
     async def get_ai_note_job_video_ids(self) -> set[str]:
         params = (
-            "?filter[queue][_eq]=ai"
-            "&filter[status][_in]=queued,running,paused"
-            "&filter[type][_eq]=ai_note_video"
+            "?filter[_and][0][queue][_eq]=ai"
+            "&filter[_and][1][type][_eq]=ai_note_video"
+            "&filter[_and][2][_or][0][status][_eq]=queued"
+            "&filter[_and][2][_or][1][status][_eq]=running"
+            "&filter[_and][2][_or][2][status][_eq]=paused"
             "&limit=-1"
             "&fields=payload"
         )
@@ -322,14 +383,29 @@ class DirectusClient:
 
     async def get_active_job_by_type(self, queue: str, job_type: str) -> Optional[dict]:
         params = (
-            f"?filter[_and][0][queue][_eq]={queue}"
-            f"&filter[_and][1][type][_eq]={job_type}"
+            f"?filter[_and][0][queue][_eq]={quote(queue)}"
+            f"&filter[_and][1][type][_eq]={quote(job_type)}"
             "&filter[_and][2][_or][0][status][_eq]=queued"
             "&filter[_and][2][_or][1][status][_eq]=running"
             "&filter[_and][2][_or][2][status][_eq]=paused"
             "&sort=created_at"
             "&limit=1"
-            "&fields=id,queue,type,status,created_at,started_at"
+            f"&fields={JOB_LIST_FIELDS}"
+        )
+        result = await self._request("GET", f"/items/jobs{params}")
+        items = result.get("data", [])
+        return items[0] if items else None
+
+    async def get_active_job_by_dedupe_key(self, queue: str, dedupe_key: str) -> Optional[dict]:
+        params = (
+            f"?filter[_and][0][queue][_eq]={quote(queue)}"
+            f"&filter[_and][1][dedupe_key][_eq]={quote(dedupe_key, safe='')}"
+            "&filter[_and][2][_or][0][status][_eq]=queued"
+            "&filter[_and][2][_or][1][status][_eq]=running"
+            "&filter[_and][2][_or][2][status][_eq]=paused"
+            "&sort=created_at"
+            "&limit=1"
+            f"&fields={JOB_LIST_FIELDS}"
         )
         result = await self._request("GET", f"/items/jobs{params}")
         items = result.get("data", [])
@@ -337,7 +413,7 @@ class DirectusClient:
 
     async def get_job(self, job_id: str) -> Optional[dict]:
         try:
-            result = await self._request("GET", f"/items/jobs/{job_id}?fields=id,queue,type,label,status,sort_order,payload,created_at,started_at,finished_at,error_message")
+            result = await self._request("GET", f"/items/jobs/{job_id}?fields={JOB_LIST_FIELDS}")
             return result.get("data")
         except Exception:
             return None
@@ -403,6 +479,7 @@ class DirectusClient:
             "video_id",
             "title",
             "url",
+            "thumbnail_url",
             "uploaded_at",
             "duration_seconds",
             "transcript",
@@ -415,7 +492,7 @@ class DirectusClient:
             return None
 
     async def get_videos_by_channel(self, channel_id: str) -> list:
-        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,uploaded_at'
+        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,uploaded_at,thumbnail_url'
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
@@ -424,11 +501,17 @@ class DirectusClient:
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
+    async def get_videos_missing_thumbnail(self) -> list:
+        params = '?filter[thumbnail_url][_null]=true&limit=-1&fields=id,video_id'
+        result = await self._request("GET", f"/items/videos{params}")
+        return result.get("data", [])
+
     async def get_videos_missing_ai_notes(self, limit: int = 10) -> list:
         params = (
             "?filter[_and][0][transcript][_nnull]=true"
             "&filter[_and][1][_or][0][summary][_null]=true"
-            "&filter[_and][1][_or][1][ai_notes_status][_eq]=error"
+            "&filter[_and][1][_or][1][critique][_null]=true"
+            "&filter[_and][1][_or][2][ai_notes_status][_eq]=error"
             f"&limit={limit}"
             "&sort=-uploaded_at"
             "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"
@@ -441,7 +524,8 @@ class DirectusClient:
             f"?filter[_and][0][channel_id][_eq]={channel_id}"
             "&filter[_and][1][transcript][_nnull]=true"
             "&filter[_and][2][_or][0][summary][_null]=true"
-            "&filter[_and][2][_or][1][ai_notes_status][_eq]=error"
+            "&filter[_and][2][_or][1][critique][_null]=true"
+            "&filter[_and][2][_or][2][ai_notes_status][_eq]=error"
             f"&limit={limit}"
             "&sort=-uploaded_at"
             "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"

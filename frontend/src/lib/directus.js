@@ -47,8 +47,8 @@ export async function updateChannel(id, data) {
 
 const PAGE_SIZE = 100;
 const VIDEO_FIELDS = [
-  'id,video_id,title,url,uploaded_at,duration_seconds,status,transcript,transcript_timed,whisper_status',
-  'summary,topics,takeaways,questions,obsidian_note,study_guide,ai_notes_status,ai_notes_generated_at,ai_notes_error',
+  'id,video_id,title,url,thumbnail_url,uploaded_at,duration_seconds,status,transcript,transcript_timed,whisper_status',
+  'summary,topics,takeaways,questions,obsidian_note,study_guide,critique,ai_notes_status,ai_notes_generated_at,ai_notes_error',
   'channel_id.id,channel_id.name,channel_id.channel_handle',
 ].join(',');
 
@@ -144,7 +144,8 @@ export async function getAdminStats() {
     }),
     countVideos({
       'filter[_and][0][transcript][_nnull]': 'true',
-      'filter[_and][1][summary][_null]': 'true',
+      'filter[_and][1][_or][0][summary][_null]': 'true',
+      'filter[_and][1][_or][1][critique][_null]': 'true',
     }),
   ]);
 

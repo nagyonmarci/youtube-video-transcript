@@ -5,6 +5,7 @@ and stores them in Directus CMS.
 """
 
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -17,6 +18,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import asyncpg
+
 from ai_notes import generate_ai_notes
 from directus_client import DirectusClient
 from youtube_fetcher import (
@@ -26,6 +29,8 @@ from youtube_fetcher import (
     fetch_video_date_info,
     fetch_transcript_variants,
     parse_uploaded_at,
+    best_thumbnail_url,
+    youtube_thumbnail_url,
     parse_channel_input,
     extract_handle_from_url,
     rate_limited_sleep_transcript,
@@ -38,6 +43,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
 DIRECTUS_TOKEN = os.environ.get("DIRECTUS_TOKEN", "admin-token-change-me")
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres")
+POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "directus")
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "directus")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "directus")
 REFRESH_CRON = os.environ.get("REFRESH_CRON", "0 7 * * *")
 SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
 AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "true").lower() in {"1", "true", "yes", "on"}
@@ -57,6 +67,15 @@ current_ai_task_info: dict = {}
 current_job_id: Optional[str] = None
 current_ai_job_id: Optional[str] = None
 scheduler: Optional[AsyncIOScheduler] = None
+AI_NOTE_GENERATED_FIELDS = {
+    "summary",
+    "topics",
+    "takeaways",
+    "questions",
+    "obsidian_note",
+    "study_guide",
+    "critique",
+}
 
 
 def get_scheduler_timezone():
@@ -120,6 +139,121 @@ def start_refresh_scheduler():
     logger.info(f"Daily refresh scheduled: {REFRESH_CRON} ({SCHEDULER_TIMEZONE})")
 
 
+# ---- Reliability helpers ----
+
+def job_dedupe_key(queue: str, task: dict) -> str:
+    """Stable key for jobs that should not be queued more than once while active."""
+    task_type = task.get("type") or "job"
+    if task_type in {"ai_notes", "refresh_dates", "refresh_thumbnails"}:
+        return f"{queue}:{task_type}"
+    if task_type == "ai_note_video":
+        return f"{queue}:{task_type}:{task.get('video_id') or ''}"
+    if task_type in {"channel", "refresh"}:
+        return f"{queue}:{task_type}:{task.get('channel_id') or task.get('channel_url') or ''}"
+    if task_type == "video":
+        return f"{queue}:{task_type}:{task.get('video_url') or ''}"
+    encoded = json.dumps(task, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return f"{queue}:{task_type}:{encoded}"[:512]
+
+
+async def update_job_progress(queue: str, current: int, total: int, label: Optional[str] = None):
+    job_id = current_ai_job_id if queue == "ai" else current_job_id
+    state = current_ai_task_info if queue == "ai" else current_task_info
+    state["progress_current"] = current
+    state["progress_total"] = total
+    if label:
+        state["progress_label"] = label
+    if not job_id:
+        return
+    await directus.update_job(job_id, {
+        "progress_current": current,
+        "progress_total": total,
+        "progress_label": (label or "")[:512] if label else None,
+    })
+
+
+async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
+    attempts = int(job.get("attempts") or 0) + 1
+    max_attempts = max(1, int(job.get("max_attempts") or 3))
+    error_message = "Stopped by user" if stopped else (str(error) or repr(error))[:1000]
+    now = datetime.now(timezone.utc).isoformat()
+    if stopped or attempts >= max_attempts:
+        await directus.update_job(job["id"], {
+            "status": "cancelled" if stopped else "error",
+            "attempts": attempts,
+            "finished_at": now,
+            "error_message": error_message,
+            "last_error": error_message,
+        })
+        return
+    await directus.update_job(job["id"], {
+        "status": "queued",
+        "attempts": attempts,
+        "finished_at": now,
+        "error_message": f"Retry {attempts}/{max_attempts}: {error_message}",
+        "last_error": error_message,
+        "progress_label": "retry queued",
+    })
+    logger.warning(f"Retrying job {job['id']} ({attempts}/{max_attempts}) after error: {error_message}")
+
+
+async def ensure_database_indexes():
+    statements = [
+        "CREATE INDEX IF NOT EXISTS idx_videos_uploaded_at ON videos (uploaded_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_videos_channel_id ON videos (channel_id)",
+        "CREATE INDEX IF NOT EXISTS idx_videos_ai_notes_status ON videos (ai_notes_status)",
+        "CREATE INDEX IF NOT EXISTS idx_videos_summary_missing ON videos (id) WHERE summary IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_videos_thumbnail_missing ON videos (id) WHERE thumbnail_url IS NULL",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_queue_status_sort ON jobs (queue, status, sort_order, created_at)",
+        "DROP INDEX IF EXISTS idx_jobs_dedupe_active",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe_active ON jobs (queue, dedupe_key) WHERE status IN ('queued', 'running', 'paused') AND dedupe_key IS NOT NULL",
+    ]
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            database=POSTGRES_DB,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+        )
+    except Exception as e:
+        logger.warning(f"Could not connect to Postgres for index bootstrap: {e}")
+        return
+    try:
+        try:
+            await conn.execute("""
+                WITH ranked AS (
+                    SELECT
+                        id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY queue, dedupe_key
+                            ORDER BY
+                                CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+                                created_at
+                        ) AS rn
+                    FROM jobs
+                    WHERE dedupe_key IS NOT NULL
+                      AND status IN ('queued', 'running', 'paused')
+                )
+                UPDATE jobs
+                SET
+                    status = 'cancelled',
+                    finished_at = NOW(),
+                    error_message = 'Cancelled duplicate active job during dedupe cleanup'
+                WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+            """)
+        except Exception as e:
+            logger.warning(f"Could not clean duplicate active jobs before index bootstrap: {e}")
+        for statement in statements:
+            try:
+                await conn.execute(statement)
+            except Exception as e:
+                logger.warning(f"Could not ensure index with statement '{statement}': {e}")
+        logger.info("Ensured database indexes")
+    finally:
+        await conn.close()
+
+
 # ---- Worker ----
 
 async def worker_loop():
@@ -147,7 +281,11 @@ async def worker_loop():
             await directus.update_job(job["id"], {
                 "status": "running",
                 "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": None,
                 "error_message": None,
+                "progress_current": None,
+                "progress_total": None,
+                "progress_label": None,
             })
             if task_type == "channel":
                 await process_channel_task(task)
@@ -157,6 +295,8 @@ async def worker_loop():
                 await process_refresh_task(task)
             elif task_type == "refresh_dates":
                 await process_refresh_dates_task()
+            elif task_type == "refresh_thumbnails":
+                await process_refresh_thumbnails_task()
             else:
                 raise ValueError(f"Unknown fetch job type: {task_type}")
             await directus.update_job(job["id"], {
@@ -164,19 +304,11 @@ async def worker_loop():
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             })
         except asyncio.CancelledError:
-            await directus.update_job(job["id"], {
-                "status": "cancelled",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "error_message": "Stopped by user",
-            })
+            await retry_or_fail_job(job, RuntimeError("Stopped by user"), stopped=True)
             raise
         except Exception as e:
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
-            await directus.update_job(job["id"], {
-                "status": "error",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "error_message": str(e)[:1000],
-            })
+            await retry_or_fail_job(job, e)
         finally:
             current_task_info = {}
             current_job_id = None
@@ -207,7 +339,11 @@ async def ai_worker_loop():
             await directus.update_job(job["id"], {
                 "status": "running",
                 "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": None,
                 "error_message": None,
+                "progress_current": None,
+                "progress_total": None,
+                "progress_label": None,
             })
             if task_type == "ai_notes":
                 await process_ai_notes_task(task)
@@ -220,19 +356,11 @@ async def ai_worker_loop():
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             })
         except asyncio.CancelledError:
-            await directus.update_job(job["id"], {
-                "status": "cancelled",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "error_message": "Stopped by user",
-            })
+            await retry_or_fail_job(job, RuntimeError("Stopped by user"), stopped=True)
             raise
         except Exception as e:
             logger.error(f"AI worker error on task {task}: {e}", exc_info=True)
-            await directus.update_job(job["id"], {
-                "status": "error",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "error_message": str(e)[:1000],
-            })
+            await retry_or_fail_job(job, e)
         finally:
             current_ai_task_info = {}
             current_ai_job_id = None
@@ -276,21 +404,24 @@ async def process_channel_task(task: dict):
         if channel_id:
             await directus.update_channel(channel_id, {"video_count": len(videos)})
 
-        # Backfill upload dates for already stored videos whenever the channel list has them.
-        # This keeps regular channel refreshes from leaving old rows permanently date-less.
+        # Backfill lightweight metadata for already stored videos whenever the channel list has it.
+        # This keeps regular channel refreshes from leaving old rows permanently incomplete.
         if existing:
             by_video_id = {video["video_id"]: video for video in videos}
             backfilled = 0
             for yt_id, stored_video in existing.items():
-                if stored_video.get("uploaded_at"):
+                channel_video = by_video_id.get(yt_id) or {}
+                update_data = {}
+                if not stored_video.get("uploaded_at") and channel_video.get("uploaded_at"):
+                    update_data["uploaded_at"] = channel_video["uploaded_at"]
+                if not stored_video.get("thumbnail_url") and channel_video.get("thumbnail_url"):
+                    update_data["thumbnail_url"] = channel_video["thumbnail_url"]
+                if not update_data:
                     continue
-                uploaded_at = (by_video_id.get(yt_id) or {}).get("uploaded_at")
-                if not uploaded_at:
-                    continue
-                await directus.update_video(stored_video["id"], {"uploaded_at": uploaded_at})
+                await directus.update_video(stored_video["id"], update_data)
                 backfilled += 1
             if backfilled:
-                logger.info(f"Backfilled upload dates for {backfilled} existing videos")
+                logger.info(f"Backfilled metadata for {backfilled} existing videos")
 
         # Process each new video
         for i, video in enumerate(new_videos):
@@ -303,6 +434,7 @@ async def process_channel_task(task: dict):
                 "phase": f"transcript {i+1}/{len(new_videos)}",
                 "video": video.get("title", video["video_id"]),
             }
+            await update_job_progress("fetch", i + 1, len(new_videos), video.get("title") or video["video_id"])
 
             # Create video record as pending
             if not video.get("uploaded_at"):
@@ -312,6 +444,8 @@ async def process_channel_task(task: dict):
                     video["uploaded_at"] = uploaded_at
                     if not video.get("duration_seconds") and info.get("duration"):
                         video["duration_seconds"] = info.get("duration")
+                    if not video.get("thumbnail_url"):
+                        video["thumbnail_url"] = best_thumbnail_url(info)
                     logger.info(f"Filled upload date for {video['video_id']}: {uploaded_at}")
 
             video_record = {**video, "channel_id": channel_id, "status": "pending"}
@@ -417,6 +551,7 @@ async def process_single_video_task(task: dict):
         "url": video_url or (existing or {}).get("url"),
         "duration_seconds": info.get("duration") or (existing or {}).get("duration_seconds"),
         "uploaded_at": uploaded_at or (existing or {}).get("uploaded_at"),
+        "thumbnail_url": best_thumbnail_url(info) or (existing or {}).get("thumbnail_url"),
         "channel_id": channel_id,
         "status": "pending",
     }
@@ -484,6 +619,7 @@ async def process_refresh_dates_task():
 
         yt_id = video["video_id"]
         current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{total}", "video": yt_id}
+        await update_job_progress("fetch", i + 1, total, yt_id)
 
         info = await loop.run_in_executor(None, fetch_video_date_info, yt_id)
         if not info:
@@ -508,9 +644,41 @@ async def process_refresh_dates_task():
     )
 
 
-async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bool:
+async def process_refresh_thumbnails_task():
+    """Fetch thumbnails for videos that are missing thumbnail_url."""
+    global current_task_info
+    videos = await directus.get_videos_missing_thumbnail()
+    if not videos:
+        logger.info("No videos with missing thumbnails")
+        return
+
+    total = len(videos)
+    logger.info(f"Refreshing thumbnails for {total} videos")
+    updated = 0
+    missing = 0
+
+    for i, video in enumerate(videos):
+        if stop_flag:
+            break
+
+        yt_id = video["video_id"]
+        current_task_info = {"type": "refresh_thumbnails", "phase": f"{i+1}/{total}", "video": yt_id}
+        await update_job_progress("fetch", i + 1, total, yt_id)
+        thumbnail_url = youtube_thumbnail_url(yt_id)
+        if not thumbnail_url:
+            missing += 1
+            continue
+
+        await directus.update_video(video["id"], {"thumbnail_url": thumbnail_url})
+        updated += 1
+
+    logger.info(f"Thumbnail refresh complete: checked={updated + missing} updated={updated} missing={missing}")
+
+
+async def generate_and_store_ai_notes(directus_video_id: str, video: dict, fields: Optional[list[str]] = None) -> bool:
     """Generate and persist AI notebook fields for a single Directus video."""
     global current_ai_task_info
+    requested_fields = [field for field in (fields or []) if field in AI_NOTE_GENERATED_FIELDS]
     current_ai_task_info = {
         "type": "ai_note_video",
         "phase": "AI jegyzet generálása",
@@ -530,6 +698,8 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict) -> bo
             })
             return False
 
+        if requested_fields:
+            notes = {field: notes.get(field) for field in requested_fields if field in notes}
         await directus.update_video(directus_video_id, {
             **notes,
             "ai_notes_status": "done",
@@ -576,6 +746,7 @@ async def process_ai_notes_task(task: dict):
             "video_id": video.get("id"),
             "video": video.get("title") or video.get("video_id"),
         }
+        await update_job_progress("ai", i + 1, len(videos), video.get("title") or video.get("video_id"))
         ok = await generate_and_store_ai_notes(video["id"], video)
         if ok:
             done += 1
@@ -606,7 +777,8 @@ async def process_single_ai_note_task(task: dict):
         "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
     }
-    await generate_and_store_ai_notes(video_id, video)
+    fields = task.get("fields")
+    await generate_and_store_ai_notes(video_id, video, fields if isinstance(fields, list) else None)
 
 
 async def enqueue_ai_note(video_id: str):
@@ -615,17 +787,18 @@ async def enqueue_ai_note(video_id: str):
         "ai_notes_status": "pending",
         "ai_notes_error": None,
     })
-    return await directus.create_job("ai", {"type": "ai_note_video", "video_id": video_id})
+    task = {"type": "ai_note_video", "video_id": video_id}
+    return await directus.create_job("ai", task, dedupe_key=job_dedupe_key("ai", task))
 
 
 async def enqueue_fetch_job(task: dict, label: Optional[str] = None):
     """Create a persistent fetch job."""
-    return await directus.create_job("fetch", task, label=label)
+    return await directus.create_job("fetch", task, label=label, dedupe_key=job_dedupe_key("fetch", task))
 
 
 async def enqueue_ai_job(task: dict, label: Optional[str] = None):
     """Create a persistent AI job."""
-    return await directus.create_job("ai", task, label=label)
+    return await directus.create_job("ai", task, label=label, dedupe_key=job_dedupe_key("ai", task))
 
 
 async def clear_ai_notes(video_id: str) -> dict:
@@ -637,6 +810,7 @@ async def clear_ai_notes(video_id: str) -> dict:
         "questions": None,
         "obsidian_note": None,
         "study_guide": None,
+        "critique": None,
         "ai_notes_status": None,
         "ai_notes_generated_at": None,
         "ai_notes_error": None,
@@ -715,6 +889,9 @@ async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Op
         "video": running.get("label"),
         "video_id": payload.get("video_id"),
         "job_id": running.get("id"),
+        "progress_current": running.get("progress_current"),
+        "progress_total": running.get("progress_total"),
+        "progress_label": running.get("progress_label"),
     }
 
 
@@ -760,6 +937,7 @@ async def lifespan(app: FastAPI):
     # Bootstrap schema
     try:
         await directus.ensure_schema()
+        await ensure_database_indexes()
         cancelled = await directus.mark_stale_running_jobs_cancelled()
         if cancelled:
             logger.info(f"Marked {cancelled} stale running jobs as cancelled")
@@ -818,6 +996,10 @@ class AiNotesRequest(BaseModel):
 
 class ChannelAiNotesRequest(BaseModel):
     limit: int = 500
+
+
+class AiNoteRegenerateRequest(BaseModel):
+    fields: list[str]
 
 
 class JobMoveRequest(BaseModel):
@@ -902,6 +1084,9 @@ async def resume_job(job_id: str):
         "started_at": None,
         "finished_at": None,
         "error_message": None,
+        "progress_current": None,
+        "progress_total": None,
+        "progress_label": None,
     })
 
 
@@ -918,6 +1103,9 @@ async def start_job_now(job_id: str):
         "started_at": None,
         "finished_at": None,
         "error_message": None,
+        "progress_current": None,
+        "progress_total": None,
+        "progress_label": None,
     })
 
 
@@ -1076,6 +1264,16 @@ async def refresh_dates():
     return {"queued": True, "job_id": job.get("id")}
 
 
+@app.post("/refresh-thumbnails")
+async def refresh_thumbnails():
+    """Queue a task to fetch missing thumbnail URLs for all videos."""
+    existing = await directus.get_active_job_by_type("fetch", "refresh_thumbnails")
+    if existing:
+        return {"queued": False, "existing": True, "job_id": existing["id"]}
+    job = await enqueue_fetch_job({"type": "refresh_thumbnails"})
+    return {"queued": True, "job_id": job.get("id")}
+
+
 @app.post("/ai-notes")
 async def ai_notes(request: AiNotesRequest):
     """Queue AI note generation for videos that have transcripts but no summary."""
@@ -1098,6 +1296,29 @@ async def ai_note_video(video_id: str):
 
     await enqueue_ai_note(video_id)
     return {"queued": True, "video_id": video_id}
+
+
+@app.post("/ai-notes/{video_id}/regenerate")
+async def regenerate_ai_note_fields(video_id: str, request: AiNoteRegenerateRequest):
+    """Queue regeneration for selected AI note fields on one video."""
+    video = await directus.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if not (video.get("transcript") or video.get("transcript_timed")):
+        raise HTTPException(status_code=400, detail="Video has no transcript")
+
+    fields = [field for field in request.fields if field in AI_NOTE_GENERATED_FIELDS]
+    if not fields:
+        raise HTTPException(status_code=400, detail="No supported AI note fields requested")
+
+    await directus.update_video(video_id, {
+        **{field: None for field in fields},
+        "ai_notes_status": "pending",
+        "ai_notes_error": None,
+    })
+    task = {"type": "ai_note_video", "video_id": video_id, "fields": fields}
+    job = await enqueue_ai_job(task)
+    return {"queued": not job.get("existing"), "existing": bool(job.get("existing")), "video_id": video_id, "fields": fields, "job_id": job.get("id")}
 
 
 @app.post("/channels/{channel_id}/ai-notes")

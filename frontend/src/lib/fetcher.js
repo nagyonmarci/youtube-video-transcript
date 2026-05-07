@@ -98,6 +98,12 @@ export async function refreshDates() {
   return res.json();
 }
 
+export async function refreshThumbnails() {
+  const res = await fetch(`${FETCHER_URL}/refresh-thumbnails`, { method: 'POST' });
+  if (!res.ok) throw new Error(`refresh-thumbnails → ${res.status}`);
+  return res.json();
+}
+
 export async function generateAiNotes(limit = 20000) {
   const res = await fetch(`${FETCHER_URL}/ai-notes`, {
     method: 'POST',
@@ -134,6 +140,23 @@ export async function generateAiNoteForVideo(videoId) {
       detail = data.detail ? `: ${data.detail}` : '';
     } catch {}
     throw new Error(`ai-notes/${videoId} → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
+export async function regenerateAiNoteFields(videoId, fields) {
+  const res = await fetch(`${FETCHER_URL}/ai-notes/${videoId}/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`ai-notes/${videoId}/regenerate → ${res.status}${detail}`);
   }
   return res.json();
 }

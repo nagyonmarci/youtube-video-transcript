@@ -132,6 +132,7 @@ export function videoToObsidianMd(video, { channel = null, timed = true } = {}) 
       channelLabel ? `channel: ${yamlString(channelLabel)}` : '',
       video.video_id ? `video_id: ${yamlString(video.video_id)}` : '',
       video.url ? `url: ${yamlString(video.url)}` : '',
+      video.thumbnail_url ? `thumbnail: ${yamlString(video.thumbnail_url)}` : '',
       uploaded ? `uploaded: ${uploaded}` : '',
       duration ? `duration: ${yamlString(duration)}` : '',
       video.ai_notes_status ? `ai_notes_status: ${yamlString(video.ai_notes_status)}` : '',
@@ -144,6 +145,7 @@ export function videoToObsidianMd(video, { channel = null, timed = true } = {}) 
     `# ${title}`,
     '',
     video.url ? `Forrás: [YouTube](${video.url})` : '',
+    video.thumbnail_url ? `![Thumbnail](${video.thumbnail_url})` : '',
     channelLabel ? `Csatorna: [[${channelLabel}]]` : '',
     uploaded ? `Feltöltve: ${uploaded}` : '',
     duration ? `Hossz: ${duration}` : '',
@@ -159,6 +161,10 @@ export function videoToObsidianMd(video, { channel = null, timed = true } = {}) 
     video.study_guide ? '' : '',
     video.study_guide || '',
     video.study_guide ? '' : '',
+    video.critique ? '## Kritikai jegyzetek' : '',
+    video.critique ? '' : '',
+    video.critique || '',
+    video.critique ? '' : '',
     video.obsidian_note ? '## AI jegyzet' : '',
     video.obsidian_note ? '' : '',
     video.obsidian_note || '',
@@ -181,6 +187,9 @@ export function videoToMarkmapMd(video) {
   let body = (video.obsidian_note || '').trim();
   if (body) {
     if (!body.startsWith('# ')) body = `# ${title}\n${body}`;
+    if (video.critique) {
+      body += `\n\n## Critical Notes\n${video.critique}`;
+    }
   } else {
     const lines = [`# ${title}`];
     if (video.summary) {
@@ -193,6 +202,13 @@ export function videoToMarkmapMd(video) {
         video[key].forEach(t => lines.push(`- ${t}`));
       }
     });
+    if (video.critique) {
+      lines.push('## Critical Notes');
+      video.critique.split('\n').filter(Boolean).forEach(line => {
+        const trimmed = line.trim();
+        lines.push(trimmed.startsWith('#') || trimmed.startsWith('-') ? trimmed : `- ${trimmed}`);
+      });
+    }
     body = lines.join('\n');
   }
   return `${fm}\n\n${body}`;

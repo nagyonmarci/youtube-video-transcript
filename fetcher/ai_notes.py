@@ -65,8 +65,9 @@ Rules:
 - Do not invent facts, dates, claims, names, or conclusions.
 - The response must be ONLY valid JSON, without a markdown code block.
 - The "topics", "takeaways", and "questions" fields must be arrays.
-- The "obsidian_note" field must start with "# {{video title}}" as the root heading, followed by "## Section" headings. ALL content must be "- bullet" items — no prose paragraphs. This makes it compatible with the Obsidian markmap plugin for mind map rendering.
+- The "obsidian_note" field must start with "# {{video title}}" as the root heading, followed by "## Section" headings. ALL content must be "- bullet" items — no prose paragraphs. Include a "## Critical Notes" section when critique points exist. This makes it compatible with the Obsidian markmap plugin for mind map rendering.
 - The "study_guide" field must be structured learning markdown: "## Learning Objectives" (3-5 bullet goals), "## Key Concepts" (- **Term**: definition), "## Content Breakdown" (timestamp-anchored bullets, e.g. "(5:23) Topic: ..."), "## Review" (2-3 practice prompts). English only.
+- The "critique" field must challenge the video's reasoning using only the transcript: unsupported claims, overgeneralizations, missing caveats, assumptions to verify, and alternative interpretations. Do not fact-check with outside knowledge.
 - If the transcript contains timestamps, keep them next to important claims in parentheses, for example (12:34).
 
 JSON schema:
@@ -76,7 +77,8 @@ JSON schema:
   "takeaways": ["key takeaway 1", "key takeaway 2"],
   "questions": ["useful review or study question 1", "question 2"],
   "obsidian_note": "# Video Title\\n## Summary\\n- key point 1\\n- key point 2\\n\\n## Topics\\n- topic 1\\n\\n## Takeaways\\n- takeaway 1\\n\\n## Questions\\n- question 1",
-  "study_guide": "## Learning Objectives\\n- ...\\n\\n## Key Concepts\\n- **Term**: definition\\n\\n## Content Breakdown\\n- (0:00) Introduction: ...\\n- (5:23) Core topic: ...\\n\\n## Review\\n- Try to explain X in your own words"
+  "study_guide": "## Learning Objectives\\n- ...\\n\\n## Key Concepts\\n- **Term**: definition\\n\\n## Content Breakdown\\n- (0:00) Introduction: ...\\n- (5:23) Core topic: ...\\n\\n## Review\\n- Try to explain X in your own words",
+  "critique": "## Critical Notes\\n- The transcript asserts ... but does not show ...\\n\\n## Assumptions to Check\\n- ...\\n\\n## Alternative Interpretations\\n- ..."
 }}
 
 Video:
@@ -123,4 +125,5 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
         "questions": normalize_list(parsed.get("questions")),
         "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
         "study_guide": str(parsed.get("study_guide", "")).strip(),
+        "critique": str(parsed.get("critique", "")).strip(),
     }

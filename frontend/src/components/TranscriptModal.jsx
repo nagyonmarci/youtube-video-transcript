@@ -51,7 +51,7 @@ export default function TranscriptModal({ video, onClose }) {
   if (!video) return null;
   const visibleTranscript = showTimed && video.transcript_timed ? video.transcript_timed : video.transcript;
   const hasTimedTranscript = Boolean(video.transcript_timed);
-  const hasMindmap = Boolean(video.obsidian_note || video.summary);
+  const hasMindmap = Boolean(video.obsidian_note || video.summary || video.critique);
 
   async function copyToClipboard() {
     try {
@@ -90,7 +90,15 @@ export default function TranscriptModal({ video, onClose }) {
       >
         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-            <div>
+            <div style={{ display: 'flex', gap: '0.8rem', minWidth: 0 }}>
+              {video.thumbnail_url && (
+                <img
+                  src={video.thumbnail_url}
+                  alt=""
+                  style={{ width: '128px', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: '6px', flex: '0 0 auto', background: 'rgba(255,255,255,0.06)' }}
+                />
+              )}
+              <div style={{ minWidth: 0 }}>
               <a
                 href={video.url}
                 target="_blank"
@@ -102,6 +110,7 @@ export default function TranscriptModal({ video, onClose }) {
               <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', color: '#888', display: 'flex', gap: '1rem' }}>
                 {video.uploaded_at && <span>Feltöltve: {formatDate(video.uploaded_at)}</span>}
                 {video.duration_seconds && <span>Hossz: {formatDuration(video.duration_seconds)}</span>}
+              </div>
               </div>
             </div>
             <button onClick={onClose} style={{ fontSize: '1.2rem', padding: '0.1rem 0.5rem', flexShrink: 0 }}>✕</button>
@@ -182,7 +191,7 @@ export default function TranscriptModal({ video, onClose }) {
         <div style={{ padding: '1rem 1.25rem', overflowY: 'auto', flex: 1 }}>
           {activeTab === 'transcript' && (
             <>
-              {(video.summary || video.topics?.length || video.takeaways?.length || video.questions?.length || video.study_guide) && (
+              {(video.summary || video.topics?.length || video.takeaways?.length || video.questions?.length || video.study_guide || video.critique) && (
                 <div style={{ marginBottom: '1.2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
                   <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: '#fff' }}>AI jegyzet</h3>
                   {video.summary && (
@@ -201,6 +210,14 @@ export default function TranscriptModal({ video, onClose }) {
                       <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>Tanulási útmutató</h4>
                       <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', color: '#ddd', fontFamily: 'inherit', margin: '0.35rem 0 0.8rem', lineHeight: 1.6 }}>
                         {video.study_guide}
+                      </pre>
+                    </>
+                  )}
+                  {video.critique && (
+                    <>
+                      <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>Kritikai jegyzetek</h4>
+                      <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', color: '#ddd', fontFamily: 'inherit', margin: '0.35rem 0 0.8rem', lineHeight: 1.6 }}>
+                        {video.critique}
                       </pre>
                     </>
                   )}

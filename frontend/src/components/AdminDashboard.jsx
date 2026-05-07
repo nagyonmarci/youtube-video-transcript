@@ -8,6 +8,7 @@ import {
   moveJob,
   pauseJob,
   refreshDates,
+  refreshThumbnails,
   resumeJob,
   startJob,
   stopProcessing,
@@ -25,6 +26,13 @@ function keepIfSame(prev, next) {
   return sameData(prev, next) ? prev : next;
 }
 
+function formatProgress(current, total) {
+  const cur = Number(current || 0);
+  const max = Number(total || 0);
+  if (!cur || !max) return '';
+  return `${cur}/${max} (${Math.round((cur / max) * 100)}%)`;
+}
+
 function cronToDailyTime(cron) {
   const parts = (cron || '').trim().split(/\s+/);
   if (parts.length !== 5 || parts[2] !== '*' || parts[3] !== '*' || parts[4] !== '*') return '07:00';
@@ -40,6 +48,7 @@ function dailyTimeToCron(time) {
 
 function StatusLine({ title, queueSize, current, onStop }) {
   const active = queueSize > 0 || Boolean(current?.type);
+  const progressText = formatProgress(current?.progress_current, current?.progress_total);
   return (
     <div className="process-line">
       <div>
@@ -51,11 +60,19 @@ function StatusLine({ title, queueSize, current, onStop }) {
               {current?.phase && <span> · {current.phase}</span>}
               {current?.video && <span> · {current.video}</span>}
               {current?.video_id && !current?.video && <span> · {current.video_id}</span>}
+              {progressText && <span> · {progressText}</span>}
             </>
           ) : (
             <span>Nincs futó feladat</span>
           )}
         </p>
+        {progressText && (
+          <progress
+            className="job-progress"
+            value={Number(current.progress_current || 0)}
+            max={Number(current.progress_total || 1)}
+          />
+        )}
       </div>
       <div className="process-actions">
         <span className={`badge ${active ? 'badge-processing' : 'badge-done'}`}>
@@ -105,6 +122,7 @@ function JobQueuePanel({ jobs, onAction, busy }) {
             const running = job.status === 'running';
             const paused = job.status === 'paused';
             const reorderable = ['queued', 'paused'].includes(job.status);
+            const progressText = formatProgress(job.progress_current, job.progress_total);
             return (
               <tr key={job.id}>
                 <td>
@@ -114,12 +132,25 @@ function JobQueuePanel({ jobs, onAction, busy }) {
                 </td>
                 <td>
                   <div className="job-label">{job.label || job.type}</div>
+                  {progressText && <div className="job-progress-text">{progressText}</div>}
+                  {progressText && (
+                    <progress
+                      className="job-progress"
+                      value={Number(job.progress_current || 0)}
+                      max={Number(job.progress_total || 1)}
+                    />
+                  )}
                   {job.error_message && <div className="job-error">{job.error_message}</div>}
                 </td>
                 <td>
                   <span className={`badge badge-${job.status}`}>
                     {JOB_STATUS_LABELS[job.status] || job.status}
                   </span>
+                  {Number(job.attempts || 0) > 0 && (
+                    <div className="job-progress-text">
+                      Próba {job.attempts}/{job.max_attempts || 3}
+                    </div>
+                  )}
                 </td>
                 <td>{formatJobTime(job.created_at)}</td>
                 <td>
@@ -265,6 +296,9 @@ export default function AdminDashboard({
           <div className="admin-section-actions">
             <button disabled={busy} onClick={() => runAction(refreshDates, 'Dátum frissítés sorba állítva')}>
               Hiányzó dátumok
+            </button>
+            <button disabled={busy} onClick={() => runAction(refreshThumbnails, 'Thumbnail frissítés sorba állítva')}>
+              Hiányzó képek
             </button>
             <button
               disabled={busy}

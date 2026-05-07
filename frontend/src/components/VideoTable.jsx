@@ -165,16 +165,26 @@ export default function VideoTable({
                       onClick={() => video.transcript && onSelectVideo(video)}
                     >
                       <td>
-                        <a
-                          href={video.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="video-link"
-                          title={video.title || 'Ismeretlen'}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {video.title || 'Ismeretlen'}
-                        </a>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
+                          {video.thumbnail_url && (
+                            <img
+                              src={video.thumbnail_url}
+                              alt=""
+                              loading="lazy"
+                              style={{ width: '56px', height: '32px', objectFit: 'cover', borderRadius: '4px', flex: '0 0 auto', background: 'rgba(255,255,255,0.06)' }}
+                            />
+                          )}
+                          <a
+                            href={video.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="video-link"
+                            title={video.title || 'Ismeretlen'}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {video.title || 'Ismeretlen'}
+                          </a>
+                        </div>
                       </td>
                       <td>{formatDate(video.uploaded_at)}</td>
                       <td>{formatDuration(video.duration_seconds)}</td>
