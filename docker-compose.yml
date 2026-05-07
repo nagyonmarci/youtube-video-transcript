@@ -58,8 +58,67 @@ services:
       POSTGRES_DB: directus
       POSTGRES_USER: directus
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      FETCHER_ROLE: api
+      FETCH_WORKER_CONCURRENCY: 0
+      AI_WORKER_CONCURRENCY: 0
       REFRESH_CRON: ${REFRESH_CRON:-0 7 * * *}
       SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Europe/Budapest}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-gemma4:31b}
+      AI_NOTES_AUTO: ${AI_NOTES_AUTO:-true}
+      AI_NOTES_BATCH_LIMIT: ${AI_NOTES_BATCH_LIMIT:-10}
+      AI_NOTES_MAX_BATCH_LIMIT: ${AI_NOTES_MAX_BATCH_LIMIT:-20000}
+
+  fetch-worker:
+    build: ./fetcher
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    depends_on:
+      - directus
+    networks:
+      - app-network
+    environment:
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: directus
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      FETCHER_ROLE: worker
+      WORKER_ID: fetch-worker
+      WORKER_QUEUES: fetch
+      FETCH_WORKER_CONCURRENCY: ${FETCH_WORKER_CONCURRENCY:-1}
+      AI_WORKER_CONCURRENCY: 0
+      STALE_JOB_MINUTES: ${STALE_JOB_MINUTES:-30}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-gemma4:31b}
+      AI_NOTES_AUTO: ${AI_NOTES_AUTO:-true}
+      AI_NOTES_BATCH_LIMIT: ${AI_NOTES_BATCH_LIMIT:-10}
+      AI_NOTES_MAX_BATCH_LIMIT: ${AI_NOTES_MAX_BATCH_LIMIT:-20000}
+
+  ai-worker:
+    build: ./fetcher
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    depends_on:
+      - directus
+    networks:
+      - app-network
+    environment:
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: directus
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      FETCHER_ROLE: worker
+      WORKER_ID: ai-worker
+      WORKER_QUEUES: ai
+      FETCH_WORKER_CONCURRENCY: 0
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
+      STALE_JOB_MINUTES: ${STALE_JOB_MINUTES:-30}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-gemma4:31b}
       AI_NOTES_AUTO: ${AI_NOTES_AUTO:-true}

@@ -8,7 +8,9 @@ import asyncio
 import json
 import logging
 import os
+import socket
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -53,8 +55,15 @@ SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
 AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "true").lower() in {"1", "true", "yes", "on"}
 AI_NOTES_BATCH_LIMIT = int(os.environ.get("AI_NOTES_BATCH_LIMIT", "10"))
 AI_NOTES_MAX_BATCH_LIMIT = int(os.environ.get("AI_NOTES_MAX_BATCH_LIMIT", "20000"))
+FETCHER_ROLE = os.environ.get("FETCHER_ROLE", "all").lower()
+WORKER_QUEUES = {item.strip() for item in os.environ.get("WORKER_QUEUES", "fetch,ai").split(",") if item.strip()}
+FETCH_WORKER_CONCURRENCY = max(0, int(os.environ.get("FETCH_WORKER_CONCURRENCY", "1")))
+AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
+STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
+WORKER_ID = os.environ.get("WORKER_ID") or f"{socket.gethostname()}:{os.getpid()}"
 
 directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
+pg_pool: Optional[asyncpg.Pool] = None
 
 # Worker state
 task_queue: asyncio.Queue = asyncio.Queue()
@@ -67,6 +76,9 @@ current_ai_task_info: dict = {}
 current_job_id: Optional[str] = None
 current_ai_job_id: Optional[str] = None
 scheduler: Optional[AsyncIOScheduler] = None
+current_job_id_var: ContextVar[Optional[str]] = ContextVar("current_job_id", default=None)
+current_job_queue_var: ContextVar[Optional[str]] = ContextVar("current_job_queue", default=None)
+current_task_info_var: ContextVar[dict] = ContextVar("current_task_info", default={})
 AI_NOTE_GENERATED_FIELDS = {
     "summary",
     "topics",
@@ -116,6 +128,29 @@ async def save_schedule_settings(cron: str, timezone_name: str):
     await directus.set_setting("scheduler_timezone", timezone_name)
 
 
+async def get_pg_pool() -> asyncpg.Pool:
+    global pg_pool
+    if pg_pool:
+        return pg_pool
+    pg_pool = await asyncpg.create_pool(
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        database=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        min_size=1,
+        max_size=max(4, FETCH_WORKER_CONCURRENCY + AI_WORKER_CONCURRENCY + 2),
+    )
+    return pg_pool
+
+
+async def close_pg_pool():
+    global pg_pool
+    if pg_pool:
+        await pg_pool.close()
+        pg_pool = None
+
+
 def start_refresh_scheduler():
     global scheduler
     if scheduler:
@@ -157,8 +192,10 @@ def job_dedupe_key(queue: str, task: dict) -> str:
 
 
 async def update_job_progress(queue: str, current: int, total: int, label: Optional[str] = None):
-    job_id = current_ai_job_id if queue == "ai" else current_job_id
-    state = current_ai_task_info if queue == "ai" else current_task_info
+    job_id = current_job_id_var.get() or (current_ai_job_id if queue == "ai" else current_job_id)
+    state = current_task_info_var.get()
+    if not state:
+        state = current_ai_task_info if queue == "ai" else current_task_info
     state["progress_current"] = current
     state["progress_total"] = total
     if label:
@@ -184,6 +221,8 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
             "finished_at": now,
             "error_message": error_message,
             "last_error": error_message,
+            "locked_at": None,
+            "locked_by": None,
         })
         return
     await directus.update_job(job["id"], {
@@ -193,12 +232,104 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
         "error_message": f"Retry {attempts}/{max_attempts}: {error_message}",
         "last_error": error_message,
         "progress_label": "retry queued",
+        "locked_at": None,
+        "locked_by": None,
     })
     logger.warning(f"Retrying job {job['id']} ({attempts}/{max_attempts}) after error: {error_message}")
 
 
+async def heartbeat_job(job_id: str):
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await directus.update_job(job_id, {"locked_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            logger.warning(f"Could not heartbeat job {job_id}: {e}")
+
+
+def normalize_claimed_job(row) -> Optional[dict]:
+    if not row:
+        return None
+    job = dict(row)
+    job["id"] = str(job["id"])
+    payload = job.get("payload")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    job["payload"] = payload or {}
+    for key in ("created_at", "started_at", "finished_at", "locked_at"):
+        if job.get(key) is not None:
+            job[key] = job[key].isoformat()
+    return job
+
+
+async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
+    pool = await get_pg_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            WITH next_job AS (
+                SELECT id
+                FROM jobs
+                WHERE queue = $1
+                  AND status = 'queued'
+                ORDER BY sort_order, created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE jobs
+            SET
+                status = 'running',
+                started_at = NOW(),
+                finished_at = NULL,
+                error_message = NULL,
+                progress_current = NULL,
+                progress_total = NULL,
+                progress_label = NULL,
+                locked_at = NOW(),
+                locked_by = $2
+            WHERE id = (SELECT id FROM next_job)
+            RETURNING
+                id, queue, type, label, status, sort_order, payload, dedupe_key,
+                attempts, max_attempts, progress_current, progress_total, progress_label,
+                locked_at, locked_by, created_at, started_at, finished_at,
+                error_message, last_error
+            """,
+            queue,
+            worker_name,
+        )
+    return normalize_claimed_job(row)
+
+
+async def reset_stale_running_jobs(max_age_minutes: int = STALE_JOB_MINUTES) -> int:
+    pool = await get_pg_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE jobs
+            SET
+                status = 'queued',
+                error_message = 'Re-queued stale running job after worker heartbeat timeout',
+                locked_at = NULL,
+                locked_by = NULL
+            WHERE status = 'running'
+              AND locked_at IS NOT NULL
+              AND locked_at < NOW() - make_interval(mins => $1::int)
+            """,
+            max_age_minutes,
+        )
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 async def ensure_database_indexes():
     statements = [
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ",
+        "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS locked_by VARCHAR(255)",
         "CREATE INDEX IF NOT EXISTS idx_videos_uploaded_at ON videos (uploaded_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_videos_channel_id ON videos (channel_id)",
         "CREATE INDEX IF NOT EXISTS idx_videos_ai_notes_status ON videos (ai_notes_status)",
@@ -256,7 +387,7 @@ async def ensure_database_indexes():
 
 # ---- Worker ----
 
-async def worker_loop():
+async def worker_loop(worker_name: str = "fetch-worker"):
     """Main background worker that processes queued tasks."""
     global stop_flag, current_task_info, current_job_id
     while True:
@@ -264,7 +395,7 @@ async def worker_loop():
             await asyncio.sleep(1)
             continue
         try:
-            job = await directus.get_next_job("fetch")
+            job = await claim_next_job("fetch", worker_name)
         except Exception as e:
             logger.warning(f"Could not poll fetch jobs: {e}")
             await asyncio.sleep(2)
@@ -277,16 +408,12 @@ async def worker_loop():
         task = job.get("payload") or {}
         task_type = task.get("type")
         current_job_id = job["id"]
+        current_task_info = {}
+        job_id_token = current_job_id_var.set(job["id"])
+        job_queue_token = current_job_queue_var.set("fetch")
+        task_info_token = current_task_info_var.set(current_task_info)
+        heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
-            await directus.update_job(job["id"], {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "finished_at": None,
-                "error_message": None,
-                "progress_current": None,
-                "progress_total": None,
-                "progress_label": None,
-            })
             if task_type == "channel":
                 await process_channel_task(task)
             elif task_type == "video":
@@ -299,10 +426,14 @@ async def worker_loop():
                 await process_refresh_thumbnails_task()
             else:
                 raise ValueError(f"Unknown fetch job type: {task_type}")
-            await directus.update_job(job["id"], {
-                "status": "done",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            })
+            latest = await directus.get_job(job["id"])
+            if latest and latest.get("status") != "cancelled":
+                await directus.update_job(job["id"], {
+                    "status": "done",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "locked_at": None,
+                    "locked_by": None,
+                })
         except asyncio.CancelledError:
             await retry_or_fail_job(job, RuntimeError("Stopped by user"), stopped=True)
             raise
@@ -310,11 +441,19 @@ async def worker_loop():
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
             await retry_or_fail_job(job, e)
         finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            current_job_id_var.reset(job_id_token)
+            current_job_queue_var.reset(job_queue_token)
+            current_task_info_var.reset(task_info_token)
             current_task_info = {}
             current_job_id = None
 
 
-async def ai_worker_loop():
+async def ai_worker_loop(worker_name: str = "ai-worker"):
     """Background worker for AI notes so LLM calls do not block fetching."""
     global stop_flag, current_ai_task_info, current_ai_job_id
     while True:
@@ -322,7 +461,7 @@ async def ai_worker_loop():
             await asyncio.sleep(1)
             continue
         try:
-            job = await directus.get_next_job("ai")
+            job = await claim_next_job("ai", worker_name)
         except Exception as e:
             logger.warning(f"Could not poll AI jobs: {e}")
             await asyncio.sleep(2)
@@ -335,26 +474,26 @@ async def ai_worker_loop():
         task = job.get("payload") or {}
         task_type = task.get("type")
         current_ai_job_id = job["id"]
+        current_ai_task_info = {}
+        job_id_token = current_job_id_var.set(job["id"])
+        job_queue_token = current_job_queue_var.set("ai")
+        task_info_token = current_task_info_var.set(current_ai_task_info)
+        heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
-            await directus.update_job(job["id"], {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "finished_at": None,
-                "error_message": None,
-                "progress_current": None,
-                "progress_total": None,
-                "progress_label": None,
-            })
             if task_type == "ai_notes":
                 await process_ai_notes_task(task)
             elif task_type == "ai_note_video":
                 await process_single_ai_note_task(task)
             else:
                 raise ValueError(f"Unknown AI job type: {task_type}")
-            await directus.update_job(job["id"], {
-                "status": "done",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            })
+            latest = await directus.get_job(job["id"])
+            if latest and latest.get("status") != "cancelled":
+                await directus.update_job(job["id"], {
+                    "status": "done",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "locked_at": None,
+                    "locked_by": None,
+                })
         except asyncio.CancelledError:
             await retry_or_fail_job(job, RuntimeError("Stopped by user"), stopped=True)
             raise
@@ -362,6 +501,14 @@ async def ai_worker_loop():
             logger.error(f"AI worker error on task {task}: {e}", exc_info=True)
             await retry_or_fail_job(job, e)
         finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            current_job_id_var.reset(job_id_token)
+            current_job_queue_var.reset(job_queue_token)
+            current_task_info_var.reset(task_info_token)
             current_ai_task_info = {}
             current_ai_job_id = None
 
@@ -729,31 +876,41 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
 
 
 async def process_ai_notes_task(task: dict):
-    """Generate AI notes for videos that have transcripts but no summary."""
+    """Fan out a global AI notes batch into per-video jobs."""
     global current_ai_task_info
     limit = max(1, min(int(task.get("limit") or AI_NOTES_BATCH_LIMIT), AI_NOTES_MAX_BATCH_LIMIT))
     videos = await directus.get_videos_missing_ai_notes(limit)
-    logger.info(f"Generating AI notes for {len(videos)} videos")
+    active_video_ids = await directus.get_ai_note_job_video_ids()
+    logger.info(f"Queueing AI note jobs for {len(videos)} candidate videos")
 
-    done = 0
-    failed = 0
+    queued = 0
+    skipped = 0
     for i, video in enumerate(videos):
         if stop_flag:
             break
+        video_id = video["id"]
         current_ai_task_info = {
             "type": "ai_notes",
             "phase": f"{i+1}/{len(videos)}",
-            "video_id": video.get("id"),
+            "video_id": video_id,
             "video": video.get("title") or video.get("video_id"),
         }
         await update_job_progress("ai", i + 1, len(videos), video.get("title") or video.get("video_id"))
-        ok = await generate_and_store_ai_notes(video["id"], video)
-        if ok:
-            done += 1
+        if video_id in active_video_ids:
+            skipped += 1
+            continue
+        await directus.update_video(video_id, {
+            "ai_notes_status": "pending",
+            "ai_notes_error": None,
+        })
+        job = await enqueue_ai_job({"type": "ai_note_video", "video_id": video_id})
+        active_video_ids.add(video_id)
+        if job.get("existing"):
+            skipped += 1
         else:
-            failed += 1
+            queued += 1
 
-    logger.info(f"AI notes batch complete: {done} done, {failed} failed")
+    logger.info(f"AI notes fan-out complete: {queued} queued, {skipped} skipped")
 
 
 async def process_single_ai_note_task(task: dict):
@@ -919,13 +1076,7 @@ async def daily_refresh():
     logger.info(f"Queued {len(channels)} channels for daily refresh")
 
 
-# ---- App lifecycle ----
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global worker_task, ai_worker_task, scheduler
-
-    # Wait for Directus to be ready
+async def bootstrap_runtime(cleanup_pending: bool = True):
     logger.info("Waiting for Directus...")
     for _ in range(40):
         if await directus.health_check():
@@ -934,34 +1085,78 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Directus not responding, continuing anyway")
 
-    # Bootstrap schema
     try:
         await directus.ensure_schema()
         await ensure_database_indexes()
-        cancelled = await directus.mark_stale_running_jobs_cancelled()
-        if cancelled:
-            logger.info(f"Marked {cancelled} stale running jobs as cancelled")
-        await cleanup_orphan_ai_pending_videos()
+        stale = await reset_stale_running_jobs()
+        if stale:
+            logger.info(f"Re-queued {stale} stale running jobs")
+        if cleanup_pending:
+            await cleanup_orphan_ai_pending_videos()
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
     await load_schedule_settings()
 
-    # Start background worker
-    worker_task = asyncio.create_task(worker_loop())
-    ai_worker_task = asyncio.create_task(ai_worker_loop())
 
-    # Start scheduler for daily refresh
-    start_refresh_scheduler()
+def create_worker_tasks() -> list[asyncio.Task]:
+    tasks = []
+    if "fetch" in WORKER_QUEUES:
+        for index in range(FETCH_WORKER_CONCURRENCY):
+            name = f"{WORKER_ID}:fetch:{index + 1}"
+            tasks.append(asyncio.create_task(worker_loop(name), name=name))
+    if "ai" in WORKER_QUEUES:
+        for index in range(AI_WORKER_CONCURRENCY):
+            name = f"{WORKER_ID}:ai:{index + 1}"
+            tasks.append(asyncio.create_task(ai_worker_loop(name), name=name))
+    return tasks
+
+
+async def run_worker_service():
+    await bootstrap_runtime(cleanup_pending=True)
+    tasks = create_worker_tasks()
+    if not tasks:
+        logger.warning("Worker service started with no queues enabled")
+        while True:
+            await asyncio.sleep(3600)
+    logger.info(f"Worker service started with {len(tasks)} worker task(s): {sorted(WORKER_QUEUES)}")
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await close_pg_pool()
+
+
+# ---- App lifecycle ----
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global worker_task, ai_worker_task, scheduler
+
+    await bootstrap_runtime(cleanup_pending=FETCHER_ROLE in {"api", "all"})
+
+    worker_tasks = []
+    if FETCHER_ROLE in {"all", "worker"}:
+        worker_tasks = create_worker_tasks()
+        worker_task = next((task for task in worker_tasks if "fetch" in task.get_name()), None)
+        ai_worker_task = next((task for task in worker_tasks if "ai" in task.get_name()), None)
+
+    if FETCHER_ROLE in {"api", "all"}:
+        start_refresh_scheduler()
+    else:
+        logger.info(f"Fetcher API started in role={FETCHER_ROLE}; scheduler disabled")
 
     yield
 
     # Cleanup
-    if worker_task:
-        worker_task.cancel()
-    if ai_worker_task:
-        ai_worker_task.cancel()
+    for task in worker_tasks:
+        task.cancel()
+    if worker_tasks:
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
     if scheduler:
         scheduler.shutdown(wait=False)
+    await close_pg_pool()
 
 
 app = FastAPI(title="YouTube Transcript Fetcher", lifespan=lifespan)
@@ -1146,6 +1341,16 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     cancelled_current = False
+    if job.get("status") == "running":
+        await directus.update_job(job_id, {
+            "status": "cancelled",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error_message": "Cancelled by user",
+            "locked_at": None,
+            "locked_by": None,
+        })
+        return {"deleted": False, "cancelled": True, "job_id": job_id, "cancelled_current": False}
+
     if job_id == current_job_id and worker_task and not worker_task.done():
         worker_task.cancel()
         try:

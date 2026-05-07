@@ -28,12 +28,14 @@ JOB_PROGRESS_FIELDS = [
     {"field": "progress_current", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
     {"field": "progress_total", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
     {"field": "progress_label", "type": "string", "meta": {"interface": "input", "readonly": True, "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
+    {"field": "locked_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+    {"field": "locked_by", "type": "string", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"max_length": 255, "is_nullable": True}},
     {"field": "last_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
 ]
 
 JOB_LIST_FIELDS = (
     "id,queue,type,label,status,sort_order,payload,dedupe_key,attempts,max_attempts,"
-    "progress_current,progress_total,progress_label,created_at,started_at,finished_at,"
+    "progress_current,progress_total,progress_label,locked_at,locked_by,created_at,started_at,finished_at,"
     "error_message,last_error"
 )
 
