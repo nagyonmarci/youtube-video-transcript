@@ -98,6 +98,12 @@ All configuration lives in `.env` (git-ignored). Copy `.env.example` and set eve
 | `AI_NOTES_AUTO` | Auto-generate notes after each transcript | `true` |
 | `AI_NOTES_BATCH_LIMIT` | Notes generated per batch run | `10` |
 | `AI_NOTES_MAX_BATCH_LIMIT` | Hard cap on batch size | `20000` |
+| `AI_NOTES_YEAR_BACKFILL_ENABLED` | Keep AI notes running for missing videos in one upload year | `true` |
+| `AI_NOTES_YEAR_BACKFILL_YEAR` | Upload year to continuously backfill | `2026` |
+| `AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT` | Max year-backfill jobs to enqueue per refill | `50` |
+| `AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE` | Target queued/running/paused AI jobs to keep available | `100` |
+| `AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS` | API scheduler refill interval | `300` |
+| `AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS` | AI worker idle refill throttle | `60` |
 | `FETCH_WORKER_CONCURRENCY` | Parallel fetch-worker threads | `1` |
 | `AI_WORKER_CONCURRENCY` | Parallel AI-worker threads | `1` |
 | `STALE_JOB_MINUTES` | Re-queue jobs stuck in `running` after N minutes | `30` |

@@ -552,18 +552,36 @@ class DirectusClient:
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
-    async def get_videos_missing_ai_notes(self, limit: int = 10) -> list:
+    def _missing_ai_notes_filter_params(self, year: Optional[int] = None) -> str:
         params = (
             "?filter[_and][0][transcript][_nnull]=true"
             "&filter[_and][1][_or][0][summary][_null]=true"
             "&filter[_and][1][_or][1][critique][_null]=true"
             "&filter[_and][1][_or][2][ai_notes_status][_eq]=error"
-            f"&limit={limit}"
-            "&sort=-uploaded_at"
-            "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"
+        )
+        if year:
+            start = quote(f"{year}-01-01T00:00:00+00:00")
+            end = quote(f"{year + 1}-01-01T00:00:00+00:00")
+            params += (
+                f"&filter[_and][2][uploaded_at][_gte]={start}"
+                f"&filter[_and][3][uploaded_at][_lt]={end}"
+            )
+        return params
+
+    async def get_videos_missing_ai_notes(self, limit: int = 10, year: Optional[int] = None) -> list:
+        params = (
+            self._missing_ai_notes_filter_params(year)
+            + f"&limit={limit}"
+            + "&sort=-uploaded_at"
+            + "&fields=id,video_id,title,url,uploaded_at,duration_seconds,transcript,transcript_timed"
         )
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
+
+    async def count_videos_missing_ai_notes(self, year: Optional[int] = None) -> int:
+        params = f"{self._missing_ai_notes_filter_params(year)}&limit=1&meta=filter_count&fields=id"
+        result = await self._request("GET", f"/items/videos{params}")
+        return int(result.get("meta", {}).get("filter_count") or 0)
 
     async def get_channel_videos_missing_ai_notes(self, channel_id: str, limit: int = 500) -> list:
         params = (

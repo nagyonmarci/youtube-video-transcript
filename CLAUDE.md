@@ -93,6 +93,7 @@ Astro shell (`src/pages/index.astro`) that mounts a single React SPA (`src/App.j
 3. `ai_notes.py::generate_ai_notes()` calls Ollama (`OLLAMA_CHAT_MODEL`, default `gemma4:31b-mlx-bf16`) and returns `{summary, topics, takeaways, questions, obsidian_note}`
 4. `obsidian_note` is markmap-compatible: starts with `# Title`, uses `## Section` + `- bullets` only
 5. Frontend can export per-video markmap files via `videoToMarkmapMd()` in `export.js`
+6. The year backfill loop keeps enqueueing missing AI notes for `AI_NOTES_YEAR_BACKFILL_YEAR` (default `2026`) until every eligible video from that upload year has notes.
 
 ## Job Queue Patterns
 

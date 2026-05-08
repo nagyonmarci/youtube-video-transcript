@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import socket
+import time
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -72,6 +73,12 @@ SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
 AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "true").lower() in {"1", "true", "yes", "on"}
 AI_NOTES_BATCH_LIMIT = int(os.environ.get("AI_NOTES_BATCH_LIMIT", "10"))
 AI_NOTES_MAX_BATCH_LIMIT = int(os.environ.get("AI_NOTES_MAX_BATCH_LIMIT", "20000"))
+AI_NOTES_YEAR_BACKFILL_ENABLED = os.environ.get("AI_NOTES_YEAR_BACKFILL_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+AI_NOTES_YEAR_BACKFILL_YEAR = int(os.environ.get("AI_NOTES_YEAR_BACKFILL_YEAR", "2026"))
+AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT", "50")))
+AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE", "100")))
+AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = max(30, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS", "300")))
+AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = max(10, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS", "60")))
 FETCHER_ROLE = os.environ.get("FETCHER_ROLE", "all").lower()
 WORKER_QUEUES = {item.strip() for item in os.environ.get("WORKER_QUEUES", "fetch,ai").split(",") if item.strip()}
 FETCH_WORKER_CONCURRENCY = max(0, int(os.environ.get("FETCH_WORKER_CONCURRENCY", "1")))
@@ -97,6 +104,7 @@ scheduler: Optional[AsyncIOScheduler] = None
 current_job_id_var: ContextVar[Optional[str]] = ContextVar("current_job_id", default=None)
 current_job_queue_var: ContextVar[Optional[str]] = ContextVar("current_job_queue", default=None)
 current_task_info_var: ContextVar[dict] = ContextVar("current_task_info", default={})
+last_ai_year_backfill_attempt = 0.0
 AI_NOTE_GENERATED_FIELDS = {
     "summary",
     "topics",
@@ -195,8 +203,26 @@ def start_refresh_scheduler():
         id="cleanup_old_jobs",
         replace_existing=True,
     )
+    if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
+        scheduler.add_job(
+            maybe_enqueue_ai_year_backfill,
+            "interval",
+            seconds=AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
+            id="ai_year_backfill",
+            kwargs={"source": "scheduler"},
+            next_run_time=datetime.now(get_scheduler_timezone()),
+            replace_existing=True,
+        )
     scheduler.start()
     logger.info(f"Daily refresh scheduled: {REFRESH_CRON} ({SCHEDULER_TIMEZONE})")
+    if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
+        logger.info(
+            "AI year backfill scheduled: year=%s interval=%ss target_active=%s batch=%s",
+            AI_NOTES_YEAR_BACKFILL_YEAR,
+            AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
+            AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+            AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+        )
 
 
 # ---- Reliability helpers ----
@@ -498,6 +524,7 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             continue
 
         if not job:
+            await maybe_enqueue_ai_year_backfill(source=worker_name)
             await asyncio.sleep(1)
             continue
 
@@ -1033,6 +1060,92 @@ async def enqueue_ai_job(task: dict, label: Optional[str] = None):
     return await directus.create_job("ai", task, label=label, dedupe_key=job_dedupe_key("ai", task))
 
 
+async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool = False) -> dict:
+    """Keep the AI queue filled with missing notes for the configured upload year."""
+    global last_ai_year_backfill_attempt
+    if not AI_NOTES_AUTO or not AI_NOTES_YEAR_BACKFILL_ENABLED or stop_flag:
+        return {"enabled": False, "queued": 0, "skipped": 0}
+
+    now = time.monotonic()
+    if not force and source != "scheduler" and now - last_ai_year_backfill_attempt < AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS:
+        return {"throttled": True, "queued": 0, "skipped": 0}
+    last_ai_year_backfill_attempt = now
+
+    active_jobs = await directus.count_jobs("ai", "queued,running,paused")
+    if not force and active_jobs >= AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE:
+        return {
+            "queued": 0,
+            "skipped": 0,
+            "active_jobs": active_jobs,
+            "target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+            "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+        }
+
+    capacity = AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT if force else min(
+        AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+        max(0, AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE - active_jobs),
+    )
+    if capacity <= 0:
+        return {"queued": 0, "skipped": 0, "active_jobs": active_jobs}
+
+    missing_total = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
+    if missing_total <= 0:
+        logger.info(f"AI year backfill complete for {AI_NOTES_YEAR_BACKFILL_YEAR}")
+        return {
+            "queued": 0,
+            "skipped": 0,
+            "missing_total": 0,
+            "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+        }
+
+    active_video_ids = await directus.get_ai_note_job_video_ids()
+    scan_limit = min(AI_NOTES_MAX_BATCH_LIMIT, max(capacity * 5, capacity + len(active_video_ids)))
+    videos = await directus.get_videos_missing_ai_notes(scan_limit, year=AI_NOTES_YEAR_BACKFILL_YEAR)
+
+    queued = 0
+    skipped = 0
+    for video in videos:
+        if queued >= capacity or stop_flag:
+            break
+        video_id = video["id"]
+        if video_id in active_video_ids:
+            skipped += 1
+            continue
+        await directus.update_video(video_id, {
+            "ai_notes_status": "pending",
+            "ai_notes_error": None,
+        })
+        job = await enqueue_ai_job({
+            "type": "ai_note_video",
+            "video_id": video_id,
+            "backfill_year": AI_NOTES_YEAR_BACKFILL_YEAR,
+        })
+        active_video_ids.add(video_id)
+        if job.get("existing"):
+            skipped += 1
+        else:
+            queued += 1
+
+    if queued or source == "scheduler":
+        logger.info(
+            "AI year backfill %s: queued=%s skipped=%s missing_total=%s active_jobs=%s year=%s",
+            source,
+            queued,
+            skipped,
+            missing_total,
+            active_jobs,
+            AI_NOTES_YEAR_BACKFILL_YEAR,
+        )
+    return {
+        "queued": queued,
+        "skipped": skipped,
+        "missing_total": missing_total,
+        "active_jobs": active_jobs,
+        "target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+        "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+    }
+
+
 async def clear_ai_notes(video_id: str) -> dict:
     """Remove generated AI notebook fields from a video without touching transcript data."""
     return await directus.update_video(video_id, {
@@ -1546,6 +1659,9 @@ async def health():
 async def status():
     fetch_current = await current_job_snapshot("fetch", current_task_info, current_job_id)
     ai_current = await current_job_snapshot("ai", current_ai_task_info, current_ai_job_id)
+    ai_year_missing = None
+    if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
+        ai_year_missing = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
     return {
         "queue_size": await directus.count_jobs("fetch", "queued"),
         "ai_queue_size": await directus.count_jobs("ai", "queued"),
@@ -1557,6 +1673,14 @@ async def status():
         "schedule": {
             "cron": REFRESH_CRON,
             "timezone": SCHEDULER_TIMEZONE,
+        },
+        "ai_year_backfill": {
+            "enabled": AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED,
+            "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+            "missing": ai_year_missing,
+            "target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+            "batch_limit": AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+            "interval_seconds": AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
         },
     }
 
