@@ -61,8 +61,10 @@ export async function getAllVideos(opts = {}) {
   return req('GET', `/ui/videos?${query}`);
 }
 
-export async function getDailyVideos(dateValue) {
-  return req('GET', `/ui/videos/daily?${paramsFrom({ date: dateValue })}`);
+export async function getDailyVideos(dateValue, tz) {
+  const params = { date: dateValue };
+  if (tz) params.tz = tz;
+  return req('GET', `/ui/videos/daily?${paramsFrom(params)}`);
 }
 
 export async function getTotalVideoCount() {

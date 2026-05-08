@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Transformer } from 'markmap-lib';
-import { Markmap } from 'markmap-view';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 import { updateVideoFields } from '../lib/directus.js';
 import { useT } from '../lib/i18n.jsx';
-
-const transformer = new Transformer();
 
 function formatDuration(seconds) {
   if (!seconds) return '';
@@ -44,8 +40,16 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
   const [transcriptSaving, setTranscriptSaving] = useState(false);
   const svgRef = useRef(null);
   const markmapRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const dialogRef = useRef(null);
 
   useEffect(() => { setLocalVideo(video); }, [video]);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    closeButtonRef.current?.focus();
+    return () => previousFocus?.focus();
+  }, []);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -53,12 +57,35 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  function handleDialogKeyDown(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = dialogRef.current?.querySelectorAll(
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable || focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+
   useEffect(() => {
     if (activeTab !== 'mindmap' || !svgRef.current) return;
-    const content = videoToMarkmapMd(localVideo);
-    const { root } = transformer.transform(content);
-    svgRef.current.innerHTML = '';
-    markmapRef.current = Markmap.create(svgRef.current, { duration: 0 }, root);
+    let cancelled = false;
+    (async () => {
+      const [{ Transformer }, { Markmap }] = await Promise.all([
+        import('markmap-lib'),
+        import('markmap-view'),
+      ]);
+      if (cancelled || !svgRef.current) return;
+      const { root } = new Transformer().transform(videoToMarkmapMd(localVideo));
+      svgRef.current.innerHTML = '';
+      markmapRef.current = Markmap.create(svgRef.current, { duration: 0 }, root);
+    })();
+    return () => { cancelled = true; };
   }, [activeTab, video]);
 
   function startEditAi() {
@@ -132,6 +159,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
 
   return (
     <div
+      role="presentation"
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,0.75)',
@@ -141,6 +169,11 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="transcript-modal-title"
+        onKeyDown={handleDialogKeyDown}
         style={{
           background: 'var(--bg2)',
           border: '1px solid var(--border)',
@@ -164,6 +197,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
               )}
               <div style={{ minWidth: 0 }}>
                 <a
+                  id="transcript-modal-title"
                   href={video.url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -177,7 +211,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                 </div>
               </div>
             </div>
-            <button onClick={onClose} style={{ fontSize: '1.2rem', padding: '0.1rem 0.5rem', flexShrink: 0 }}>✕</button>
+            <button ref={closeButtonRef} onClick={onClose} aria-label={t('btn.close')} style={{ fontSize: '1.2rem', padding: '0.1rem 0.5rem', flexShrink: 0 }}>✕</button>
           </div>
 
           <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.75rem' }}>

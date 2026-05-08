@@ -63,6 +63,7 @@
     "editTranscript": "Transzkript szerkesztése"
   },
   "export": {
+    "label": "Export",
     "txt": "TXT",
     "md": "MD",
     "txtTimed": "TXT idővel",
@@ -149,6 +150,7 @@
     "queueSize": "Sor: {count}",
     "processingBadge": "Feldolgozás: {count} a sorban",
     "whisperBadge": "🎙 Whisper: {count} a sorban",
+    "aiChip": "AI: {count}",
     "selected": "{count} kiválasztva",
     "attempts": "Próba {current}/{max}",
     "activeJobs": "{count} aktív job",
@@ -228,7 +230,9 @@
     "errAdmin": "Admin adatok betöltési hiba: {error}",
     "errDaily": "Napi frissítés betöltési hiba: {error}",
     "errSchedule": "Időzítés hiba: {error}",
-    "errWhisper": "Whisper hiba: {error}"
+    "errWhisper": "Whisper hiba: {error}",
+    "bulkAiErrors": "{count} AI generálás sikertelen: {titles}",
+    "bulkDeleteErrors": "{count} AI törlés sikertelen: {titles}"
   },
   "confirm": {
     "deleteChannel": "Töröljük: {name}?",

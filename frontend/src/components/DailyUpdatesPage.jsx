@@ -56,7 +56,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
   async function load() {
     setLoading(true);
     try {
-      setVideos(await getDailyVideos(date));
+      setVideos(await getDailyVideos(date, Intl.DateTimeFormat().resolvedOptions().timeZone));
     } catch (e) {
       setMsg({ text: t('msg.errDaily', { error: e.message }), isError: true });
     } finally {

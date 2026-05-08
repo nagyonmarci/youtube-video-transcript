@@ -63,6 +63,7 @@
     "editTranscript": "Edit transcript"
   },
   "export": {
+    "label": "Export",
     "txt": "TXT",
     "md": "MD",
     "txtTimed": "TXT timed",
@@ -149,6 +150,7 @@
     "queueSize": "Queue: {count}",
     "processingBadge": "Processing: {count} in queue",
     "whisperBadge": "🎙 Whisper: {count} in queue",
+    "aiChip": "AI: {count}",
     "selected": "{count} selected",
     "attempts": "Attempt {current}/{max}",
     "activeJobs": "{count} active jobs",
@@ -228,7 +230,9 @@
     "errAdmin": "Admin data load error: {error}",
     "errDaily": "Daily updates load error: {error}",
     "errSchedule": "Schedule error: {error}",
-    "errWhisper": "Whisper error: {error}"
+    "errWhisper": "Whisper error: {error}",
+    "bulkAiErrors": "{count} AI generation failed: {titles}",
+    "bulkDeleteErrors": "{count} AI delete failed: {titles}"
   },
   "confirm": {
     "deleteChannel": "Delete {name}?",

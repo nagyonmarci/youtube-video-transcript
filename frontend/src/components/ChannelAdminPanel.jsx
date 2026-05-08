@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { deleteChannel, updateChannel } from '../lib/directus.js';
 import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
 import { useT } from '../lib/i18n.jsx';
@@ -26,6 +26,16 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
   const [drafts, setDrafts] = useState(() => Object.fromEntries(
     channels.map(ch => [ch.id, editableChannel(ch)])
   ));
+  useEffect(() => {
+    setDrafts(prev => {
+      const next = { ...prev };
+      channels.forEach(ch => {
+        if (!next[ch.id]) next[ch.id] = editableChannel(ch);
+      });
+      return next;
+    });
+  }, [channels]);
+
   const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
 

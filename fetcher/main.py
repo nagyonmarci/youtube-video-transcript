@@ -1520,8 +1520,13 @@ async def ui_videos(
 
 
 @app.get("/ui/videos/daily")
-async def ui_daily_videos(date: str):
-    start = datetime.fromisoformat(f"{date}T00:00:00").replace(tzinfo=timezone.utc)
+async def ui_daily_videos(date: str, tz: str = "UTC"):
+    try:
+        local_tz = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, KeyError):
+        local_tz = timezone.utc
+    year, month, day = (int(x) for x in date.split("-"))
+    start = datetime(year, month, day, tzinfo=local_tz).astimezone(timezone.utc)
     end = start + timedelta(days=1)
     params = {
         "filter[uploaded_at][_gte]": start.isoformat(),

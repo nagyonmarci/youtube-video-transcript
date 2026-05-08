@@ -163,6 +163,19 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .status-chip {
+    display: inline-block;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .status-chip-video {
+    max-width: 120px;
+    cursor: default;
   }
   .badge-whisper {
     background: rgba(156,39,176,0.2);
@@ -655,6 +668,31 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .export-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 200;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.25rem 0;
+    min-width: 120px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: flex;
+    flex-direction: column;
+  }
+  .export-menu-item {
+    background: none;
+    border: none;
+    color: var(--text1);
+    padding: 0.4rem 0.75rem;
+    text-align: left;
+    font-size: 0.82rem;
+    cursor: pointer;
+    width: 100%;
+  }
+  .export-menu-item:hover { background: rgba(255,255,255,0.07); }
   .video-table .clickable-row { cursor: pointer; }
   .video-table .clickable-row:hover { background: rgba(255,255,255,0.04); }
   .video-link {

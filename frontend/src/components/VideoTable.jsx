@@ -4,15 +4,21 @@ import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMark
 import { useT } from '../lib/i18n.jsx';
 
 async function bulkGenerateAiNotes(videos) {
+  const errors = [];
   for (const v of videos) {
-    try { await generateAiNoteForVideo(v.id); } catch {}
+    try { await generateAiNoteForVideo(v.id); }
+    catch { errors.push(v.title || v.video_id); }
   }
+  return errors;
 }
 
 async function bulkDeleteAiNotes(videos) {
+  const errors = [];
   for (const v of videos) {
-    try { await deleteAiNoteForVideo(v.id); } catch {}
+    try { await deleteAiNoteForVideo(v.id); }
+    catch { errors.push(v.title || v.video_id); }
   }
+  return errors;
 }
 
 function formatDuration(seconds) {
@@ -54,6 +60,7 @@ export default function VideoTable({
   const searchInputRef = useRef();
   const [localSearch, setLocalSearch] = useState(search);
   const [aiBusyId, setAiBusyId] = useState(null);
+  const [exportMenuId, setExportMenuId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const debounceRef = useRef(null);
@@ -88,6 +95,13 @@ export default function VideoTable({
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, onLoadMore, videos.length]);
 
+  useEffect(() => {
+    if (!exportMenuId) return;
+    const handler = () => setExportMenuId(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [exportMenuId]);
+
   const allSelected = videos.length > 0 && videos.every(v => selectedIds.has(v.id));
   const someSelected = selectedIds.size > 0;
   const selectedVideos = videos.filter(v => selectedIds.has(v.id));
@@ -112,8 +126,9 @@ export default function VideoTable({
     if (!selectedVideos.length) return;
     setBulkBusy(true);
     try {
-      await bulkGenerateAiNotes(selectedVideos.filter(v => v.transcript));
+      const errors = await bulkGenerateAiNotes(selectedVideos.filter(v => v.transcript));
       await onVideosChanged?.();
+      if (errors.length) alert(t('msg.bulkAiErrors', { count: errors.length, titles: errors.slice(0, 3).join(', ') }));
     } finally {
       setBulkBusy(false);
     }
@@ -124,8 +139,9 @@ export default function VideoTable({
     if (!confirm(t('confirm.deleteAiNotes', { count: selectedVideos.length }))) return;
     setBulkBusy(true);
     try {
-      await bulkDeleteAiNotes(selectedVideos);
+      const errors = await bulkDeleteAiNotes(selectedVideos);
       await onVideosChanged?.();
+      if (errors.length) alert(t('msg.bulkDeleteErrors', { count: errors.length, titles: errors.slice(0, 3).join(', ') }));
     } finally {
       setBulkBusy(false);
     }
@@ -175,6 +191,7 @@ export default function VideoTable({
     setAiBusyId(video.id);
     try {
       await generateAiNoteForVideo(video.id);
+      await onVideosChanged?.();
     } catch (err) {
       alert(t('msg.errAi', { error: err.message }));
     } finally {
@@ -345,7 +362,7 @@ export default function VideoTable({
                         )}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: '0.3rem' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                           {video.transcript && (
                             <button
                               className="btn-sm"
@@ -374,51 +391,62 @@ export default function VideoTable({
                               {t('btn.aiDelete')}
                             </button>
                           )}
-                          <button
-                            className="btn-sm"
-                            onClick={e => {
-                              e.stopPropagation();
-                              downloadFile(videoToTxt(video), `${sanitizeFilename(video.title)}.txt`);
-                            }}
-                          >
-                            {t('export.txt')}
-                          </button>
-                          <button
-                            className="btn-sm"
-                            onClick={e => {
-                              e.stopPropagation();
-                              downloadFile(videoToMd(video), `${sanitizeFilename(video.title)}.md`);
-                            }}
-                          >
-                            {t('export.md')}
-                          </button>
-                          <button
-                            className="btn-sm"
-                            onClick={e => {
-                              e.stopPropagation();
-                              downloadFile(
-                                videoToObsidianMd(video, { channel: selectedChannel, timed: true }),
-                                obsidianFilename(video, { channel: selectedChannel })
-                              );
-                            }}
-                          >
-                            {t('export.obsidian')}
-                          </button>
-                          {(video.obsidian_note || video.summary) && (
+                          <div style={{ position: 'relative' }}>
                             <button
                               className="btn-sm"
-                              title={t('tooltip.mindmap')}
                               onClick={e => {
                                 e.stopPropagation();
-                                downloadFile(
-                                  videoToMarkmapMd(video),
-                                  markmapFilename(video, { channel: selectedChannel })
-                                );
+                                setExportMenuId(prev => prev === video.id ? null : video.id);
                               }}
                             >
-                              {t('export.mindmap')}
+                              {t('export.label')} ▾
                             </button>
-                          )}
+                            {exportMenuId === video.id && (
+                              <div
+                                className="export-menu"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <button
+                                  className="export-menu-item"
+                                  onClick={() => { downloadFile(videoToTxt(video), `${sanitizeFilename(video.title)}.txt`); setExportMenuId(null); }}
+                                >
+                                  {t('export.txt')}
+                                </button>
+                                <button
+                                  className="export-menu-item"
+                                  onClick={() => { downloadFile(videoToMd(video), `${sanitizeFilename(video.title)}.md`); setExportMenuId(null); }}
+                                >
+                                  {t('export.md')}
+                                </button>
+                                <button
+                                  className="export-menu-item"
+                                  onClick={() => {
+                                    downloadFile(
+                                      videoToObsidianMd(video, { channel: selectedChannel, timed: true }),
+                                      obsidianFilename(video, { channel: selectedChannel })
+                                    );
+                                    setExportMenuId(null);
+                                  }}
+                                >
+                                  {t('export.obsidian')}
+                                </button>
+                                {(video.obsidian_note || video.summary) && (
+                                  <button
+                                    className="export-menu-item"
+                                    onClick={() => {
+                                      downloadFile(
+                                        videoToMarkmapMd(video),
+                                        markmapFilename(video, { channel: selectedChannel })
+                                      );
+                                      setExportMenuId(null);
+                                    }}
+                                  >
+                                    {t('export.mindmap')}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>

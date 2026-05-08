@@ -19,14 +19,34 @@ export default function AppHeader({
       <div className="header-status">
         {fetcherRunning && (
           <span className="header-status-item">
-            <span className="badge badge-processing">
+            <span className="badge badge-processing status-chip">
               {t('label.processingBadge', { count: fetcherStatus.queue_size })}
-              {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
-              {fetcherStatus.current_task?.video && ` • ${fetcherStatus.current_task.video}`}
-              {(fetcherStatus.ai_active_size > 0 || fetcherStatus.ai_queue_size > 0) && ` • AI aktív: ${fetcherStatus.ai_active_size ?? fetcherStatus.ai_queue_size}`}
-              {fetcherStatus.current_ai_task?.phase && ` • ${fetcherStatus.current_ai_task.phase}`}
-              {fetcherStatus.current_ai_task?.video && ` • ${fetcherStatus.current_ai_task.video}`}
             </span>
+            {fetcherStatus.current_task?.phase && (
+              <span className="badge badge-processing status-chip">
+                {fetcherStatus.current_task.phase}
+              </span>
+            )}
+            {fetcherStatus.current_task?.video && (
+              <span className="badge badge-processing status-chip status-chip-video" title={fetcherStatus.current_task.video}>
+                {fetcherStatus.current_task.video}
+              </span>
+            )}
+            {(fetcherStatus.ai_active_size > 0 || fetcherStatus.ai_queue_size > 0) && (
+              <span className="badge badge-processing status-chip">
+                {t('label.aiChip', { count: fetcherStatus.ai_active_size ?? fetcherStatus.ai_queue_size })}
+              </span>
+            )}
+            {fetcherStatus.current_ai_task?.phase && (
+              <span className="badge badge-processing status-chip">
+                {fetcherStatus.current_ai_task.phase}
+              </span>
+            )}
+            {fetcherStatus.current_ai_task?.video && (
+              <span className="badge badge-processing status-chip status-chip-video" title={fetcherStatus.current_ai_task.video}>
+                {fetcherStatus.current_ai_task.video}
+              </span>
+            )}
             <button className="danger" onClick={handleStop} style={{ padding: '0.25rem 0.6rem' }}>
               {t('btn.stop')}
             </button>
