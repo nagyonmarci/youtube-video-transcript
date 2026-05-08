@@ -1,38 +1,46 @@
-# YouTube Transcript Downloader
+# YouTube Transcript & AI Notes
 
-Helyi eszköz YouTube csatornák és videók feliratainak letöltésére és keresésére. Ha egy videónak nincs elérhető felirata, a Whisper.cpp speech-to-text modell automatikusan legenerálja.
+A self-hosted tool for downloading, searching, and AI-annotating YouTube channel transcripts. If a video has no available caption track, Whisper.cpp transcribes the audio automatically.
 
-## Stack
+## Features
 
-- **Frontend:** Astro + React, Caddy reverse proxy
-- **Fetcher:** Python FastAPI – yt-dlp + youtube-transcript-api
-- **Whisper:** Whisper.cpp (ggml-large-v3) – automatikus átírás
-- **Adatbázis:** Directus v11 + PostgreSQL
-- **AI jegyzetek:** Ollama chat API, alapértelmezetten `gemma4:31b-mlx-bf16`
+- Add channels by URL, `@handle`, or bulk `.txt`/`.csv` upload
+- Add individual videos with automatic channel detection
+- Infinite-scroll video list with full-text search, sort, and filters (transcript status, AI notes status, members-only)
+- Export transcripts per-video, per-channel, or in bulk — TXT, MD, or Obsidian-compatible MD
+- Obsidian export with YAML frontmatter, clickable timestamped transcript links back to YouTube
+- AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note — generated via Ollama
+- AI fields are regenerable individually; AI processing runs on a separate queue and never blocks transcript fetching
+- Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
+- Admin dashboard shows both job queues (fetch + AI), running/stuck jobs, and allows pause/resume/delete
+- Daily automatic channel refresh (default: 07:00 `Europe/Budapest`)
 
-## Indítás
+## Architecture
 
-```bash
-cp .env.example .env
-docker network create web
-docker compose up
+```
+http://yt.test
+      │
+   Caddy ──► Frontend (Astro+React :4321)
+                  │  Vite dev proxy
+                  ├─ /admin   ──► Directus :8055 ──► PostgreSQL
+                  ├─ /api     ──► Fetcher   :8000
+                  └─ /whisper ──► Whisper   :8001
+
+Fetcher API ──► jobs table ──► fetch-worker / ai-worker
 ```
 
-Böngészőben: **http://yt.test**
+**Eight Docker services:** `postgres`, `directus`, `fetcher` (API only), `fetch-worker`, `ai-worker`, `whisper`, `frontend`, `caddy`. Workers are separated so LLM calls never block transcript fetching. Caddy also proxies `suliweb.test` via the shared external `web` Docker network.
 
-Ez a compose stack adja a közös helyi Caddy belépési pontot is. A Caddy a külső `web` Docker networkön keresztül proxyzza a `suliweb.test` domaint a `suliweb` repo konténerei felé (`suliweb-frontend`, `suliweb-backend`), ezért a `suliweb` stacknek is ugyanarra a `web` networkre kell csatlakoznia.
+## Quick Start
 
-> **Első indításnál** a Whisper letölti a `ggml-large-v3.bin` modellt (~3 GB). Ez csak egyszer történik, a modell Docker volume-ban tárolódik.
-
-## Előfeltételek
+### Prerequisites
 
 - Docker + Docker Compose
-- dnsmasq a `*.test` domain helyi feloldásához
-- `web` nevű külső Docker network
-- mkcert tanúsítvány a `suliweb.test` HTTPS proxyhoz
+- dnsmasq for `*.test` local resolution
+- External Docker network named `web`
+- mkcert certificate for `suliweb.test` HTTPS (only needed if running the suliweb stack)
 
-### dnsmasq telepítés (Mac, egyszeri)
-
+**dnsmasq (macOS, one-time):**
 ```bash
 brew install dnsmasq
 echo 'address=/.test/127.0.0.1' >> $(brew --prefix)/etc/dnsmasq.conf
@@ -41,146 +49,156 @@ sudo mkdir -p /etc/resolver
 echo 'nameserver 127.0.0.1' | sudo tee /etc/resolver/test
 ```
 
-### Helyi TLS tanúsítvány `suliweb.test`-hez
-
+**Local TLS cert for `suliweb.test` (one-time):**
 ```bash
-brew install mkcert
-mkcert -install
+brew install mkcert && mkcert -install
 mkdir -p certs
 mkcert -cert-file certs/suliweb.test.pem -key-file certs/suliweb.test-key.pem suliweb.test
 ```
 
-A `certs/` könyvtár lokális titkokat tartalmaz, ezért nincs verziókezelve.
+### Start
 
-## Konfiguráció (.env)
+```bash
+cp .env.example .env
+# Edit .env — change all default credentials before first run (see Security section)
+docker network create web
+docker compose up -d
+```
 
-| Változó | Leírás | Alapértelmezett |
+App: **http://yt.test** — Directus admin: **http://yt.test/admin**
+
+> First start: Whisper downloads `ggml-large-v3.bin` (~3 GB) to a Docker volume. This happens once.
+
+## Configuration
+
+All configuration lives in `.env` (git-ignored). Copy `.env.example` and set every value marked as required.
+
+| Variable | Description | Default |
 |---|---|---|
-| `POSTGRES_PASSWORD` | PostgreSQL jelszó | `directus` |
-| `DIRECTUS_ADMIN_TOKEN` | Directus admin token | `admin-token-change-me` |
-| `REFRESH_CRON` | Csatornák automatikus frissítése | `0 7 * * *` |
-| `SCHEDULER_TIMEZONE` | Automatikus frissítés időzónája | `Europe/Budapest` |
-| `OLLAMA_BASE_URL` | Ollama chat API URL az AI jegyzetekhez | `http://host.docker.internal:11434` |
-| `OLLAMA_CHAT_MODEL` | Ollama modell az AI jegyzetekhez | `gemma4:31b-mlx-bf16` |
-| `AI_NOTES_AUTO` | Transzkript után automatikus AI jegyzet generálás | `true` |
-| `AI_NOTES_BATCH_LIMIT` | Egyszerre generált hiányzó AI jegyzetek száma | `10` |
-| `FETCH_WORKER_CONCURRENCY` | Fetch worker párhuzamosság | `1` |
-| `AI_WORKER_CONCURRENCY` | AI worker párhuzamosság | `1` |
-| `STALE_JOB_MINUTES` | Beragadt running job újrasorolása ennyi perc után | `30` |
-| `JOB_CLEANUP_DAYS` | Befejezett/törölt jobok automatikus takarítása | `7` |
-| `WHISPER_THREADS` | Whisper CPU szálak száma | `4` |
-| `WHISPER_LANGUAGE` | Felismerési nyelv | `auto` |
-| `WHISPER_BATCH_CRON` | Whisper batch futtatása | `0 3 * * *` |
-| `WHISPER_BATCH_LIMIT` | Max videó egy batch-ben | `50` |
+| `POSTGRES_PASSWORD` | PostgreSQL password | `directus` (**change**) |
+| `DIRECTUS_SECRET` | Directus JWT signing secret | `change-me-random-string` (**change**) |
+| `DIRECTUS_ADMIN_EMAIL` | Directus admin login email | `admin@example.com` |
+| `DIRECTUS_ADMIN_PASSWORD` | Directus admin UI password | `admin` (**change**) |
+| `DIRECTUS_ADMIN_TOKEN` | Static API token for all internal services | `admin-token-change-me` (**change**) |
+| `REFRESH_CRON` | Automatic channel refresh schedule | `0 7 * * *` |
+| `SCHEDULER_TIMEZONE` | Cron timezone | `Europe/Budapest` |
+| `OLLAMA_BASE_URL` | Ollama API base URL | `http://host.docker.internal:11434` |
+| `OLLAMA_CHAT_MODEL` | Chat model for AI notes | `gemma4:31b-mlx-bf16` |
+| `AI_NOTES_AUTO` | Auto-generate notes after each transcript | `true` |
+| `AI_NOTES_BATCH_LIMIT` | Notes generated per batch run | `10` |
+| `AI_NOTES_MAX_BATCH_LIMIT` | Hard cap on batch size | `20000` |
+| `FETCH_WORKER_CONCURRENCY` | Parallel fetch-worker threads | `1` |
+| `AI_WORKER_CONCURRENCY` | Parallel AI-worker threads | `1` |
+| `STALE_JOB_MINUTES` | Re-queue jobs stuck in `running` after N minutes | `30` |
+| `JOB_CLEANUP_DAYS` | Auto-delete completed/cancelled jobs after N days | `7` |
+| `WHISPER_THREADS` | CPU threads for Whisper | `4` |
+| `WHISPER_LANGUAGE` | Recognition language (`auto` detects) | `auto` |
+| `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
+| `WHISPER_BATCH_LIMIT` | Max videos per Whisper batch | `50` |
 
-## Funkciók
-
-- **Csatorna hozzáadása** – URL, `@handle`, vagy `.txt`/`.csv` fájl feltöltés
-- **Egyedi videó hozzáadása** – csatorna automatikus felismerésével
-- **Whisper átírás** – automatikus napi batch, vagy manuális indítás a headerből
-- **Hiányzó dátumok frissítése** – feltöltési dátum pótlása yt-dlp-vel
-- **Hiányzó transzkriptek újrapróbálása** – csatornafrissítéskor az új videók mellett a korábbi `pending`, `no_transcript` és `error` videók is újra sorra kerülnek
-- **Végtelen scrollos videólista** – a lista 100-as adagokban tölt tovább, külön lapozó nélkül
-- **Lebegő vissza a tetejére gomb** – hosszú listáknál jobb alul megjelenő nyíllal lehet a lista elejére ugrani
-- **Keresés, rendezés és szűrés** – cím, dátum, hossz, transzkript státusz, AI jegyzet státusz és members-only jelölés szerint
-- **Members-only videók kezelése** – yt-dlp metadata alapján `is_members_only` mezőbe kerülnek, a listában elrejthetők vagy külön kilistázhatók
-- **Export** – videónként, csatornánként, összesítve – TXT, MD vagy Obsidian-kompatibilis MD formátum
-- **Obsidian tudásgyűjtő export** – YAML frontmatter, YouTube forráslink, csatornatag, jegyzet szekció és kattintható időbélyeges transzkript
-- **AI jegyzetek** – videónként generált összefoglaló, témák, tanulságok, kérdések, tanulási vázlat, kritika és Obsidian-kompatibilis jegyzet Ollamával
-- **Külön AI feldolgozási sor** – az LLM jegyzetgenerálás egyedi `ai_note_video` jobokra bomlik, ezért nem blokkolja a videólista/frissítés/transzkript fetch folyamatot
-- **Megbízható job queue** – dedupe kulcsok, retry, perzisztens progress, SQL lock alapú claim és több worker konténer
-- **Admin és státusz nézet** – látszik a normál feldolgozási sor, az AI sor és az aktuálisan futó feladat; a futó vagy beragadt munkák leállíthatók
-- **Napi automatikus frissítés** – új videók letöltése, alapból reggel 7-kor Europe/Budapest időzónában
-
-## Videólista és szűrők
-
-A fő videólista végtelen scrollt használ. A frontend 100-as adagokat kér le Directusból, alul automatikus betöltési ponttal és tartalék `További videók betöltése` gombbal. Hosszabb görgetés után jobb alul megjelenik egy lebegő felfelé nyíl, ami visszaugrik a lista tetejére.
-
-Elérhető szűrők:
-
-- cím keresés
-- transzkript állapot: minden, kész, várakozik, nincs transzkript, hiba
-- AI állapot: minden, kész, hiányzik, hiba
-- members-only: mind, elrejtve, csak members
-
-A members-only jelölés a `videos.is_members_only` mezőben tárolódik. Új videóknál a channel/video metadata lekéréskor töltődik. Régi videóknál csatornafrissítés vagy metadata backfill közben frissül, ezért egy régi adatbázisban kezdetben lehet, hogy még `0` members-only videó látszik.
-
-## Obsidian export
-
-Az `Obsidian` gomb olyan Markdown fájlt készít, amit közvetlenül be lehet húzni egy Obsidian vaultba. A videó note-ok tartalmaznak frontmattert (`type`, `source`, `title`, `channel`, `video_id`, `url`, `uploaded`, `duration`, `tags`), egy üres `Jegyzetek` részt, valamint időbélyeges transzkriptet. Az időbélyegek YouTube `t=` linkekre mutatnak, ezért Obsidianból vissza lehet ugrani a videó adott pontjára.
-
-## AI jegyzet modell
-
-Az AI jegyzeteket a fetcher Ollamán keresztül generálja. A használt modell az `.env` fájlban állítható:
+## Development Workflow
 
 ```bash
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_CHAT_MODEL=gemma4:31b-mlx-bf16
+# Rebuild and restart a single service after code change
+docker compose build fetcher && docker compose up -d fetcher
+
+# Tail logs
+docker compose logs -f fetcher
+docker compose logs --tail=120 fetch-worker
+
+# Syntax-check Python (no test suite exists)
+python3 -m py_compile fetcher/main.py fetcher/directus_client.py fetcher/youtube_fetcher.py fetcher/ai_notes.py
+
+# Check yt-dlp version inside container
+docker compose exec -T fetcher yt-dlp --version   # expected: 2025.12.08
+
+# Manual endpoint test
+docker compose exec -T fetcher curl -s http://localhost:8000/status
+docker compose exec -T fetcher curl -s -X POST http://localhost:8000/refresh-dates
 ```
 
-Modellcsere után indítsd újra a fetchert és az AI workert:
+> **Schema changes:** After touching `directus_client.py`, new fields only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
 
+After switching the Ollama model, restart both workers:
 ```bash
-docker compose up -d fetcher ai-worker
+docker compose up -d fetcher fetch-worker ai-worker
 ```
 
-Az AI jegyzetek külön háttérsoron futnak. A transzkript letöltése után a videó csak bekerül az AI sorba, ezért a fetcher tovább tud dolgozni a következő videókon. A globális AI backfill sok kis `ai_note_video` jobra bomlik, így a folyamat deduplikálható, újrapróbálható és pontos progresszt tud mutatni. A frontend státuszsávja külön mutatja a normál sort és az `AI sor` állapotát; a `Stop` gomb mindkét sort leállítja és kiüríti.
+## Job Queue
 
-Az AI jegyzetgenerálás angol munkanyelvű: a `summary`, `topics`, `takeaways`, `questions`, `obsidian_note`, `study_guide` és `critique` mezők angolul készülnek akkor is, ha a videó transzkriptje más nyelvű. Az egyes mezők külön is újragenerálhatók.
+The `jobs` Directus collection is the shared work queue. Two separate workers poll it:
 
-Az admin felület a feldolgozási sort Directus `jobs` collectionben kezeli. A sor így látható és szerkeszthető: queued/paused/running/error/cancelled állapot, sorrend módosítás, pause/resume, azonnali indítás és törlés.
+- `fetch-worker` — `fetch` queue: channel refresh, video fetch, metadata backfill, date backfill
+- `ai-worker` — `ai` queue: per-video AI note generation
 
-## Job queue és worker modell
+Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), and progress tracking. A channel refresh error on one video does not stop the rest.
 
-A fetcher API és a workerek külön konténerekben futnak:
+`FETCH_WORKER_CONCURRENCY` and `AI_WORKER_CONCURRENCY` increase parallelism — raise them only where the bottleneck (YouTube rate limits or LLM throughput) allows.
 
-- `fetcher` – FastAPI, scheduler, státusz és enqueue végpontok
-- `fetch-worker` – csatornafrissítés, metadata pótlás, transzkript letöltés
-- `ai-worker` – AI jegyzetgenerálás
-- `whisper` – speech-to-text fallback
+## Rate Limiting
 
-A `jobs` collection tartalmazza a dedupe kulcsot, retry/progress mezőket, lock adatokat és hibákat. A worker SQL lock alapú claimet használ, így ugyanazt a jobot több worker nem veszi fel egyszerre. A `FETCH_WORKER_CONCURRENCY` és `AI_WORKER_CONCURRENCY` változókkal csak ott érdemes növelni a párhuzamosságot, ahol a rate limit és az LLM kapacitás engedi.
+Limits are enforced inside `youtube_fetcher.py`:
 
-A csatornafrissítés transzkript szempontból önálló: metadata backfill, members-only jelölés vagy AI jegyzet enqueue hiba nem állítja meg a többi videó transzkript letöltését. Egy videó hibája `error` státuszba kerülhet, de a csatorna többi videója tovább feldolgozódik.
+- Between transcript fetches: 45–75 s (randomised)
+- Between channel list requests: 5–15 s
 
-## Adatbázis és indexek
+## Security Posture
 
-A bootstrap a szükséges mezőket és indexeket automatikusan létrehozza. Fontosabb videómezők:
+This tool is designed for **single-user, local-network or loopback-only** deployment. The notes below describe the current posture honestly and give a hardening checklist for anyone who needs stricter controls.
 
-- `uploaded_at`
-- `channel_id`
-- `thumbnail_url`
-- `is_members_only`
-- `ai_notes_status`
-- `summary`
+### What is protected
 
-Fontosabb indexek:
+| Control | How |
+|---|---|
+| Secrets at rest | `.env` is git-ignored; credentials never committed |
+| TLS certificates | `certs/` is git-ignored; mkcert-generated |
+| YouTube auth cookies | `cookie.txt` is git-ignored |
+| Internal network isolation | All services communicate on the internal `app-network`; no service ports are bound to the host except Caddy (80, 443) |
+| Single ingress | Caddy is the only externally reachable entry point |
 
-- `idx_videos_uploaded_at`
-- `idx_videos_channel_id`
-- `idx_videos_members_only`
-- `idx_videos_ai_notes_status`
-- `idx_videos_summary_missing`
-- `idx_videos_thumbnail_missing`
-- `idx_jobs_queue_status_sort`
-- `idx_jobs_dedupe_active`
+### Known limitations (accepted for single-user use)
 
-## Rate limiting
+| Finding | Location | Notes |
+|---|---|---|
+| No authentication on the Fetcher API | `fetcher/main.py` | All `/api/*` endpoints are open; intended for localhost/LAN only |
+| CORS `allow_origins=["*"]` | `fetcher/main.py` | Permissive; safe when not exposed to the public internet |
+| Admin token in client-side JS | `frontend/src/lib/directus.js` | Token is visible in browser DevTools; acceptable when the admin is the only user |
+| All internal services share one admin token | `docker-compose.yml` | No role separation; fine for a personal tool, not for multi-user |
+| Containers run as root | `fetcher/Dockerfile`, `frontend/Dockerfile` | No non-root user defined |
+| Directus `CORS_ORIGIN: "true"` | `docker-compose.yml` | Allows any origin to call Directus directly; safe only on loopback |
+| Dev servers in containers | `frontend/Dockerfile` | Runs Astro dev server with `--host`, not a production build |
+| No CI/CD or image scanning | — | No automated vulnerability scanning |
+| Weak example defaults | `.env.example` | All placeholder values must be changed before first run |
 
-- Transzkriptek között: 45–75 másodperc (véletlenszerű)
-- Csatorna videólista lekérések között: 5–15 másodperc
-- Alapértelmezetten 1 fetch worker és 1 AI worker fut; a párhuzamosság konfigurálható, de YouTube/LLM rate limit miatt óvatosan növeld
+### Hardening checklist (for public or multi-user deployments)
 
-## Architektúra
+- [ ] **Rotate all credentials** — generate random `POSTGRES_PASSWORD`, `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_PASSWORD`, and `DIRECTUS_ADMIN_TOKEN` before first start
+- [ ] **Add API authentication** — add an `X-API-Key` or JWT middleware to `fetcher/main.py` and pass the key from the frontend
+- [ ] **Restrict CORS** — change `allow_origins=["*"]` to the specific frontend origin; set `CORS_ORIGIN` in Directus to the same value
+- [ ] **Create a read-only Directus token** for the frontend and a separate write token for the fetcher (instead of sharing the admin token)
+- [ ] **Add non-root users to Dockerfiles** — `RUN adduser --disabled-password appuser && USER appuser`
+- [ ] **Build the frontend for production** — replace `npm run dev` with `npm run build && npx astro preview` (or a static file server)
+- [ ] **Pin dependency versions** — lock `requirements.txt` with exact versions and run `pip-audit` or Trivy in CI
+- [ ] **Scan images** — add `trivy image` or `grype` to a CI step before deployment
+- [ ] **Set up real TLS** — replace mkcert certs with Let's Encrypt (Caddy handles this automatically with a public domain)
+- [ ] **Restrict Directus `CORS_ORIGIN`** — set to the specific public domain instead of `"true"`
+- [ ] **Add a firewall rule** — block direct access to ports 8000, 8055, 5432 from outside the host; all traffic should flow through Caddy
 
-```
-http://yt.test
-      │
-   Caddy ──► Frontend (Astro+React, :4321)
-                  │  Vite proxy
-                  ├─ /admin  ──► Directus (:8055) ──► PostgreSQL
-                  ├─ /api    ──► Fetcher API (:8000)
-                  └─ /whisper──► Whisper (:8001)
+### Secrets never to commit
 
-Fetcher API ──► Directus jobs ──► fetch-worker / ai-worker
-```
+- `.env` — all credentials
+- `certs/` — TLS private keys
+- `cookie.txt` — YouTube session cookie
+
+All three are covered by `.gitignore`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| New schema fields not visible | Bootstrap runs at startup | `docker compose up -d fetcher` |
+| yt-dlp errors or blocked requests | Outdated binary | Check version with `docker compose exec -T fetcher yt-dlp --version`; rebuild if outdated |
+| Ollama connection refused | Wrong base URL or Ollama not running | Verify `OLLAMA_BASE_URL` in `.env`; `http://host.docker.internal:11434` works on Docker Desktop (Mac/Windows) |
+| Whisper model not found | First-start download incomplete | Check `docker compose logs whisper`; the download retries on restart |
+| Job stuck in `running` | Worker crashed mid-job | Jobs are automatically re-queued after `STALE_JOB_MINUTES`; or use the Admin dashboard to cancel manually |
+| `web` network not found | Network not created | `docker network create web` |
