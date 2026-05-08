@@ -9,21 +9,21 @@ permissions:
   contents: read
   security-events: write
 
-# ── Shared CI credentials (no real secrets) ───────────────────────────────
+# ── Shared CI placeholders (no real credentials) ──────────────────────────
 env:
-  POSTGRES_PASSWORD: ci
+  POSTGRES_PASSWORD: ci-placeholder
   POSTGRES_HOST: postgres
   POSTGRES_PORT: "5432"
   POSTGRES_DB: directus
   POSTGRES_USER: directus
-  DIRECTUS_SECRET: ci-directus-secret
+  DIRECTUS_SECRET: ci-placeholder
   DIRECTUS_ADMIN_EMAIL: admin@example.com
-  DIRECTUS_ADMIN_PASSWORD: ci-password
-  DIRECTUS_ADMIN_TOKEN: ci-directus-token
-  APP_API_TOKEN: ci-api-token
+  DIRECTUS_ADMIN_PASSWORD: ci-placeholder
+  DIRECTUS_ADMIN_TOKEN: ci-placeholder
+  APP_API_TOKEN: ci-placeholder
   APP_CORS_ORIGINS: http://localhost:4321
   APP_BASIC_AUTH_USER: ci
-  APP_BASIC_AUTH_HASH: "ci-placeholder"
+  APP_BASIC_AUTH_HASH: ci-placeholder
 
 jobs:
 
