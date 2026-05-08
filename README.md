@@ -14,6 +14,7 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
 - Admin dashboard shows both job queues (fetch + AI), running/stuck jobs, and allows pause/resume/delete
 - Daily automatic channel refresh (default: 07:00 `Europe/Budapest`)
+- UI language toggle: English / Hungarian (persisted in `localStorage`)
 
 ## Architecture
 
