@@ -1,14 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getChannels, getVideos, getAllVideos, getTotalVideoCount } from './lib/directus.js';
-import {
-  stopProcessing, getStatus,
-  getWhisperStatus, startWhisperBatch, stopWhisper,
-} from './lib/fetcher.js';
 import ChannelGrid from './components/ChannelGrid.jsx';
 import VideoTable from './components/VideoTable.jsx';
 import TranscriptModal from './components/TranscriptModal.jsx';
-import DailyUpdatesPage from './components/DailyUpdatesPage.jsx';
-import AdminDashboard from './components/AdminDashboard.jsx';
+import AppHeader from './components/AppHeader.jsx';
+import { useAppStatus } from './lib/useAppStatus.js';
 import { I18nProvider, useT } from './lib/i18n.jsx';
 
 function sameData(a, b) {
@@ -31,6 +27,9 @@ function readUrlFilters() {
 
 function AppInner() {
   const { t, lang, setLanguage } = useT();
+  const [theme, setTheme] = useState(() => localStorage.getItem('yt_theme') || 'dark');
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
@@ -45,19 +44,43 @@ function AppInner() {
   const [aiFilter, setAiFilter] = useState(initialFilters.aiFilter);
   const [membersFilter, setMembersFilter] = useState(initialFilters.membersFilter);
   const [selectedVideo, setSelectedVideo] = useState(null);
-  const [fetcherStatus, setFetcherStatus] = useState(null);
-  const [whisperStatus, setWhisperStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [view, setView] = useState('home');
   const [toasts, setToasts] = useState([]);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const appContentRef = useRef(null);
   const prevFetcherRunning = useRef(false);
   const prevWhisperRunning = useRef(false);
-  const tRef = useRef(t);
-  tRef.current = t;
   const selectedChannelId = selectedChannel?.id ?? null;
+
+  const {
+    fetcherStatus, whisperStatus, fetcherRunning, whisperRunning,
+    handleStop, handleWhisperStart, handleWhisperStop, loadStatus,
+  } = useAppStatus(tRef);
+
+  function addToast(text) {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, text }]);
+    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 5000);
+  }
+
+  function handleThemeToggle() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('yt_theme', next);
+    if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+  }
+
+  useEffect(() => {
+    if (prevFetcherRunning.current && !fetcherRunning) addToast(tRef.current('msg.processingDone'));
+    prevFetcherRunning.current = !!fetcherRunning;
+  }, [fetcherRunning]);
+
+  useEffect(() => {
+    if (prevWhisperRunning.current && !whisperRunning) addToast(tRef.current('msg.whisperDone'));
+    prevWhisperRunning.current = !!whisperRunning;
+  }, [whisperRunning]);
 
   const loadChannels = useCallback(async () => {
     try {
@@ -111,35 +134,15 @@ function AppInner() {
     }
   }, [selectedChannelId, page, sort, search, statusFilter, aiFilter, membersFilter]);
 
-  const loadStatus = useCallback(async () => {
-    try {
-      const s = await getStatus();
-      setFetcherStatus(prev => keepIfSame(prev, s));
-    } catch {
-      setFetcherStatus(prev => (prev === null ? prev : null));
-    }
-    try {
-      const w = await getWhisperStatus();
-      setWhisperStatus(prev => keepIfSame(prev, w));
-    } catch {
-      setWhisperStatus(prev => (prev === null ? prev : null));
-    }
-  }, []);
-
   useEffect(() => {
     loadChannels();
-    const interval = setInterval(() => {
-      loadChannels();
-      loadStatus();
-    }, 10000);
+    const interval = setInterval(loadChannels, 10000);
     return () => clearInterval(interval);
-  }, [loadChannels, loadStatus]);
+  }, [loadChannels]);
 
   useEffect(() => {
-    if (view !== 'home') return undefined;
     loadVideos({ showLoading: page === 1, targetPage: page, append: page > 1 });
-    return undefined;
-  }, [loadVideos, page, view]);
+  }, [loadVideos, page]);
 
   useEffect(() => {
     const el = appContentRef.current;
@@ -156,30 +159,6 @@ function AppInner() {
       window.removeEventListener('scroll', handleScroll);
     };
   }, []);
-
-  useEffect(() => {
-    loadStatus();
-  }, [loadStatus]);
-
-  const whisperRunning = whisperStatus && (whisperStatus.queue_size > 0 || whisperStatus.batch_running);
-  const fetcherRunning = fetcherStatus && (
-    fetcherStatus.fetch_active_size > 0
-    || fetcherStatus.ai_active_size > 0
-    || fetcherStatus.queue_size > 0
-    || fetcherStatus.ai_queue_size > 0
-    || Boolean(fetcherStatus.current_task?.type)
-    || Boolean(fetcherStatus.current_ai_task?.type)
-  );
-
-  useEffect(() => {
-    if (prevFetcherRunning.current && !fetcherRunning) addToast(tRef.current('msg.processingDone'));
-    prevFetcherRunning.current = !!fetcherRunning;
-  }, [fetcherRunning]);
-
-  useEffect(() => {
-    if (prevWhisperRunning.current && !whisperRunning) addToast(tRef.current('msg.whisperDone'));
-    prevWhisperRunning.current = !!whisperRunning;
-  }, [whisperRunning]);
 
   function handleSelectChannel(ch) {
     setSelectedChannel(ch);
@@ -232,39 +211,6 @@ function AppInner() {
     setPage(prev => prev + 1);
   }, [loading, loadingMore, videos.length, totalCount]);
 
-  const handleStop = async () => {
-    try {
-      await stopProcessing();
-      await loadStatus();
-    } catch (e) {
-      alert(t('msg.errGeneric', { error: e.message }));
-    }
-  };
-
-  const handleWhisperStart = async () => {
-    try {
-      await startWhisperBatch();
-      await loadStatus();
-    } catch (e) {
-      alert(t('msg.errWhisper', { error: e.message }));
-    }
-  };
-
-  const handleWhisperStop = async () => {
-    try {
-      await stopWhisper();
-      await loadStatus();
-    } catch (e) {
-      alert(t('msg.errWhisper', { error: e.message }));
-    }
-  };
-
-  function addToast(text) {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, text }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-  }
-
   function scrollToTop() {
     appContentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -272,119 +218,54 @@ function AppInner() {
 
   return (
     <div className="app-layout">
-      <header className="app-header">
-        <span style={{ fontSize: '1.4rem' }}>▶</span>
-        <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{t('header.appTitle')}</h1>
-
-        <nav className="main-nav">
-          <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>{t('nav.home')}</button>
-          <button className={view === 'daily' ? 'active' : ''} onClick={() => setView('daily')}>{t('nav.dailyUpdates')}</button>
-          <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>{t('nav.admin')}</button>
-        </nav>
-
-        <div className="header-status">
-          {fetcherRunning && (
-            <span className="header-status-item">
-              <span className="badge badge-processing">
-                {t('label.processingBadge', { count: fetcherStatus.queue_size })}
-                {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
-                {fetcherStatus.current_task?.video && ` • ${fetcherStatus.current_task.video}`}
-                {(fetcherStatus.ai_active_size > 0 || fetcherStatus.ai_queue_size > 0) && ` • AI aktív: ${fetcherStatus.ai_active_size ?? fetcherStatus.ai_queue_size}`}
-                {fetcherStatus.current_ai_task?.phase && ` • ${fetcherStatus.current_ai_task.phase}`}
-                {fetcherStatus.current_ai_task?.video && ` • ${fetcherStatus.current_ai_task.video}`}
-              </span>
-              <button className="danger" onClick={handleStop} style={{ padding: '0.25rem 0.6rem' }}>
-                {t('btn.stop')}
-              </button>
-            </span>
-          )}
-
-          <span className="header-status-item">
-            {whisperRunning ? (
-              <>
-                <span className="badge badge-whisper">
-                  {t('label.whisperBadge', { count: whisperStatus.queue_size })}
-                  {whisperStatus.current_task?.video_id && ` • ${whisperStatus.current_task.video_id}`}
-                  {whisperStatus.current_task?.phase && ` (${whisperStatus.current_task.phase})`}
-                </span>
-                <button className="danger" onClick={handleWhisperStop} style={{ padding: '0.25rem 0.6rem' }}>
-                  {t('btn.stop')}
-                </button>
-              </>
-            ) : (
-              <button onClick={handleWhisperStart} className="whisper-btn" style={{ padding: '0.25rem 0.6rem' }}>
-                {t('btn.whisperStart')}
-              </button>
-            )}
-          </span>
-
-          <button
-            onClick={() => setLanguage(lang === 'hu' ? 'en' : 'hu')}
-            title={lang === 'hu' ? 'Switch to English' : 'Váltás magyarra'}
-            style={{ padding: '0.25rem 0.55rem', fontWeight: 700, fontSize: '0.8rem', opacity: 0.85 }}
-          >
-            {lang === 'hu' ? 'EN' : 'HU'}
-          </button>
-        </div>
-      </header>
+      <AppHeader
+        fetcherStatus={fetcherStatus}
+        whisperStatus={whisperStatus}
+        fetcherRunning={fetcherRunning}
+        whisperRunning={whisperRunning}
+        handleStop={handleStop}
+        handleWhisperStart={handleWhisperStart}
+        handleWhisperStop={handleWhisperStop}
+        theme={theme}
+        onThemeToggle={handleThemeToggle}
+        t={t}
+        lang={lang}
+        setLanguage={setLanguage}
+      />
 
       <div className="app-content" ref={appContentRef}>
-        {view === 'home' && (
-          <>
-            <ChannelGrid
-              channels={channels}
-              totalVideos={allVideosCount}
-              selectedChannel={selectedChannel}
-              onSelect={handleSelectChannel}
-              onChannelsChanged={async () => {
-                await loadChannels();
-                await loadVideos({ targetPage: 1 });
-              }}
-            />
+        <ChannelGrid
+          channels={channels}
+          totalVideos={allVideosCount}
+          selectedChannel={selectedChannel}
+          onSelect={handleSelectChannel}
+          onChannelsChanged={async () => {
+            await loadChannels();
+            await loadVideos({ targetPage: 1 });
+          }}
+        />
 
-            <VideoTable
-              videos={videos}
-              totalCount={totalCount}
-              hasMore={videos.length < totalCount}
-              loadingMore={loadingMore}
-              onLoadMore={handleLoadMoreVideos}
-              search={search}
-              onSearchChange={handleSearchChange}
-              sort={sort}
-              onSortChange={handleSortChange}
-              statusFilter={statusFilter}
-              onStatusFilterChange={handleStatusFilterChange}
-              aiFilter={aiFilter}
-              onAiFilterChange={handleAiFilterChange}
-              membersFilter={membersFilter}
-              onMembersFilterChange={handleMembersFilterChange}
-              loading={loading}
-              onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
-              onVideosChanged={() => loadVideos({ targetPage: 1 })}
-              selectedChannel={selectedChannel}
-            />
-          </>
-        )}
-
-        {view === 'daily' && (
-          <DailyUpdatesPage
-            onSelectVideo={video => setSelectedVideo({ ...video, channel: video.channel_id })}
-          />
-        )}
-
-        {view === 'admin' && (
-          <AdminDashboard
-            channels={channels}
-            selectedChannel={selectedChannel}
-            fetcherStatus={fetcherStatus}
-            whisperStatus={whisperStatus}
-            onStatusChanged={loadStatus}
-            onChannelsChanged={async () => {
-              await loadChannels();
-              await loadVideos({ targetPage: 1 });
-            }}
-          />
-        )}
+        <VideoTable
+          videos={videos}
+          totalCount={totalCount}
+          hasMore={videos.length < totalCount}
+          loadingMore={loadingMore}
+          onLoadMore={handleLoadMoreVideos}
+          search={search}
+          onSearchChange={handleSearchChange}
+          sort={sort}
+          onSortChange={handleSortChange}
+          statusFilter={statusFilter}
+          onStatusFilterChange={handleStatusFilterChange}
+          aiFilter={aiFilter}
+          onAiFilterChange={handleAiFilterChange}
+          membersFilter={membersFilter}
+          onMembersFilterChange={handleMembersFilterChange}
+          loading={loading}
+          onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
+          onVideosChanged={() => loadVideos({ targetPage: 1 })}
+          selectedChannel={selectedChannel}
+        />
       </div>
 
       {toasts.length > 0 && (
