@@ -1910,33 +1910,20 @@ async def delete_ai_note_video(video_id: str):
 
 
 @app.post("/stop")
-async def stop_processing():
-    """Clear the task queue, cancel current processing, then keep the worker ready."""
+async def stop_processing(queue: Optional[str] = None):
+    """Cancel jobs for a specific queue (fetch|ai) or both if queue is omitted."""
     global stop_flag, worker_task, ai_worker_task
-    stop_flag = True
-    cancelled_current = False
-    cancelled_ai_current = False
+    stop_fetch = queue in (None, "fetch")
+    stop_ai = queue in (None, "ai")
 
-    if worker_task and not worker_task.done():
-        worker_task.cancel()
-        cancelled_current = True
-    if ai_worker_task and not ai_worker_task.done():
-        ai_worker_task.cancel()
-        cancelled_ai_current = True
+    drained = await cancel_jobs("fetch", include_running=True) if stop_fetch else 0
+    ai_drained = await cancel_jobs("ai", include_running=True) if stop_ai else 0
 
-    # Cancel queued and running persistent jobs (workers run in separate containers)
-    drained = await cancel_jobs("fetch", include_running=True)
-    ai_drained = await cancel_jobs("ai", include_running=True)
-
-    stop_flag = False
-    worker_task = asyncio.create_task(worker_loop())
-    ai_worker_task = asyncio.create_task(ai_worker_loop())
     return {
         "stopped": True,
+        "queue": queue or "all",
         "drained": drained,
         "ai_drained": ai_drained,
-        "cancelled_current": cancelled_current,
-        "cancelled_ai_current": cancelled_ai_current,
     }
 
 

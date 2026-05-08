@@ -28,8 +28,9 @@ export async function refreshChannel(channelId) {
   return res.json();
 }
 
-export async function stopProcessing() {
-  const res = await fetch(`${FETCHER_URL}/stop`, { method: 'POST' });
+export async function stopProcessing(queue) {
+  const url = queue ? `${FETCHER_URL}/stop?queue=${queue}` : `${FETCHER_URL}/stop`;
+  const res = await fetch(url, { method: 'POST' });
   if (!res.ok) throw new Error(`stop → ${res.status}`);
   return res.json();
 }

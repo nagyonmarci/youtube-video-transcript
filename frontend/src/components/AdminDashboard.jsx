@@ -450,13 +450,13 @@ export default function AdminDashboard({
             title={t('label.fetcher')}
             queueSize={fetcherStatus?.fetch_active_size ?? fetcherStatus?.queue_size ?? 0}
             current={fetcherStatus?.current_task}
-            onStop={() => runAction(stopProcessing, t('msg.queueRefreshed'))}
+            onStop={() => runAction(() => stopProcessing('fetch'), t('msg.queueRefreshed'))}
           />
           <StatusLine
             title={t('label.aiWorker')}
             queueSize={fetcherStatus?.ai_active_size ?? fetcherStatus?.ai_queue_size ?? 0}
             current={fetcherStatus?.current_ai_task}
-            onStop={() => runAction(stopProcessing, t('msg.queueRefreshed'))}
+            onStop={() => runAction(() => stopProcessing('ai'), t('msg.queueRefreshed'))}
           />
           <StatusLine
             title={t('label.whisper')}
