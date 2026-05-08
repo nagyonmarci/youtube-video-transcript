@@ -181,7 +181,7 @@
     "noAiSummary": "Még nincs AI összefoglaló.",
     "noJobs": "A feldolgozási sor üres.",
     "noErrorVideos": "Nincs hibás videó.",
-    “noChannelSearch”: “Nincs találat: \”{query}\””,
+    "noChannelSearch": "Nincs találat: \"{query}\"",
     "allLoaded": "Mind betöltve ({count} / {total})",
     "loadMore": "További videók betöltése",
     "noDate": "Nincs dátum",
