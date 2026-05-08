@@ -108,16 +108,32 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
     payload = {
         "model": OLLAMA_CHAT_MODEL,
         "messages": messages,
-        "stream": False,
+        "stream": True,
         "format": "json",
     }
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(OLLAMA_TIMEOUT)) as client:
-        response = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
-        response.raise_for_status()
-        data = response.json()
+    # Stream the response so the per-chunk read timeout resets with each token,
+    # avoiding ReadTimeout on slow/large models.
+    chunks = []
+    connect_timeout = 30
+    read_timeout = OLLAMA_TIMEOUT  # per-chunk, not total
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(read_timeout, connect=connect_timeout)
+    ) as client:
+        async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                delta = chunk.get("message", {}).get("content", "")
+                if delta:
+                    chunks.append(delta)
 
-    content = data.get("message", {}).get("content", "")
+    content = "".join(chunks)
     parsed = extract_json(content)
     return {
         "summary": str(parsed.get("summary", "")).strip(),
