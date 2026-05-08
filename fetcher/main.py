@@ -1563,9 +1563,12 @@ async def status():
 
 @app.get("/jobs")
 async def list_jobs():
-    jobs = await directus.list_jobs()
+    active_statuses = ["queued", "running", "paused", "error"]
+    done_statuses = ["done", "cancelled"]
+    active = await directus.list_jobs(statuses=active_statuses, limit=500)
+    completed = await directus.list_jobs(statuses=done_statuses, limit=100)
     return {
-        "jobs": jobs,
+        "jobs": active + completed,
         "counts": {
             "fetch": await directus.count_jobs("fetch", "queued"),
             "ai": await directus.count_jobs("ai", "queued"),

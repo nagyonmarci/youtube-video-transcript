@@ -356,11 +356,18 @@ class DirectusClient:
         items = result.get("data", [])
         return items[0] if items else None
 
-    async def list_jobs(self, limit: int = 200) -> list:
+    async def list_jobs(self, statuses: Optional[list] = None, limit: int = 200) -> list:
+        status_filter = ""
+        if statuses:
+            parts = "".join(
+                f"&filter[_or][{i}][status][_eq]={s}" for i, s in enumerate(statuses)
+            )
+            status_filter = parts
         params = (
             f"?limit={limit}"
             "&sort=queue,sort_order,created_at"
             f"&fields={JOB_LIST_FIELDS}"
+            f"{status_filter}"
         )
         result = await self._request("GET", f"/items/jobs{params}")
         return result.get("data", [])
