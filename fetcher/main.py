@@ -1069,13 +1069,16 @@ async def drain_queue(queue: asyncio.Queue, predicate=None) -> int:
     return removed
 
 
-async def cancel_jobs(queue: Optional[str] = None, predicate=None) -> int:
-    """Mark queued/paused jobs as cancelled. Return count."""
+async def cancel_jobs(queue: Optional[str] = None, predicate=None, include_running: bool = False) -> int:
+    """Mark queued/paused (and optionally running) jobs as cancelled. Return count."""
+    cancellable = {"queued", "paused"}
+    if include_running:
+        cancellable.add("running")
     removed = 0
     for job in await directus.list_jobs():
         if queue and job.get("queue") != queue:
             continue
-        if job.get("status") not in {"queued", "paused"}:
+        if job.get("status") not in cancellable:
             continue
         task = job.get("payload") or {}
         if predicate and not predicate(task):
@@ -1921,9 +1924,9 @@ async def stop_processing():
         ai_worker_task.cancel()
         cancelled_ai_current = True
 
-    # Cancel queued persistent jobs
-    drained = await cancel_jobs("fetch")
-    ai_drained = await cancel_jobs("ai")
+    # Cancel queued and running persistent jobs (workers run in separate containers)
+    drained = await cancel_jobs("fetch", include_running=True)
+    ai_drained = await cancel_jobs("ai", include_running=True)
 
     stop_flag = False
     worker_task = asyncio.create_task(worker_loop())
