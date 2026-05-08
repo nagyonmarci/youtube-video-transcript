@@ -5,10 +5,10 @@ import {
   channelToTxt, channelToMd, channelToObsidianMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
+import { useT } from '../lib/i18n.jsx';
 
 function parseChannelFile(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-  // CSV: take first non-empty column that looks like a URL or handle
   return lines.map(line => {
     if (line.includes(',')) {
       const parts = line.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
@@ -19,11 +19,19 @@ function parseChannelFile(text) {
 }
 
 export default function ChannelSidebar({ channels, selectedChannel, onSelect, onChannelsChanged, videos }) {
+  const { t } = useT();
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileInputRef = useRef();
+
+  const STATUS_LABEL = {
+    pending: t('status.pending'),
+    processing: t('status.inProgress'),
+    done: t('status.done'),
+    error: t('status.error'),
+  };
 
   function showMsg(text, isError = false) {
     setMsg({ text, isError });
@@ -35,10 +43,10 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
     setBusy(true);
     try {
       const result = await fetchChannels(urls);
-      showMsg(`${result.count} csatorna sorba állítva`);
+      showMsg(t('msg.channelQueued', { count: result.count }));
       onChannelsChanged();
     } catch (e) {
-      showMsg('Hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
@@ -58,10 +66,10 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
     setBusy(true);
     try {
       await fetchVideo(url, selectedChannel?.id ?? null);
-      showMsg('Videó sorba állítva');
+      showMsg(t('msg.videoQueued'));
       setVideoInput('');
     } catch (e) {
-      showMsg('Hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
@@ -77,7 +85,7 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
   }
 
   async function handleDelete(ch) {
-    if (!confirm(`Töröljük: ${ch.name || ch.channel_handle}?`)) return;
+    if (!confirm(t('confirm.deleteChannel', { name: ch.name || ch.channel_handle }))) return;
     await deleteChannel(ch.id);
     if (selectedChannel?.id === ch.id) onSelect(null);
     onChannelsChanged();
@@ -87,9 +95,9 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
     setBusy(true);
     try {
       await refreshChannel(ch.id);
-      showMsg('Frissítés sorba állítva');
+      showMsg(t('msg.refreshQueued'));
     } catch (e) {
-      showMsg('Hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
@@ -105,9 +113,9 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       }
       const options = { timed };
       const content = fmt === 'md' ? channelToMd(name, chVideos, options) : channelToTxt(name, chVideos, options);
-      downloadFile(content, `${sanitizeFilename(name)}${timed ? '_idovel' : ''}.${fmt}`);
+      downloadFile(content, `${sanitizeFilename(name)}${timed ? '_timed' : ''}.${fmt}`);
     } catch (e) {
-      showMsg('Export hiba: ' + e.message, true);
+      showMsg(t('msg.errExport', { error: e.message }), true);
     }
   }
 
@@ -126,59 +134,50 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       }
       const options = { timed };
       const content = fmt === 'md' ? allChannelsToMd(groups, options) : allChannelsToTxt(groups, options);
-      downloadFile(content, `osszes_transkript${timed ? '_idovel' : ''}.${fmt}`);
+      downloadFile(content, `osszes_transkript${timed ? '_timed' : ''}.${fmt}`);
     } catch (e) {
-      showMsg('Export hiba: ' + e.message, true);
+      showMsg(t('msg.errExport', { error: e.message }), true);
     }
   }
 
-  const statusLabel = (s) => {
-    const map = { pending: 'Várakozik', processing: 'Folyamatban', done: 'Kész', error: 'Hiba' };
-    return map[s] || s;
-  };
-
   return (
     <>
-      {/* Add channel form */}
       <div className="card">
-        <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>Csatorna hozzáadása</h3>
+        <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>{t('header.addChannel')}</h3>
         <form onSubmit={handleChannelSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <textarea
             rows={3}
-            placeholder="URL-ek soronként (@handle, youtube.com/...)"
+            placeholder={t('placeholder.channelUrls')}
             value={channelInput}
             onChange={e => setChannelInput(e.target.value)}
             style={{ resize: 'vertical' }}
           />
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button type="submit" className="primary" disabled={busy || !channelInput.trim()} style={{ flex: 1 }}>
-              Hozzáad
+              {t('btn.add')}
             </button>
-            <button type="button" onClick={() => fileInputRef.current.click()} disabled={busy}
-              title="Fájl feltöltés (txt/csv)">
-              Fájl
+            <button type="button" onClick={() => fileInputRef.current.click()} disabled={busy}>
+              {t('btn.file')}
             </button>
           </div>
         </form>
         <input ref={fileInputRef} type="file" accept=".txt,.csv" style={{ display: 'none' }} onChange={handleFileUpload} />
       </div>
 
-      {/* Add single video form */}
       <div className="card">
-        <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>Videó hozzáadása</h3>
+        <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>{t('header.addVideo')}</h3>
         <form onSubmit={handleVideoSubmit} style={{ display: 'flex', gap: '0.4rem' }}>
           <input
-            placeholder="youtube.com/watch?v=..."
+            placeholder={t('placeholder.videoUrl')}
             value={videoInput}
             onChange={e => setVideoInput(e.target.value)}
           />
           <button type="submit" disabled={busy || !videoInput.trim()} style={{ whiteSpace: 'nowrap' }}>
-            Hozzáad
+            {t('btn.add')}
           </button>
         </form>
       </div>
 
-      {/* Status message */}
       {msg && (
         <div style={{
           padding: '0.5rem 0.75rem',
@@ -192,19 +191,17 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
         </div>
       )}
 
-      {/* Export all */}
       <div className="card">
-        <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>Összes export</h3>
+        <h3 style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: '#aaa' }}>{t('header.allExport')}</h3>
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          <button onClick={() => handleExportAll('txt')} style={{ flex: 1 }}>TXT</button>
-          <button onClick={() => handleExportAll('md')} style={{ flex: 1 }}>MD</button>
-          <button onClick={() => handleExportAll('txt', true)} style={{ flex: 1 }}>TXT idővel</button>
-          <button onClick={() => handleExportAll('md', true)} style={{ flex: 1 }}>MD idővel</button>
-          <button onClick={() => handleExportAll('obsidian')} style={{ flex: 1 }}>Obsidian</button>
+          <button onClick={() => handleExportAll('txt')} style={{ flex: 1 }}>{t('export.txt')}</button>
+          <button onClick={() => handleExportAll('md')} style={{ flex: 1 }}>{t('export.md')}</button>
+          <button onClick={() => handleExportAll('txt', true)} style={{ flex: 1 }}>{t('export.txtTimed')}</button>
+          <button onClick={() => handleExportAll('md', true)} style={{ flex: 1 }}>{t('export.mdTimed')}</button>
+          <button onClick={() => handleExportAll('obsidian')} style={{ flex: 1 }}>{t('export.obsidian')}</button>
         </div>
       </div>
 
-      {/* Channel list */}
       <div style={{ marginBottom: '0.5rem' }}>
         <div
           onClick={() => onSelect(null)}
@@ -218,7 +215,7 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
             fontSize: '0.85rem',
           }}
         >
-          Összes csatorna ({channels.length})
+          {t('filter.all')} ({channels.length})
         </div>
 
         {channels.map(ch => (
@@ -237,12 +234,12 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.15rem' }}>
-                  {ch.name || ch.channel_handle || 'Ismeretlen'}
+                  {ch.name || ch.channel_handle || t('state.unknownChannel')}
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <span className={`badge badge-${ch.status}`}>{statusLabel(ch.status)}</span>
+                  <span className={`badge badge-${ch.status}`}>{STATUS_LABEL[ch.status] || ch.status}</span>
                   {ch.video_count > 0 && (
-                    <span style={{ fontSize: '0.75rem', color: '#888' }}>{ch.video_count} videó</span>
+                    <span style={{ fontSize: '0.75rem', color: '#888' }}>{t('label.videoCount', { count: ch.video_count })}</span>
                   )}
                 </div>
               </div>
@@ -251,40 +248,40 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
               <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
                 <button
                   onClick={e => { e.stopPropagation(); handleRefresh(ch); }}
-                  title="Frissítés" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
                 >
-                  Frissít
+                  {t('btn.refresh')}
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); handleExportChannel(ch, 'txt'); }}
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
                 >
-                  TXT
+                  {t('export.txt')}
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); handleExportChannel(ch, 'md'); }}
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
                 >
-                  MD
+                  {t('export.md')}
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); handleExportChannel(ch, 'obsidian'); }}
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
                 >
-                  Obsidian
+                  {t('export.obsidian')}
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); handleExportChannel(ch, 'txt', true); }}
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
                 >
-                  TXT idővel
+                  {t('export.txtTimed')}
                 </button>
                 <button
                   className="danger"
                   onClick={e => { e.stopPropagation(); handleDelete(ch); }}
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', marginLeft: 'auto' }}
                 >
-                  Töröl
+                  {t('btn.delete')}
                 </button>
               </div>
             )}

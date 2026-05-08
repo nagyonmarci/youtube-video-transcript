@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { getChannels, getVideos, getAllVideos, getTotalVideoCount } from './lib/directus.js';
 import {
   stopProcessing, getStatus,
-  getWhisperStatus, startWhisperBatch, stopWhisper, resumeWhisper,
+  getWhisperStatus, startWhisperBatch, stopWhisper,
 } from './lib/fetcher.js';
 import ChannelGrid from './components/ChannelGrid.jsx';
 import VideoTable from './components/VideoTable.jsx';
 import TranscriptModal from './components/TranscriptModal.jsx';
 import DailyUpdatesPage from './components/DailyUpdatesPage.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
+import { I18nProvider, useT } from './lib/i18n.jsx';
 
 function sameData(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -28,7 +29,9 @@ function readUrlFilters() {
   };
 }
 
-export default function App() {
+function AppInner() {
+  const { t, lang, setLanguage } = useT();
+
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
@@ -52,6 +55,8 @@ export default function App() {
   const appContentRef = useRef(null);
   const prevFetcherRunning = useRef(false);
   const prevWhisperRunning = useRef(false);
+  const tRef = useRef(t);
+  tRef.current = t;
   const selectedChannelId = selectedChannel?.id ?? null;
 
   const loadChannels = useCallback(async () => {
@@ -167,12 +172,12 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (prevFetcherRunning.current && !fetcherRunning) addToast('Feldolgozás kész.');
+    if (prevFetcherRunning.current && !fetcherRunning) addToast(tRef.current('msg.processingDone'));
     prevFetcherRunning.current = !!fetcherRunning;
   }, [fetcherRunning]);
 
   useEffect(() => {
-    if (prevWhisperRunning.current && !whisperRunning) addToast('Whisper átírás kész.');
+    if (prevWhisperRunning.current && !whisperRunning) addToast(tRef.current('msg.whisperDone'));
     prevWhisperRunning.current = !!whisperRunning;
   }, [whisperRunning]);
 
@@ -232,16 +237,16 @@ export default function App() {
       await stopProcessing();
       await loadStatus();
     } catch (e) {
-      alert('Hiba: ' + e.message);
+      alert(t('msg.errGeneric', { error: e.message }));
     }
   };
 
   const handleWhisperStart = async () => {
     try {
-      const result = await startWhisperBatch();
+      await startWhisperBatch();
       await loadStatus();
     } catch (e) {
-      alert('Whisper hiba: ' + e.message);
+      alert(t('msg.errWhisper', { error: e.message }));
     }
   };
 
@@ -250,7 +255,7 @@ export default function App() {
       await stopWhisper();
       await loadStatus();
     } catch (e) {
-      alert('Whisper hiba: ' + e.message);
+      alert(t('msg.errWhisper', { error: e.message }));
     }
   };
 
@@ -269,20 +274,19 @@ export default function App() {
     <div className="app-layout">
       <header className="app-header">
         <span style={{ fontSize: '1.4rem' }}>▶</span>
-        <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>YouTube Transcript Downloader</h1>
+        <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{t('header.appTitle')}</h1>
 
         <nav className="main-nav">
-          <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>Főoldal</button>
-          <button className={view === 'daily' ? 'active' : ''} onClick={() => setView('daily')}>Napi frissítések</button>
-          <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
+          <button className={view === 'home' ? 'active' : ''} onClick={() => setView('home')}>{t('nav.home')}</button>
+          <button className={view === 'daily' ? 'active' : ''} onClick={() => setView('daily')}>{t('nav.dailyUpdates')}</button>
+          <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>{t('nav.admin')}</button>
         </nav>
 
         <div className="header-status">
-          {/* Fetcher status */}
           {fetcherRunning && (
             <span className="header-status-item">
               <span className="badge badge-processing">
-                Feldolgozás: {fetcherStatus.queue_size} a sorban
+                {t('label.processingBadge', { count: fetcherStatus.queue_size })}
                 {fetcherStatus.current_task?.phase && ` • ${fetcherStatus.current_task.phase}`}
                 {fetcherStatus.current_task?.video && ` • ${fetcherStatus.current_task.video}`}
                 {(fetcherStatus.ai_active_size > 0 || fetcherStatus.ai_queue_size > 0) && ` • AI aktív: ${fetcherStatus.ai_active_size ?? fetcherStatus.ai_queue_size}`}
@@ -290,53 +294,60 @@ export default function App() {
                 {fetcherStatus.current_ai_task?.video && ` • ${fetcherStatus.current_ai_task.video}`}
               </span>
               <button className="danger" onClick={handleStop} style={{ padding: '0.25rem 0.6rem' }}>
-                Stop
+                {t('btn.stop')}
               </button>
             </span>
           )}
 
-          {/* Whisper status & controls */}
           <span className="header-status-item">
             {whisperRunning ? (
               <>
                 <span className="badge badge-whisper">
-                  🎙 Whisper: {whisperStatus.queue_size} a sorban
+                  {t('label.whisperBadge', { count: whisperStatus.queue_size })}
                   {whisperStatus.current_task?.video_id && ` • ${whisperStatus.current_task.video_id}`}
                   {whisperStatus.current_task?.phase && ` (${whisperStatus.current_task.phase})`}
                 </span>
                 <button className="danger" onClick={handleWhisperStop} style={{ padding: '0.25rem 0.6rem' }}>
-                  Stop
+                  {t('btn.stop')}
                 </button>
               </>
             ) : (
               <button onClick={handleWhisperStart} className="whisper-btn" style={{ padding: '0.25rem 0.6rem' }}>
-                🎙 Whisper indítás
+                {t('btn.whisperStart')}
               </button>
             )}
           </span>
+
+          <button
+            onClick={() => setLanguage(lang === 'hu' ? 'en' : 'hu')}
+            title={lang === 'hu' ? 'Switch to English' : 'Váltás magyarra'}
+            style={{ padding: '0.25rem 0.55rem', fontWeight: 700, fontSize: '0.8rem', opacity: 0.85 }}
+          >
+            {lang === 'hu' ? 'EN' : 'HU'}
+          </button>
         </div>
       </header>
 
       <div className="app-content" ref={appContentRef}>
         {view === 'home' && (
           <>
-	            <ChannelGrid
+            <ChannelGrid
               channels={channels}
               totalVideos={allVideosCount}
               selectedChannel={selectedChannel}
               onSelect={handleSelectChannel}
-	              onChannelsChanged={async () => {
-	                await loadChannels();
-	                await loadVideos({ targetPage: 1 });
-	              }}
-	            />
+              onChannelsChanged={async () => {
+                await loadChannels();
+                await loadVideos({ targetPage: 1 });
+              }}
+            />
 
             <VideoTable
-	              videos={videos}
-	              totalCount={totalCount}
-	              hasMore={videos.length < totalCount}
-	              loadingMore={loadingMore}
-	              onLoadMore={handleLoadMoreVideos}
+              videos={videos}
+              totalCount={totalCount}
+              hasMore={videos.length < totalCount}
+              loadingMore={loadingMore}
+              onLoadMore={handleLoadMoreVideos}
               search={search}
               onSearchChange={handleSearchChange}
               sort={sort}
@@ -347,11 +358,11 @@ export default function App() {
               onAiFilterChange={handleAiFilterChange}
               membersFilter={membersFilter}
               onMembersFilterChange={handleMembersFilterChange}
-	              loading={loading}
-	              onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
-	              onVideosChanged={() => loadVideos({ targetPage: 1 })}
-	              selectedChannel={selectedChannel}
-	            />
+              loading={loading}
+              onSelectVideo={video => setSelectedVideo({ ...video, channel: selectedChannel || video.channel_id })}
+              onVideosChanged={() => loadVideos({ targetPage: 1 })}
+              selectedChannel={selectedChannel}
+            />
           </>
         )}
 
@@ -368,19 +379,19 @@ export default function App() {
             fetcherStatus={fetcherStatus}
             whisperStatus={whisperStatus}
             onStatusChanged={loadStatus}
-	            onChannelsChanged={async () => {
-	              await loadChannels();
-	              await loadVideos({ targetPage: 1 });
-	            }}
+            onChannelsChanged={async () => {
+              await loadChannels();
+              await loadVideos({ targetPage: 1 });
+            }}
           />
         )}
       </div>
 
       {toasts.length > 0 && (
         <div style={{ position: 'fixed', bottom: '4.75rem', right: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', zIndex: 2000 }}>
-          {toasts.map(t => (
-            <div key={t.id} style={{ background: 'rgba(76,175,80,0.9)', color: '#fff', padding: '0.55rem 0.9rem', borderRadius: '7px', fontSize: '0.88rem', fontWeight: 600, boxShadow: '0 2px 8px rgba(0,0,0,0.4)', cursor: 'pointer' }} onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}>
-              {t.text}
+          {toasts.map(toast => (
+            <div key={toast.id} style={{ background: 'rgba(76,175,80,0.9)', color: '#fff', padding: '0.55rem 0.9rem', borderRadius: '7px', fontSize: '0.88rem', fontWeight: 600, boxShadow: '0 2px 8px rgba(0,0,0,0.4)', cursor: 'pointer' }} onClick={() => setToasts(prev => prev.filter(x => x.id !== toast.id))}>
+              {toast.text}
             </div>
           ))}
         </div>
@@ -391,8 +402,8 @@ export default function App() {
           type="button"
           className="scroll-top-button"
           onClick={scrollToTop}
-          aria-label="Ugrás a lap tetejére"
-          title="Ugrás a lap tetejére"
+          aria-label={t('btn.scrollToTop')}
+          title={t('btn.scrollToTop')}
         >
           ↑
         </button>
@@ -400,11 +411,19 @@ export default function App() {
 
       {selectedVideo && (
         <TranscriptModal
-	          video={selectedVideo}
-	          onClose={() => setSelectedVideo(null)}
-	          onVideoUpdated={() => loadVideos({ targetPage: 1 })}
-	        />
+          video={selectedVideo}
+          onClose={() => setSelectedVideo(null)}
+          onVideoUpdated={() => loadVideos({ targetPage: 1 })}
+        />
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppInner />
+    </I18nProvider>
   );
 }

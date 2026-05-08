@@ -5,29 +5,33 @@ import {
   channelToTxt, channelToMd, channelToObsidianMd,
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
-
-const SORT_OPTIONS = [
-  { value: 'name_asc',   label: 'Név A–Z' },
-  { value: 'name_desc',  label: 'Név Z–A' },
-  { value: 'count_desc', label: 'Legtöbb videó' },
-  { value: 'count_asc',  label: 'Legkevesebb videó' },
-];
+import { useT } from '../lib/i18n.jsx';
 
 export default function ChannelGrid({ channels, totalVideos, selectedChannel, onSelect, onChannelsChanged }) {
+  const { t } = useT();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState('name_asc');
 
+  const SORT_OPTIONS = [
+    { value: 'name_asc',   label: t('sort.nameAZ') },
+    { value: 'name_desc',  label: t('sort.nameZA') },
+    { value: 'count_desc', label: t('sort.mostVideos') },
+    { value: 'count_asc',  label: t('sort.fewestVideos') },
+  ];
+
+  const STATUS_LABEL = {
+    pending: t('status.pending'),
+    processing: t('status.inProgress'),
+    done: t('status.done'),
+    error: t('status.error'),
+  };
+
   function showMsg(text, isError = false) {
     setMsg({ text, isError });
     setTimeout(() => setMsg(null), 4000);
   }
-
-  const statusLabel = (s) => {
-    const map = { pending: 'Várakozik', processing: 'Folyamatban', done: 'Kész', error: 'Hiba' };
-    return map[s] || s;
-  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -54,9 +58,9 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     setBusy(true);
     try {
       await refreshChannel(ch.id);
-      showMsg('Frissítés sorba állítva');
+      showMsg(t('msg.refreshQueued'));
     } catch (err) {
-      showMsg('Hiba: ' + err.message, true);
+      showMsg(t('msg.errGeneric', { error: err.message }), true);
     } finally {
       setBusy(false);
     }
@@ -67,9 +71,9 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     setBusy(true);
     try {
       const result = await generateAiNotesForChannel(ch.id);
-      showMsg(`${result.count} AI jegyzet sorba állítva`);
+      showMsg(t('msg.aiQueued', { count: result.count }));
     } catch (err) {
-      showMsg('AI jegyzet hiba: ' + err.message, true);
+      showMsg(t('msg.errAi', { error: err.message }), true);
     } finally {
       setBusy(false);
     }
@@ -77,7 +81,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
 
   async function handleDelete(e, ch) {
     e.stopPropagation();
-    if (!confirm(`Töröljük: ${ch.name || ch.channel_handle}?`)) return;
+    if (!confirm(t('confirm.deleteChannel', { name: ch.name || ch.channel_handle }))) return;
     await deleteChannel(ch.id);
     if (selectedChannel?.id === ch.id) onSelect(null);
     onChannelsChanged();
@@ -95,7 +99,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       const content = fmt === 'md' ? channelToMd(name, chVideos) : channelToTxt(name, chVideos);
       downloadFile(content, `${sanitizeFilename(name)}.${fmt}`);
     } catch (err) {
-      showMsg('Export hiba: ' + err.message, true);
+      showMsg(t('msg.errExport', { error: err.message }), true);
     }
   }
 
@@ -105,11 +109,11 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     <div className="channel-section">
       <div className="channel-section-header">
         <h3 style={{ fontSize: '0.9rem', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
-          Csatornák ({filtered.length}/{channels.length})
+          {t('header.channels', { filtered: filtered.length, total: channels.length })}
         </h3>
         <input
           className="channel-search"
-          placeholder="Keresés..."
+          placeholder={t('placeholder.searchChannel')}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -131,15 +135,14 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       )}
 
       <div className="channel-grid">
-        {/* All channels option */}
         <div
           className={`channel-card ${!selectedChannel ? 'channel-card-selected' : ''}`}
           onClick={() => onSelect(null)}
         >
-          <div className="channel-card-name">Összes</div>
+          <div className="channel-card-name">{t('filter.all')}</div>
           <div className="channel-card-meta">
             <span style={{ fontSize: '0.75rem', color: 'var(--text2)' }}>
-              {displayedTotalVideos} videó
+              {t('label.videoCount', { count: displayedTotalVideos })}
             </span>
           </div>
         </div>
@@ -153,22 +156,22 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
               onClick={() => onSelect(ch)}
             >
               <div className="channel-card-name">
-                {ch.name || ch.channel_handle || 'Ismeretlen'}
+                {ch.name || ch.channel_handle || t('state.unknownChannel')}
               </div>
               <div className="channel-card-meta">
-                <span className={`badge badge-${ch.status}`}>{statusLabel(ch.status)}</span>
+                <span className={`badge badge-${ch.status}`}>{STATUS_LABEL[ch.status] || ch.status}</span>
                 {ch.video_count > 0 && (
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text2)' }}>{ch.video_count} videó</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text2)' }}>{t('label.videoCount', { count: ch.video_count })}</span>
                 )}
               </div>
               {isSelected && (
                 <div className="channel-card-actions">
-                  <button onClick={e => handleRefresh(e, ch)} disabled={busy}>Frissít</button>
-                  <button onClick={e => handleGenerateChannelAi(e, ch)} disabled={busy}>AI jegyzetek</button>
-                  <button onClick={e => handleExport(e, ch, 'txt')}>TXT</button>
-                  <button onClick={e => handleExport(e, ch, 'md')}>MD</button>
-                  <button onClick={e => handleExport(e, ch, 'obsidian')}>Obsidian</button>
-                  <button className="danger" onClick={e => handleDelete(e, ch)}>Töröl</button>
+                  <button onClick={e => handleRefresh(e, ch)} disabled={busy}>{t('btn.refresh')}</button>
+                  <button onClick={e => handleGenerateChannelAi(e, ch)} disabled={busy}>{t('header.aiNotes')}</button>
+                  <button onClick={e => handleExport(e, ch, 'txt')}>{t('export.txt')}</button>
+                  <button onClick={e => handleExport(e, ch, 'md')}>{t('export.md')}</button>
+                  <button onClick={e => handleExport(e, ch, 'obsidian')}>{t('export.obsidian')}</button>
+                  <button className="danger" onClick={e => handleDelete(e, ch)}>{t('btn.delete')}</button>
                 </div>
               )}
             </div>
@@ -177,7 +180,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
 
         {filtered.length === 0 && search && (
           <div style={{ fontSize: '0.85rem', color: 'var(--text2)', padding: '0.5rem' }}>
-            Nincs találat: „{search}"
+            {t('state.noChannelSearch', { query: search })}
           </div>
         )}
       </div>

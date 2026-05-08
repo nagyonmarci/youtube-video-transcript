@@ -3,6 +3,7 @@ import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 import { updateVideoFields } from '../lib/directus.js';
+import { useT } from '../lib/i18n.jsx';
 
 const transformer = new Transformer();
 
@@ -30,6 +31,7 @@ function renderList(items) {
 }
 
 export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
+  const { t } = useT();
   const [showTimed, setShowTimed] = useState(false);
   const [activeTab, setActiveTab] = useState('transcript');
   const [localVideo, setLocalVideo] = useState(video);
@@ -83,11 +85,11 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
       await updateVideoFields(localVideo.id, fields);
       setLocalVideo(prev => ({ ...prev, ...fields }));
       setEditingAi(false);
-      setAiSaveMsg('Mentve.');
+      setAiSaveMsg(t('msg.saved'));
       setTimeout(() => setAiSaveMsg(null), 2500);
       onVideoUpdated?.();
     } catch (err) {
-      setAiSaveMsg('Hiba: ' + err.message);
+      setAiSaveMsg(t('msg.errGeneric', { error: err.message }));
     } finally {
       setAiSaving(false);
     }
@@ -104,7 +106,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
       setEditingTranscript(false);
       onVideoUpdated?.();
     } catch (err) {
-      alert('Mentési hiba: ' + err.message);
+      alert(t('msg.errSave', { error: err.message }));
     } finally {
       setTranscriptSaving(false);
     }
@@ -161,31 +163,30 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                 />
               )}
               <div style={{ minWidth: 0 }}>
-              <a
-                href={video.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: '#64b5f6', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}
-              >
-                {video.title || 'Ismeretlen cím'}
-              </a>
-              <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', color: '#888', display: 'flex', gap: '1rem' }}>
-                {video.uploaded_at && <span>Feltöltve: {formatDate(video.uploaded_at)}</span>}
-                {video.duration_seconds && <span>Hossz: {formatDuration(video.duration_seconds)}</span>}
-              </div>
+                <a
+                  href={video.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#64b5f6', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}
+                >
+                  {video.title || t('state.unknownTitle')}
+                </a>
+                <div style={{ marginTop: '0.3rem', fontSize: '0.8rem', color: '#888', display: 'flex', gap: '1rem' }}>
+                  {video.uploaded_at && <span>{t('label.uploadedAtMeta', { date: formatDate(video.uploaded_at) })}</span>}
+                  {video.duration_seconds && <span>{t('label.durationMeta', { duration: formatDuration(video.duration_seconds) })}</span>}
+                </div>
               </div>
             </div>
             <button onClick={onClose} style={{ fontSize: '1.2rem', padding: '0.1rem 0.5rem', flexShrink: 0 }}>✕</button>
           </div>
 
-          {/* Tab sor */}
           <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.75rem' }}>
             <button
               onClick={() => setActiveTab('transcript')}
               disabled={activeTab === 'transcript'}
               style={{ fontSize: '0.8rem' }}
             >
-              Transzkript
+              {t('btn.transcript')}
             </button>
             {hasMindmap && (
               <button
@@ -193,12 +194,11 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                 disabled={activeTab === 'mindmap'}
                 style={{ fontSize: '0.8rem' }}
               >
-                Gondolattérkép
+                {t('label.mindmap')}
               </button>
             )}
           </div>
 
-          {/* Export gombok — csak transzkript tab alatt */}
           {activeTab === 'transcript' && (
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: '0.25rem', marginRight: '0.25rem' }}>
@@ -207,43 +207,43 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                   disabled={!showTimed}
                   style={{ fontSize: '0.8rem' }}
                 >
-                  Sima
+                  {t('label.plain')}
                 </button>
                 <button
                   onClick={() => setShowTimed(true)}
                   disabled={!hasTimedTranscript || showTimed}
-                  title={hasTimedTranscript ? 'Időbélyeges transzkript' : 'Ehhez a transzkripthez még nincs időbélyeges változat'}
+                  title={hasTimedTranscript ? t('tooltip.timedTranscript') : t('tooltip.noTimedTranscript')}
                   style={{ fontSize: '0.8rem' }}
                 >
-                  Idővel
+                  {t('label.timed')}
                 </button>
               </div>
-              <button onClick={copyToClipboard} style={{ fontSize: '0.8rem' }}>Másolás</button>
+              <button onClick={copyToClipboard} style={{ fontSize: '0.8rem' }}>{t('btn.copy')}</button>
               <button
-                onClick={() => downloadFile(videoToTxt(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_idovel' : ''}.txt`)}
+                onClick={() => downloadFile(videoToTxt(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_timed' : ''}.txt`)}
                 style={{ fontSize: '0.8rem' }}
               >
-                Letöltés TXT
+                {t('export.downloadTxt')}
               </button>
               <button
-                onClick={() => downloadFile(videoToMd(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_idovel' : ''}.md`)}
+                onClick={() => downloadFile(videoToMd(video, { timed: showTimed }), `${sanitizeFilename(video.title)}${showTimed ? '_timed' : ''}.md`)}
                 style={{ fontSize: '0.8rem' }}
               >
-                Letöltés MD
+                {t('export.downloadMd')}
               </button>
               <button
                 onClick={() => downloadFile(videoToObsidianMd(video, { timed: true }), obsidianFilename(video))}
                 style={{ fontSize: '0.8rem' }}
               >
-                Obsidian MD
+                {t('export.obsidianMd')}
               </button>
               {hasMindmap && (
                 <button
                   onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
                   style={{ fontSize: '0.8rem' }}
-                  title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+                  title={t('tooltip.mindmap')}
                 >
-                  Mindmap MD
+                  {t('export.mindmapMd')}
                 </button>
               )}
             </div>
@@ -256,22 +256,22 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
               {(localVideo.summary || localVideo.topics?.length || localVideo.takeaways?.length || localVideo.questions?.length || localVideo.study_guide || localVideo.critique) && (
                 <div style={{ marginBottom: '1.2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <h3 style={{ fontSize: '0.9rem', color: '#fff' }}>AI jegyzet</h3>
+                    <h3 style={{ fontSize: '0.9rem', color: '#fff' }}>{t('label.aiNote')}</h3>
                     {!editingAi && (
                       <button onClick={startEditAi} style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }}>
-                        Szerkesztés
+                        {t('btn.edit')}
                       </button>
                     )}
                   </div>
                   {aiSaveMsg && (
-                    <div style={{ fontSize: '0.8rem', color: aiSaveMsg.startsWith('Hiba') ? '#f88' : '#6fcf73', marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: aiSaveMsg.startsWith('Hiba') || aiSaveMsg.startsWith('Error') ? '#f88' : '#6fcf73', marginBottom: '0.5rem' }}>
                       {aiSaveMsg}
                     </div>
                   )}
                   {editingAi ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                       <label style={{ fontSize: '0.8rem', color: '#aaa' }}>
-                        Összefoglaló
+                        {t('label.summary')}
                         <textarea
                           value={aiEdit.summary}
                           onChange={e => setAiEdit(p => ({ ...p, summary: e.target.value }))}
@@ -280,7 +280,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                         />
                       </label>
                       <label style={{ fontSize: '0.8rem', color: '#aaa' }}>
-                        Témák (soronként egy)
+                        {t('label.topicsPerLine')}
                         <textarea
                           value={aiEdit.topics}
                           onChange={e => setAiEdit(p => ({ ...p, topics: e.target.value }))}
@@ -289,7 +289,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                         />
                       </label>
                       <label style={{ fontSize: '0.8rem', color: '#aaa' }}>
-                        Tanulságok (soronként egy)
+                        {t('label.takeawaysPerLine')}
                         <textarea
                           value={aiEdit.takeaways}
                           onChange={e => setAiEdit(p => ({ ...p, takeaways: e.target.value }))}
@@ -298,7 +298,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                         />
                       </label>
                       <label style={{ fontSize: '0.8rem', color: '#aaa' }}>
-                        Kérdések (soronként egy)
+                        {t('label.questionsPerLine')}
                         <textarea
                           value={aiEdit.questions}
                           onChange={e => setAiEdit(p => ({ ...p, questions: e.target.value }))}
@@ -308,10 +308,10 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                       </label>
                       <div style={{ display: 'flex', gap: '0.4rem' }}>
                         <button onClick={handleSaveAi} disabled={aiSaving} className="primary" style={{ fontSize: '0.8rem' }}>
-                          {aiSaving ? 'Mentés...' : 'Mentés'}
+                          {aiSaving ? t('btn.saving') : t('btn.save')}
                         </button>
                         <button onClick={() => setEditingAi(false)} disabled={aiSaving} style={{ fontSize: '0.8rem' }}>
-                          Mégsem
+                          {t('btn.cancel')}
                         </button>
                       </div>
                     </div>
@@ -322,15 +322,15 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                           {localVideo.summary}
                         </p>
                       )}
-                      {localVideo.topics?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Témák</h4>}
+                      {localVideo.topics?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.topics')}</h4>}
                       {renderList(localVideo.topics)}
-                      {localVideo.takeaways?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Tanulságok</h4>}
+                      {localVideo.takeaways?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.takeaways')}</h4>}
                       {renderList(localVideo.takeaways)}
-                      {localVideo.questions?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>Kérdések</h4>}
+                      {localVideo.questions?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.questions')}</h4>}
                       {renderList(localVideo.questions)}
                       {localVideo.study_guide && (
                         <>
-                          <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>Tanulási útmutató</h4>
+                          <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>{t('label.studyGuide')}</h4>
                           <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', color: '#ddd', fontFamily: 'inherit', margin: '0.35rem 0 0.8rem', lineHeight: 1.6 }}>
                             {localVideo.study_guide}
                           </pre>
@@ -338,7 +338,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                       )}
                       {localVideo.critique && (
                         <>
-                          <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>Kritikai jegyzetek</h4>
+                          <h4 style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.5rem' }}>{t('label.critique')}</h4>
                           <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', color: '#ddd', fontFamily: 'inherit', margin: '0.35rem 0 0.8rem', lineHeight: 1.6 }}>
                             {localVideo.critique}
                           </pre>
@@ -353,15 +353,15 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.3rem' }}>
                     {!editingTranscript ? (
                       <button style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }} onClick={() => { setTranscriptEdit(visibleTranscript); setEditingTranscript(true); }}>
-                        Transzkript szerkesztése
+                        {t('btn.editTranscript')}
                       </button>
                     ) : (
                       <div style={{ display: 'flex', gap: '0.35rem' }}>
                         <button className="primary" style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }} disabled={transcriptSaving} onClick={handleSaveTranscript}>
-                          {transcriptSaving ? 'Mentés...' : 'Mentés'}
+                          {transcriptSaving ? t('btn.saving') : t('btn.save')}
                         </button>
                         <button style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }} disabled={transcriptSaving} onClick={() => setEditingTranscript(false)}>
-                          Mégsem
+                          {t('btn.cancel')}
                         </button>
                       </div>
                     )}
@@ -379,7 +379,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                   )}
                 </>
               ) : (
-                <p style={{ color: '#888', fontStyle: 'italic' }}>Ehhez a videóhoz nincs elérhető transzkript.</p>
+                <p style={{ color: '#888', fontStyle: 'italic' }}>{t('state.noTranscript')}</p>
               )}
             </>
           )}

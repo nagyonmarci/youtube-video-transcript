@@ -1,13 +1,7 @@
 import { useMemo, useState } from 'react';
 import { deleteChannel, updateChannel } from '../lib/directus.js';
 import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
-
-const STATUS_OPTIONS = [
-  { value: 'pending', label: 'Várakozik' },
-  { value: 'processing', label: 'Folyamatban' },
-  { value: 'done', label: 'Kész' },
-  { value: 'error', label: 'Hiba' },
-];
+import { useT } from '../lib/i18n.jsx';
 
 function editableChannel(ch) {
   return {
@@ -19,6 +13,15 @@ function editableChannel(ch) {
 }
 
 export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
+  const { t } = useT();
+
+  const STATUS_OPTIONS = [
+    { value: 'pending', label: t('status.pending') },
+    { value: 'processing', label: t('status.inProgress') },
+    { value: 'done', label: t('status.done') },
+    { value: 'error', label: t('status.error') },
+  ];
+
   const [search, setSearch] = useState('');
   const [drafts, setDrafts] = useState(() => Object.fromEntries(
     channels.map(ch => [ch.id, editableChannel(ch)])
@@ -61,10 +64,10 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
         channel_handle: draft.channel_handle.trim(),
         status: draft.status,
       });
-      showMsg('Csatorna mentve');
+      showMsg(t('msg.channelSaved'));
       await onChanged();
     } catch (e) {
-      showMsg('Mentési hiba: ' + e.message, true);
+      showMsg(t('msg.errSave', { error: e.message }), true);
     } finally {
       setBusyId(null);
     }
@@ -74,10 +77,10 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
     setBusyId(ch.id);
     try {
       await refreshChannel(ch.id);
-      showMsg('Frissítés sorba állítva');
+      showMsg(t('msg.refreshQueued'));
       await onChanged();
     } catch (e) {
-      showMsg('Frissítési hiba: ' + e.message, true);
+      showMsg(t('msg.errRefresh', { error: e.message }), true);
     } finally {
       setBusyId(null);
     }
@@ -87,24 +90,24 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
     setBusyId(ch.id);
     try {
       const result = await generateAiNotesForChannel(ch.id);
-      showMsg(`${result.count} AI jegyzet sorba állítva`);
+      showMsg(t('msg.aiQueued', { count: result.count }));
       await onChanged();
     } catch (e) {
-      showMsg('AI jegyzet hiba: ' + e.message, true);
+      showMsg(t('msg.errAi', { error: e.message }), true);
     } finally {
       setBusyId(null);
     }
   }
 
   async function handleDelete(ch) {
-    if (!confirm(`Töröljük: ${ch.name || ch.channel_handle || ch.channel_url}?`)) return;
+    if (!confirm(t('confirm.deleteChannel', { name: ch.name || ch.channel_handle || ch.channel_url }))) return;
     setBusyId(ch.id);
     try {
       await deleteChannel(ch.id);
-      showMsg('Csatorna törölve');
+      showMsg(t('msg.channelDeleted'));
       await onChanged();
     } catch (e) {
-      showMsg('Törlési hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusyId(null);
     }
@@ -114,17 +117,17 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
     <section className="admin-panel">
       <div className="admin-panel-header">
         <div>
-          <h2>Csatorna admin</h2>
-          <p>{channels.length} csatorna kezelése</p>
+          <h2>{t('header.channelAdmin')}</h2>
+          <p>{t('header.channelAdminSub', { count: channels.length })}</p>
         </div>
-        {onClose && <button onClick={onClose}>Bezár</button>}
+        {onClose && <button onClick={onClose}>{t('btn.close')}</button>}
       </div>
 
       <div className="admin-toolbar">
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Keresés név, handle vagy URL alapján..."
+          placeholder={t('placeholder.searchChannelAdmin')}
         />
       </div>
 
@@ -138,11 +141,11 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Név</th>
-              <th>URL</th>
-              <th>Handle</th>
-              <th>Státusz</th>
-              <th>Videók</th>
+              <th>{t('label.name')}</th>
+              <th>{t('label.url')}</th>
+              <th>{t('label.handle')}</th>
+              <th>{t('label.status')}</th>
+              <th>{t('label.videos')}</th>
               <th></th>
             </tr>
           </thead>
@@ -183,10 +186,10 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
                   <td className="admin-count">{ch.video_count || 0}</td>
                   <td>
                     <div className="admin-row-actions">
-                      <button onClick={() => handleSave(ch)} disabled={busy}>Mentés</button>
-                      <button onClick={() => handleRefresh(ch)} disabled={busy}>Frissít</button>
-                      <button onClick={() => handleGenerateChannelAi(ch)} disabled={busy}>AI jegyzetek</button>
-                      <button className="danger" onClick={() => handleDelete(ch)} disabled={busy}>Töröl</button>
+                      <button onClick={() => handleSave(ch)} disabled={busy}>{t('btn.save')}</button>
+                      <button onClick={() => handleRefresh(ch)} disabled={busy}>{t('btn.refresh')}</button>
+                      <button onClick={() => handleGenerateChannelAi(ch)} disabled={busy}>{t('header.aiNotes')}</button>
+                      <button className="danger" onClick={() => handleDelete(ch)} disabled={busy}>{t('btn.delete')}</button>
                     </div>
                   </td>
                 </tr>
@@ -194,7 +197,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="6" className="admin-empty">Nincs találat.</td>
+                <td colSpan="6" className="admin-empty">{t('state.noResults')}</td>
               </tr>
             )}
           </tbody>

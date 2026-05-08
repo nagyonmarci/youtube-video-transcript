@@ -5,6 +5,7 @@ import {
   channelToTxt, channelToMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
+import { useT } from '../lib/i18n.jsx';
 
 function parseChannelFile(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
@@ -32,15 +33,8 @@ function dailyTimeToCron(time) {
   return `${Number(minute)} ${Number(hour)} * * *`;
 }
 
-function scheduleLabel(cron, timezone) {
-  const parts = (cron || '').trim().split(/\s+/);
-  if (parts.length === 5 && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
-    return `Naponta ${cronToDailyTime(cron)} (${timezone || 'Europe/Budapest'})`;
-  }
-  return `${cron || 'nincs beállítva'} (${timezone || 'Europe/Budapest'})`;
-}
-
 export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }) {
+  const { t } = useT();
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,10 +56,10 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
     setBusy(true);
     try {
       const result = await fetchChannels(urls);
-      showMsg(`${result.count} csatorna sorba állítva`);
+      showMsg(t('msg.channelQueued', { count: result.count }));
       onChannelsChanged();
     } catch (e) {
-      showMsg('Hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
@@ -99,10 +93,10 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
     setBusy(true);
     try {
       await fetchVideo(url, selectedChannel?.id ?? null);
-      showMsg('Videó sorba állítva');
+      showMsg(t('msg.videoQueued'));
       setVideoInput('');
     } catch (e) {
-      showMsg('Hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
@@ -134,7 +128,7 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       const content = fmt === 'md' ? allChannelsToMd(groups, options) : allChannelsToTxt(groups, options);
       downloadFile(content, `osszes_transkript${timed ? '_idovel' : ''}.${fmt}`);
     } catch (e) {
-      showMsg('Export hiba: ' + e.message, true);
+      showMsg(t('msg.errExport', { error: e.message }), true);
     }
   }
 
@@ -147,10 +141,10 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       setScheduleCron(schedule.cron);
       setScheduleTime(cronToDailyTime(schedule.cron));
       setScheduleTimezone(schedule.timezone);
-      showMsg('Automatikus frissítés mentve');
+      showMsg(t('msg.scheduleUpdated'));
       setScheduleOpen(false);
     } catch (e) {
-      showMsg('Időzítés hiba: ' + e.message, true);
+      showMsg(t('msg.errSchedule', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
@@ -158,83 +152,75 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
 
   return (
     <div className="top-actions">
-      {/* Add channel */}
       <div className="card top-action-card">
-        <h3 className="card-title">Csatorna hozzáadása</h3>
+        <h3 className="card-title">{t('header.addChannel')}</h3>
         <form onSubmit={handleChannelSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <textarea
             rows={2}
-            placeholder="URL-ek soronként (@handle, youtube.com/...)"
+            placeholder={t('placeholder.channelUrls')}
             value={channelInput}
             onChange={e => setChannelInput(e.target.value)}
             style={{ resize: 'vertical' }}
           />
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button type="submit" className="primary" disabled={busy || !channelInput.trim()} style={{ flex: 1 }}>
-              Hozzáad
+              {t('btn.add')}
             </button>
             <button type="button" onClick={() => fileInputRef.current.click()} disabled={busy}>
-              Fájl
+              {t('btn.file')}
             </button>
           </div>
         </form>
         <input ref={fileInputRef} type="file" accept=".txt,.csv" style={{ display: 'none' }} onChange={handleFileUpload} />
       </div>
 
-      {/* Add video */}
       <div className="card top-action-card">
-        <h3 className="card-title">Videó hozzáadása</h3>
+        <h3 className="card-title">{t('header.addVideo')}</h3>
         <form onSubmit={handleVideoSubmit} style={{ display: 'flex', gap: '0.4rem' }}>
           <input
-            placeholder="youtube.com/watch?v=..."
+            placeholder={t('placeholder.videoUrl')}
             value={videoInput}
             onChange={e => setVideoInput(e.target.value)}
           />
           <button type="submit" disabled={busy || !videoInput.trim()} style={{ whiteSpace: 'nowrap' }}>
-            Hozzáad
+            {t('btn.add')}
           </button>
         </form>
       </div>
 
-      {/* Export all */}
       <div className="card top-action-card">
-        <h3 className="card-title">Összes export</h3>
+        <h3 className="card-title">{t('header.allExport')}</h3>
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          <button onClick={() => handleExportAll('txt')} style={{ flex: 1 }}>TXT</button>
-          <button onClick={() => handleExportAll('md')} style={{ flex: 1 }}>MD</button>
-          <button onClick={() => handleExportAll('txt', true)} style={{ flex: 1 }}>TXT idővel</button>
-          <button onClick={() => handleExportAll('md', true)} style={{ flex: 1 }}>MD idővel</button>
-          <button onClick={() => handleExportAll('obsidian')} style={{ flex: 1 }}>Obsidian</button>
+          <button onClick={() => handleExportAll('txt')} style={{ flex: 1 }}>{t('export.txt')}</button>
+          <button onClick={() => handleExportAll('md')} style={{ flex: 1 }}>{t('export.md')}</button>
+          <button onClick={() => handleExportAll('txt', true)} style={{ flex: 1 }}>{t('export.txtTimed')}</button>
+          <button onClick={() => handleExportAll('md', true)} style={{ flex: 1 }}>{t('export.mdTimed')}</button>
+          <button onClick={() => handleExportAll('obsidian')} style={{ flex: 1 }}>{t('export.obsidian')}</button>
         </div>
       </div>
 
-      {/* Refresh dates */}
       <div className="card top-action-card">
-        <h3 className="card-title">Hiányzó dátumok</h3>
+        <h3 className="card-title">{t('header.missingDates')}</h3>
         <button
           disabled={busy}
           onClick={async () => {
             setBusy(true);
             try {
               const result = await refreshDates();
-              showMsg(result.job_id
-                ? `Dátum frissítés sorba állítva (${result.job_id.slice(0, 8)})`
-                : 'Dátum frissítés sorba állítva'
-              );
+              showMsg(t('msg.dateRefreshQueued'));
             } catch (e) {
-              showMsg('Hiba: ' + e.message, true);
+              showMsg(t('msg.errGeneric', { error: e.message }), true);
             } finally {
               setBusy(false);
             }
           }}
         >
-          Frissítés
+          {t('btn.refresh')}
         </button>
       </div>
 
-      {/* AI notes */}
       <div className="card top-action-card">
-        <h3 className="card-title">AI jegyzetek</h3>
+        <h3 className="card-title">{t('header.aiNotes')}</h3>
         <button
           disabled={busy}
           onClick={async () => {
@@ -242,17 +228,17 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
             try {
               const result = await generateAiNotes();
               showMsg(result?.existing
-                ? `AI jegyzet batch már fut (${result.job_id?.slice(0, 8)})`
-                : `${result?.limit ?? ''} AI jegyzet generálás sorba állítva`
+                ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
+                : t('msg.aiBatchQueued', { limit: result?.limit ?? '' })
               );
             } catch (e) {
-              showMsg('AI jegyzet hiba: ' + e.message, true);
+              showMsg(t('msg.errAi', { error: e.message }), true);
             } finally {
               setBusy(false);
             }
           }}
         >
-          Hiányzók generálása
+          {t('btn.generateMissing')}
         </button>
       </div>
 
@@ -260,18 +246,18 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
         <div className="card top-action-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
             <div>
-              <h3 className="card-title" style={{ marginBottom: '0.15rem' }}>Automatikus frissítés</h3>
-              <div style={{ fontSize: '0.78rem', color: '#aaa' }}>{scheduleLabel(scheduleCron, scheduleTimezone)}</div>
+              <h3 className="card-title" style={{ marginBottom: '0.15rem' }}>{t('header.autoRefresh')}</h3>
+              <div style={{ fontSize: '0.78rem', color: '#aaa' }}>{scheduleCron} · {scheduleTimezone}</div>
             </div>
             <button type="button" onClick={() => setScheduleOpen(v => !v)} style={{ whiteSpace: 'nowrap' }}>
-              {scheduleOpen ? 'Bezár' : 'Beállítás'}
+              {scheduleOpen ? t('btn.close') : t('btn.settings')}
             </button>
           </div>
 
           {scheduleOpen && (
             <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
-                Napi frissítés ideje
+                {t('label.dailyRefreshTime')}
                 <input
                   type="time"
                   value={scheduleTime}
@@ -282,7 +268,7 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
                 />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
-                Időzóna
+                {t('label.timezone')}
                 <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
                   <option value="Europe/Budapest">Europe/Budapest</option>
                   <option value="UTC">UTC</option>
@@ -297,26 +283,25 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
                   checked={advancedSchedule}
                   onChange={e => setAdvancedSchedule(e.target.checked)}
                 />
-                Haladó cron
+                {t('label.advancedCron')}
               </label>
               {advancedSchedule && (
                 <input
                   value={scheduleCron}
                   onChange={e => setScheduleCron(e.target.value)}
-                  placeholder="0 7 * * *"
+                  placeholder={t('placeholder.cronExpr')}
                   spellCheck={false}
                   style={{ fontFamily: 'monospace' }}
                 />
               )}
               <button type="submit" disabled={busy || !scheduleTimezone.trim() || (advancedSchedule ? !scheduleCron.trim() : !scheduleTime)}>
-                Mentés
+                {t('btn.save')}
               </button>
             </form>
           )}
         </div>
       )}
 
-      {/* Status message */}
       {msg && (
         <div className={`status-msg ${msg.isError ? 'status-error' : 'status-success'}`}>
           {msg.text}

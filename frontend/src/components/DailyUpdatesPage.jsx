@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getDailyVideos } from '../lib/directus.js';
 import { generateAiNoteForVideo } from '../lib/fetcher.js';
 import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.js';
+import { useT } from '../lib/i18n.jsx';
 
 function todayValue() {
   const now = new Date();
@@ -13,7 +14,7 @@ function todayValue() {
 }
 
 function formatDateTime(iso) {
-  if (!iso) return 'Nincs dátum';
+  if (!iso) return '';
   return new Date(iso).toLocaleString('hu-HU', {
     year: 'numeric',
     month: '2-digit',
@@ -23,16 +24,12 @@ function formatDateTime(iso) {
   });
 }
 
-function channelName(video) {
-  const channel = video.channel_id;
-  return channel?.name || channel?.channel_handle || 'Ismeretlen csatorna';
-}
-
 function groupByChannel(videos) {
   return videos.reduce((groups, video) => {
-    const key = channelName(video);
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(video);
+    const channel = video.channel_id;
+    const key = channel?.name || channel?.channel_handle || '';
+    if (!groups[key]) groups[key] = { label: key, videos: [] };
+    groups[key].videos.push(video);
     return groups;
   }, {});
 }
@@ -47,6 +44,7 @@ function listPreview(items, limit = 3) {
 }
 
 export default function DailyUpdatesPage({ onSelectVideo }) {
+  const { t } = useT();
   const [date, setDate] = useState(todayValue());
   const [videos, setVideos] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -60,7 +58,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
     try {
       setVideos(await getDailyVideos(date));
     } catch (e) {
-      setMsg({ text: 'Napi frissítés betöltési hiba: ' + e.message, isError: true });
+      setMsg({ text: t('msg.errDaily', { error: e.message }), isError: true });
     } finally {
       setLoading(false);
     }
@@ -94,10 +92,10 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
     setBusyId(video.id);
     try {
       await generateAiNoteForVideo(video.id);
-      showMsg('AI jegyzet sorba állítva');
+      showMsg(t('msg.aiQueued', { count: 1 }));
       await load();
     } catch (e) {
-      showMsg('AI jegyzet hiba: ' + e.message, true);
+      showMsg(t('msg.errAi', { error: e.message }), true);
     } finally {
       setBusyId(null);
     }
@@ -117,23 +115,23 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
     <section className="daily-page">
       <div className="view-header">
         <div>
-          <h2>Napi frissítések</h2>
-          <p>{filteredVideos.length} videó ezen a napon</p>
+          <h2>{t('header.daily')}</h2>
+          <p>{t('header.dailySub', { count: filteredVideos.length })}</p>
         </div>
         <div className="daily-controls">
-          <button onClick={() => changeDay(-1)}>Előző nap</button>
+          <button onClick={() => changeDay(-1)}>{t('btn.prevDay')}</button>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
-          <button onClick={() => setDate(todayValue())}>Ma</button>
-          <button onClick={() => changeDay(1)}>Következő nap</button>
+          <button onClick={() => setDate(todayValue())}>{t('btn.today')}</button>
+          <button onClick={() => changeDay(1)}>{t('btn.nextDay')}</button>
           <select value={filter} onChange={e => setFilter(e.target.value)}>
-            <option value="all">Összes</option>
-            <option value="with_ai">AI kész</option>
-            <option value="without_ai">AI hiányzik</option>
-            <option value="without_transcript">Transzkript hiányzik</option>
+            <option value="all">{t('filter.all')}</option>
+            <option value="with_ai">{t('filter.aiDone')}</option>
+            <option value="without_ai">{t('filter.aiMissing')}</option>
+            <option value="without_transcript">{t('filter.transcriptMissing')}</option>
           </select>
           <input
             type="search"
-            placeholder="Cím keresés..."
+            placeholder={t('placeholder.searchVideo')}
             value={titleSearch}
             onChange={e => setTitleSearch(e.target.value)}
             style={{ width: '180px' }}
@@ -144,27 +142,27 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
       {msg && <div className={`status-msg ${msg.isError ? 'status-error' : 'status-success'}`}>{msg.text}</div>}
 
       {loading ? (
-        <div className="video-empty">Betöltés...</div>
+        <div className="video-empty">{t('state.loading')}</div>
       ) : groupEntries.length === 0 ? (
-        <div className="video-empty">Nincs videó a választott napon.</div>
+        <div className="video-empty">{t('state.noVideos')}</div>
       ) : (
         <div className="daily-groups">
-          {groupEntries.map(([name, channelVideos]) => (
-            <section key={name} className="daily-channel">
+          {groupEntries.map(([key, group]) => (
+            <section key={key} className="daily-channel">
               <div className="daily-channel-header">
-                <h3>{name}</h3>
-                <span>{channelVideos.length} videó</span>
+                <h3>{group.label || t('state.unknownChannel')}</h3>
+                <span>{t('label.videoCount', { count: group.videos.length })}</span>
               </div>
               <div className="daily-video-list">
-                {channelVideos.map(video => (
+                {group.videos.map(video => (
                   <article key={video.id} className="daily-video-card">
                     <div className="daily-video-main">
                       <a href={video.url} target="_blank" rel="noopener noreferrer" className="daily-video-title">
-                        {video.title || 'Ismeretlen cím'}
+                        {video.title || t('state.unknownTitle')}
                       </a>
                       <div className="daily-video-meta">
                         <span>{formatDateTime(video.uploaded_at)}</span>
-                        <span className={`badge badge-${video.status}`}>{video.status || 'nincs státusz'}</span>
+                        <span className={`badge badge-${video.status}`}>{video.status}</span>
                         {video.ai_notes_status && (
                           <span className={`badge badge-${video.ai_notes_status}`}>{video.ai_notes_status}</span>
                         )}
@@ -172,7 +170,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
                       {video.summary ? (
                         <p className="daily-summary">{video.summary}</p>
                       ) : (
-                        <p className="daily-summary daily-muted">Még nincs AI összefoglaló.</p>
+                        <p className="daily-summary daily-muted">{t('state.noAiSummary')}</p>
                       )}
                       {video.topics?.length > 0 && (
                         <div className="topic-row">
@@ -182,28 +180,28 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
                       {listPreview(video.takeaways)}
                     </div>
                     <div className="daily-video-actions">
-                      {video.transcript && <button onClick={() => onSelectVideo(video)}>Transzkript</button>}
+                      {video.transcript && <button onClick={() => onSelectVideo(video)}>{t('btn.transcript')}</button>}
                       {video.transcript && (
                         <button disabled={busyId === video.id || video.ai_notes_status === 'pending'} onClick={() => handleGenerateAi(video)}>
-                          {video.summary ? 'AI újra' : 'AI jegyzet'}
+                          {video.summary ? t('btn.aiRegen') : t('btn.aiNote')}
                         </button>
                       )}
                       <button
                         onClick={() => downloadFile(videoToMd(video, { timed: true }), `${sanitizeFilename(video.title)}.md`)}
                       >
-                        MD
+                        {t('export.md')}
                       </button>
                       <button
                         onClick={() => downloadFile(videoToObsidianMd(video, { timed: true }), obsidianFilename(video))}
                       >
-                        Obsidian
+                        {t('export.obsidian')}
                       </button>
                       {(video.obsidian_note || video.summary) && (
                         <button
-                          title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+                          title={t('tooltip.mindmap')}
                           onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
                         >
-                          Mindmap
+                          {t('export.mindmap')}
                         </button>
                       )}
                     </div>

@@ -17,6 +17,7 @@ import {
 } from '../lib/fetcher.js';
 import ChannelAdminPanel from './ChannelAdminPanel.jsx';
 import TopActions from './TopActions.jsx';
+import { useT } from '../lib/i18n.jsx';
 
 function sameData(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -47,6 +48,7 @@ function dailyTimeToCron(time) {
 }
 
 function StatusLine({ title, queueSize, current, onStop }) {
+  const { t } = useT();
   const active = queueSize > 0 || Boolean(current?.type);
   const progressText = formatProgress(current?.progress_current, current?.progress_total);
   return (
@@ -56,14 +58,14 @@ function StatusLine({ title, queueSize, current, onStop }) {
         <p>
           {active ? (
             <>
-              <span>Sor: {queueSize}</span>
+              <span>{t('label.queueSize', { count: queueSize })}</span>
               {current?.phase && <span> · {current.phase}</span>}
               {current?.video && <span> · {current.video}</span>}
               {current?.video_id && !current?.video && <span> · {current.video_id}</span>}
               {progressText && <span> · {progressText}</span>}
             </>
           ) : (
-            <span>Nincs futó feladat</span>
+            <span>{t('state.noRunning')}</span>
           )}
         </p>
         {progressText && (
@@ -76,9 +78,9 @@ function StatusLine({ title, queueSize, current, onStop }) {
       </div>
       <div className="process-actions">
         <span className={`badge ${active ? 'badge-processing' : 'badge-done'}`}>
-          {active ? 'Fut' : 'Üres'}
+          {active ? t('status.running') : t('status.empty')}
         </span>
-        {active && onStop && <button className="danger" onClick={onStop}>Stop</button>}
+        {active && onStop && <button className="danger" onClick={onStop}>{t('btn.stop')}</button>}
       </div>
     </div>
   );
@@ -94,101 +96,103 @@ function formatJobTime(value) {
   });
 }
 
-const JOB_STATUS_LABELS = {
-  queued: 'Sorban',
-  running: 'Fut',
-  paused: 'Szünetel',
-  done: 'Kész',
-  error: 'Hiba',
-  cancelled: 'Leállítva',
-};
-
 function JobQueuePanel({ jobs, onAction, busy }) {
+  const { t } = useT();
   const [showCompleted, setShowCompleted] = useState(false);
+
+  const JOB_STATUS_LABELS = {
+    queued: t('status.queued'),
+    running: t('status.running'),
+    paused: t('status.paused'),
+    done: t('status.done'),
+    error: t('status.error'),
+    cancelled: t('status.cancelled'),
+  };
+
   const activeJobs = jobs.filter(job => job.status !== 'done' && job.status !== 'cancelled');
   const completedJobs = jobs.filter(job => job.status === 'done' || job.status === 'cancelled');
   const visibleJobs = showCompleted ? jobs.slice(0, 100) : activeJobs.slice(0, 80);
   return (
     <>
-    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem', alignItems: 'center' }}>
-      <span style={{ fontSize: '0.78rem', color: 'var(--text2)' }}>{activeJobs.length} aktív job</span>
-      {completedJobs.length > 0 && (
-        <button style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }} onClick={() => setShowCompleted(v => !v)}>
-          {showCompleted ? 'Csak aktív' : `+ ${completedJobs.length} befejezett`}
-        </button>
-      )}
-    </div>
-    <div className="job-table-wrap">
-      <table className="job-table">
-        <thead>
-          <tr>
-            <th>Sor</th>
-            <th>Feladat</th>
-            <th>Állapot</th>
-            <th>Létrehozva</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {visibleJobs.map(job => {
-            const running = job.status === 'running';
-            const paused = job.status === 'paused';
-            const reorderable = ['queued', 'paused'].includes(job.status);
-            const progressText = formatProgress(job.progress_current, job.progress_total);
-            return (
-              <tr key={job.id}>
-                <td>
-                  <span className={`badge ${job.queue === 'ai' ? 'badge-whisper' : 'badge-processing'}`}>
-                    {job.queue}
-                  </span>
-                </td>
-                <td>
-                  <div className="job-label">{job.label || job.type}</div>
-                  {progressText && <div className="job-progress-text">{progressText}</div>}
-                  {progressText && (
-                    <progress
-                      className="job-progress"
-                      value={Number(job.progress_current || 0)}
-                      max={Number(job.progress_total || 1)}
-                    />
-                  )}
-                  {job.error_message && <div className="job-error">{job.error_message}</div>}
-                </td>
-                <td>
-                  <span className={`badge badge-${job.status}`}>
-                    {JOB_STATUS_LABELS[job.status] || job.status}
-                  </span>
-                  {Number(job.attempts || 0) > 0 && (
-                    <div className="job-progress-text">
-                      Próba {job.attempts}/{job.max_attempts || 3}
-                    </div>
-                  )}
-                </td>
-                <td>{formatJobTime(job.created_at)}</td>
-                <td>
-                  <div className="job-actions">
-                    <button disabled={busy || !reorderable} onClick={() => onAction(() => moveJob(job.id, 'up'))}>Fel</button>
-                    <button disabled={busy || !reorderable} onClick={() => onAction(() => moveJob(job.id, 'down'))}>Le</button>
-                    {paused ? (
-                      <button disabled={busy} onClick={() => onAction(() => resumeJob(job.id))}>Folytat</button>
-                    ) : (
-                      <button disabled={busy || running || ['done', 'cancelled'].includes(job.status)} onClick={() => onAction(() => pauseJob(job.id))}>Pause</button>
-                    )}
-                    <button disabled={busy || running} onClick={() => onAction(() => startJob(job.id))}>Indít</button>
-                    <button className="danger" disabled={busy} onClick={() => onAction(() => deleteJob(job.id))}>Töröl</button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-          {visibleJobs.length === 0 && (
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem', alignItems: 'center' }}>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text2)' }}>{t('label.activeJobs', { count: activeJobs.length })}</span>
+        {completedJobs.length > 0 && (
+          <button style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }} onClick={() => setShowCompleted(v => !v)}>
+            {showCompleted ? t('label.activeOnly') : t('label.plusCompleted', { count: completedJobs.length })}
+          </button>
+        )}
+      </div>
+      <div className="job-table-wrap">
+        <table className="job-table">
+          <thead>
             <tr>
-              <td colSpan="5" className="admin-empty">A feldolgozási sor üres.</td>
+              <th>{t('label.queue')}</th>
+              <th>{t('label.task')}</th>
+              <th>{t('label.status')}</th>
+              <th>{t('label.createdAt')}</th>
+              <th></th>
             </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {visibleJobs.map(job => {
+              const running = job.status === 'running';
+              const paused = job.status === 'paused';
+              const reorderable = ['queued', 'paused'].includes(job.status);
+              const progressText = formatProgress(job.progress_current, job.progress_total);
+              return (
+                <tr key={job.id}>
+                  <td>
+                    <span className={`badge ${job.queue === 'ai' ? 'badge-whisper' : 'badge-processing'}`}>
+                      {job.queue}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="job-label">{job.label || job.type}</div>
+                    {progressText && <div className="job-progress-text">{progressText}</div>}
+                    {progressText && (
+                      <progress
+                        className="job-progress"
+                        value={Number(job.progress_current || 0)}
+                        max={Number(job.progress_total || 1)}
+                      />
+                    )}
+                    {job.error_message && <div className="job-error">{job.error_message}</div>}
+                  </td>
+                  <td>
+                    <span className={`badge badge-${job.status}`}>
+                      {JOB_STATUS_LABELS[job.status] || job.status}
+                    </span>
+                    {Number(job.attempts || 0) > 0 && (
+                      <div className="job-progress-text">
+                        {t('label.attempts', { current: job.attempts, max: job.max_attempts || 3 })}
+                      </div>
+                    )}
+                  </td>
+                  <td>{formatJobTime(job.created_at)}</td>
+                  <td>
+                    <div className="job-actions">
+                      <button disabled={busy || !reorderable} onClick={() => onAction(() => moveJob(job.id, 'up'))}>{t('btn.up')}</button>
+                      <button disabled={busy || !reorderable} onClick={() => onAction(() => moveJob(job.id, 'down'))}>{t('btn.down')}</button>
+                      {paused ? (
+                        <button disabled={busy} onClick={() => onAction(() => resumeJob(job.id))}>{t('btn.resume')}</button>
+                      ) : (
+                        <button disabled={busy || running || ['done', 'cancelled'].includes(job.status)} onClick={() => onAction(() => pauseJob(job.id))}>{t('btn.pause')}</button>
+                      )}
+                      <button disabled={busy || running} onClick={() => onAction(() => startJob(job.id))}>{t('btn.start')}</button>
+                      <button className="danger" disabled={busy} onClick={() => onAction(() => deleteJob(job.id))}>{t('btn.delete')}</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {visibleJobs.length === 0 && (
+              <tr>
+                <td colSpan="5" className="admin-empty">{t('state.noJobs')}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -201,6 +205,7 @@ export default function AdminDashboard({
   onChannelsChanged,
   onStatusChanged,
 }) {
+  const { t } = useT();
   const [stats, setStats] = useState(null);
   const [coverage, setCoverage] = useState(null);
   const [monthlyData, setMonthlyData] = useState([]);
@@ -233,7 +238,7 @@ export default function AdminDashboard({
       setScheduleTime(prev => (prev === nextTime ? prev : nextTime));
       setScheduleTimezone(prev => (prev === nextTimezone ? prev : nextTimezone));
     } catch (e) {
-      setMsg({ text: 'Admin adatok betöltési hiba: ' + e.message, isError: true });
+      setMsg({ text: t('msg.errAdmin', { error: e.message }), isError: true });
     }
   }
 
@@ -255,21 +260,21 @@ export default function AdminDashboard({
       showMsg(typeof successText === 'function' ? successText(result) : successText);
       await Promise.all([loadAdminData(), onStatusChanged?.()]);
     } catch (e) {
-      showMsg('Hiba: ' + e.message, true);
+      showMsg(t('msg.errGeneric', { error: e.message }), true);
     } finally {
       setBusy(false);
     }
   }
 
   async function runJobAction(action) {
-    await runAction(action, 'Sor frissítve');
+    await runAction(action, t('msg.queueRefreshed'));
   }
 
   async function saveSchedule(e) {
     e.preventDefault();
     await runAction(
       () => updateSchedule(dailyTimeToCron(scheduleTime), scheduleTimezone),
-      'Ütemezés mentve'
+      t('msg.scheduleUpdated')
     );
   }
 
@@ -281,8 +286,8 @@ export default function AdminDashboard({
     <section className="admin-dashboard">
       <div className="view-header">
         <div>
-          <h2>Admin</h2>
-          <p>{channelCount} csatorna · {displayedTotalVideos} videó</p>
+          <h2>{t('header.admin')}</h2>
+          <p>{t('header.adminSub', { channels: channelCount, videos: displayedTotalVideos })}</p>
         </div>
       </div>
 
@@ -290,41 +295,40 @@ export default function AdminDashboard({
 
       <div className="metric-grid">
         <div className="metric-card">
-          <span>Mai videók</span>
+          <span>{t('metric.todayVideos')}</span>
           <strong>{stats?.todayVideos ?? '-'}</strong>
         </div>
         <div className="metric-card">
-          <span>Összes videó</span>
+          <span>{t('metric.totalVideos')}</span>
           <strong>{displayedTotalVideos}</strong>
         </div>
         <div className="metric-card">
-          <span>Transzkript hiány</span>
+          <span>{t('metric.missingTranscripts')}</span>
           <strong>{stats?.missingTranscripts ?? '-'}</strong>
         </div>
         <div className="metric-card">
-          <span>AI jegyzet hiány</span>
+          <span>{t('metric.missingAi')}</span>
           <strong>{stats?.missingAiNotes ?? '-'}</strong>
         </div>
         <div className="metric-card">
-          <span>Hibás videók</span>
+          <span>{t('metric.errorVideos')}</span>
           <strong>{stats?.errorVideos ?? '-'}</strong>
         </div>
       </div>
 
       <section className="admin-section">
         <div className="admin-section-header">
-          <h3>Statisztika</h3>
+          <h3>{t('header.statistics')}</h3>
         </div>
 
-        {/* Monthly chart */}
         {monthlyData.length > 0 && (() => {
           const max = Math.max(...monthlyData.map(d => d.count), 1);
           return (
             <div style={{ marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text2)', marginBottom: '0.4rem' }}>Havi videók (utolsó 12 hónap)</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text2)', marginBottom: '0.4rem' }}>{t('metric.monthlyChart')}</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: '80px' }}>
                 {monthlyData.map(({ month, count }) => (
-                  <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', height: '100%', justifyContent: 'flex-end' }} title={`${month}: ${count} videó`}>
+                  <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', height: '100%', justifyContent: 'flex-end' }} title={`${month}: ${count}`}>
                     <div style={{ width: '100%', background: 'rgba(100,181,246,0.7)', borderRadius: '3px 3px 0 0', height: `${Math.max(2, Math.round((count / max) * 72))}px` }} />
                     <span style={{ fontSize: '0.6rem', color: 'var(--text2)', transform: 'rotate(-45deg)', transformOrigin: 'top right', whiteSpace: 'nowrap', marginTop: '2px' }}>
                       {month.slice(5)}
@@ -336,18 +340,17 @@ export default function AdminDashboard({
           );
         })()}
 
-        {/* Coverage per channel */}
         {coverage && channels.length > 0 && (
           <div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text2)', marginBottom: '0.4rem' }}>Lefedettség csatornánként</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text2)', marginBottom: '0.4rem' }}>{t('header.coverage')}</div>
             <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', background: 'var(--bg2)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Csatorna</th>
-                    <th style={{ textAlign: 'right', padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '60px' }}>Videók</th>
-                    <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '160px' }}>Transzkript</th>
-                    <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '160px' }}>AI</th>
+                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{t('label.channel')}</th>
+                    <th style={{ textAlign: 'right', padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '60px' }}>{t('label.videos')}</th>
+                    <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '160px' }}>{t('label.transcript')}</th>
+                    <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '160px' }}>{t('label.aiNote')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -386,7 +389,6 @@ export default function AdminDashboard({
           </div>
         )}
 
-        {/* Error videos */}
         {(stats?.errorVideos > 0) && (
           <div style={{ marginTop: '0.75rem' }}>
             <button
@@ -399,7 +401,7 @@ export default function AdminDashboard({
                 setShowErrorVideos(v => !v);
               }}
             >
-              {showErrorVideos ? 'Hibás videók elrejtése' : `Hibás videók (${stats.errorVideos})`}
+              {showErrorVideos ? t('label.hideErrors') : t('label.showErrors', { count: stats.errorVideos })}
             </button>
             {showErrorVideos && errorVideos && (
               <div style={{ marginTop: '0.5rem', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', background: 'var(--bg2)' }}>
@@ -413,7 +415,7 @@ export default function AdminDashboard({
                     </a>
                   </div>
                 ))}
-                {errorVideos.length === 0 && <div style={{ padding: '0.5rem 0.7rem', color: 'var(--text2)', fontSize: '0.82rem' }}>Nincs hibás videó.</div>}
+                {errorVideos.length === 0 && <div style={{ padding: '0.5rem 0.7rem', color: 'var(--text2)', fontSize: '0.82rem' }}>{t('state.noErrorVideos')}</div>}
               </div>
             )}
           </div>
@@ -422,45 +424,45 @@ export default function AdminDashboard({
 
       <section className="admin-section">
         <div className="admin-section-header">
-          <h3>Feldolgozás</h3>
+          <h3>{t('header.processing')}</h3>
           <div className="admin-section-actions">
-            <button disabled={busy} onClick={() => runAction(refreshDates, 'Dátum frissítés sorba állítva')}>
-              Hiányzó dátumok
+            <button disabled={busy} onClick={() => runAction(refreshDates, t('msg.dateRefreshQueued'))}>
+              {t('header.missingDates')}
             </button>
-            <button disabled={busy} onClick={() => runAction(refreshThumbnails, 'Thumbnail frissítés sorba állítva')}>
-              Hiányzó képek
+            <button disabled={busy} onClick={() => runAction(refreshThumbnails, t('msg.thumbnailRefreshQueued'))}>
+              {t('header.missingImages')}
             </button>
             <button
               disabled={busy}
               onClick={() => runAction(
                 () => generateAiNotes(stats?.missingAiNotes || 20000),
                 result => result?.existing
-                  ? `AI jegyzet batch már fut (${result.job_id?.slice(0, 8)})`
-                  : `${result?.limit ?? stats?.missingAiNotes ?? ''} AI jegyzet sorba állítva`
+                  ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
+                  : t('msg.aiQueued', { count: result?.limit ?? stats?.missingAiNotes ?? '' })
               )}
             >
-              Hiányzó AI
+              {t('header.aiNotes')}
             </button>
           </div>
         </div>
         <div className="process-panel">
           <StatusLine
-            title="Fetcher"
+            title={t('label.fetcher')}
             queueSize={fetcherStatus?.fetch_active_size ?? fetcherStatus?.queue_size ?? 0}
             current={fetcherStatus?.current_task}
-            onStop={() => runAction(stopProcessing, 'Fetcher leállítva')}
+            onStop={() => runAction(stopProcessing, t('msg.queueRefreshed'))}
           />
           <StatusLine
-            title="AI jegyzetek"
+            title={t('label.aiWorker')}
             queueSize={fetcherStatus?.ai_active_size ?? fetcherStatus?.ai_queue_size ?? 0}
             current={fetcherStatus?.current_ai_task}
-            onStop={() => runAction(stopProcessing, 'AI sor leállítva')}
+            onStop={() => runAction(stopProcessing, t('msg.queueRefreshed'))}
           />
           <StatusLine
-            title="Whisper"
+            title={t('label.whisper')}
             queueSize={whisperStatus?.queue_size ?? 0}
             current={whisperStatus?.current_task}
-            onStop={() => runAction(stopWhisper, 'Whisper leállítva')}
+            onStop={() => runAction(stopWhisper, t('msg.queueRefreshed'))}
           />
         </div>
         <JobQueuePanel jobs={jobs} busy={busy} onAction={runJobAction} />
@@ -468,16 +470,16 @@ export default function AdminDashboard({
 
       <section className="admin-section">
         <div className="admin-section-header">
-          <h3>Ütemezés</h3>
+          <h3>{t('header.schedule')}</h3>
           <span>{scheduleCron} · {scheduleTimezone}</span>
         </div>
         <form className="schedule-form" onSubmit={saveSchedule}>
           <label>
-            Napi frissítés
+            {t('label.dailyRefresh')}
             <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} />
           </label>
           <label>
-            Időzóna
+            {t('label.timezone')}
             <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
               <option value="Europe/Budapest">Europe/Budapest</option>
               <option value="UTC">UTC</option>
@@ -486,13 +488,13 @@ export default function AdminDashboard({
               <option value="America/New_York">America/New_York</option>
             </select>
           </label>
-          <button type="submit" disabled={busy}>Mentés</button>
+          <button type="submit" disabled={busy}>{t('btn.save')}</button>
         </form>
       </section>
 
       <section className="admin-section">
         <div className="admin-section-header">
-          <h3>Gyors műveletek</h3>
+          <h3>{t('header.quickActions')}</h3>
         </div>
         <TopActions
           channels={channels}

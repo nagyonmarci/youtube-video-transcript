@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.js';
+import { useT } from '../lib/i18n.jsx';
 
 async function bulkGenerateAiNotes(videos) {
   for (const v of videos) {
@@ -28,20 +29,6 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('hu-HU');
 }
 
-const STATUS_MAP = {
-  done: { icon: '✅', label: 'Kész' },
-  pending: { icon: '⏳', label: 'Várakozik' },
-  processing: { icon: '🔄', label: 'Feldolgozás' },
-  no_transcript: { icon: '—', label: 'Nincs' },
-  error: { icon: '⚠️', label: 'Hiba' },
-};
-
-const AI_STATUS_MAP = {
-  done: 'AI kész',
-  pending: 'AI folyamatban',
-  error: 'AI hiba',
-};
-
 export default function VideoTable({
   videos,
   totalCount,
@@ -63,6 +50,7 @@ export default function VideoTable({
   onVideosChanged,
   selectedChannel,
 }) {
+  const { t } = useT();
   const searchInputRef = useRef();
   const [localSearch, setLocalSearch] = useState(search);
   const [aiBusyId, setAiBusyId] = useState(null);
@@ -70,6 +58,20 @@ export default function VideoTable({
   const [bulkBusy, setBulkBusy] = useState(false);
   const debounceRef = useRef(null);
   const loadMoreRef = useRef(null);
+
+  const STATUS_MAP = {
+    done: { icon: '✅', label: t('status.done') },
+    pending: { icon: '⏳', label: t('status.pending') },
+    processing: { icon: '🔄', label: t('status.processing') },
+    no_transcript: { icon: '—', label: t('status.none') },
+    error: { icon: '⚠️', label: t('status.error') },
+  };
+
+  const AI_STATUS_MAP = {
+    done: t('status.aiDone'),
+    pending: t('status.aiRunning'),
+    error: t('status.aiError'),
+  };
 
   useEffect(() => { setSelectedIds(new Set()); }, [search, statusFilter, aiFilter, membersFilter, sort, selectedChannel?.id]);
 
@@ -119,7 +121,7 @@ export default function VideoTable({
 
   async function handleBulkDeleteAi() {
     if (!selectedVideos.length) return;
-    if (!confirm(`Töröljük az AI noteket ${selectedVideos.length} videóhoz?`)) return;
+    if (!confirm(t('confirm.deleteAiNotes', { count: selectedVideos.length }))) return;
     setBulkBusy(true);
     try {
       await bulkDeleteAiNotes(selectedVideos);
@@ -139,7 +141,6 @@ export default function VideoTable({
     downloadFile(combined, `bulk_obsidian_${selectedVideos.length}.md`);
   }
 
-  // Sync local search with prop
   useEffect(() => {
     setLocalSearch(search);
   }, [search]);
@@ -175,7 +176,7 @@ export default function VideoTable({
     try {
       await generateAiNoteForVideo(video.id);
     } catch (err) {
-      alert('AI jegyzet hiba: ' + err.message);
+      alert(t('msg.errAi', { error: err.message }));
     } finally {
       setAiBusyId(null);
     }
@@ -183,13 +184,13 @@ export default function VideoTable({
 
   async function handleDeleteAiNote(e, video) {
     e.stopPropagation();
-    if (!confirm(`Töröljük az AI jegyzetet ehhez a videóhoz?\n\n${video.title || video.video_id}`)) return;
+    if (!confirm(t('confirm.deleteAiNote', { title: video.title || video.video_id }))) return;
     setAiBusyId(video.id);
     try {
       await deleteAiNoteForVideo(video.id);
       await onVideosChanged?.();
     } catch (err) {
-      alert('AI jegyzet törlés hiba: ' + err.message);
+      alert(t('msg.errAiDelete', { error: err.message }));
     } finally {
       setAiBusyId(null);
     }
@@ -200,15 +201,15 @@ export default function VideoTable({
       <div className="video-header">
         <h2 className="video-title">
           {selectedChannel
-            ? `${selectedChannel.name || selectedChannel.channel_handle} — ${totalCount} videó`
-            : `Összes videó (${totalCount})`
+            ? t('header.channelVideos', { name: selectedChannel.name || selectedChannel.channel_handle, count: totalCount })
+            : t('header.allVideos', { count: totalCount })
           }
         </h2>
         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             ref={searchInputRef}
             className="video-search"
-            placeholder="Cím keresés..."
+            placeholder={t('placeholder.searchVideo')}
             value={localSearch}
             onChange={handleSearchInput}
             style={{ width: '200px' }}
@@ -217,56 +218,53 @@ export default function VideoTable({
             value={statusFilter}
             onChange={e => onStatusFilterChange?.(e.target.value)}
             style={{ width: 'auto' }}
-            title="Transzkript állapot szűrő"
           >
-            <option value="all">Minden állapot</option>
-            <option value="done">Kész</option>
-            <option value="pending">Várakozik</option>
-            <option value="no_transcript">Nincs transzkript</option>
-            <option value="error">Hiba</option>
+            <option value="all">{t('filter.allStatus')}</option>
+            <option value="done">{t('filter.done')}</option>
+            <option value="pending">{t('filter.pending')}</option>
+            <option value="no_transcript">{t('filter.noTranscript')}</option>
+            <option value="error">{t('filter.error')}</option>
           </select>
           <select
             value={aiFilter}
             onChange={e => onAiFilterChange?.(e.target.value)}
             style={{ width: 'auto' }}
-            title="AI jegyzetek szűrő"
           >
-            <option value="all">Minden AI</option>
-            <option value="done">AI kész</option>
-            <option value="missing">AI hiányzik</option>
-            <option value="error">AI hiba</option>
+            <option value="all">{t('filter.allAi')}</option>
+            <option value="done">{t('filter.aiDone')}</option>
+            <option value="missing">{t('filter.aiMissing')}</option>
+            <option value="error">{t('filter.aiError')}</option>
           </select>
           <select
             value={membersFilter}
             onChange={e => onMembersFilterChange?.(e.target.value)}
             style={{ width: 'auto' }}
-            title="Members-only videók szűrője"
           >
-            <option value="all">Members: mind</option>
-            <option value="hide">Members elrejtve</option>
-            <option value="only">Csak members</option>
+            <option value="all">{t('filter.membersAll')}</option>
+            <option value="hide">{t('filter.membersHidden')}</option>
+            <option value="only">{t('filter.membersOnly')}</option>
           </select>
         </div>
       </div>
 
       {loading ? (
-        <div className="video-empty">Betöltés...</div>
+        <div className="video-empty">{t('state.loading')}</div>
       ) : totalCount === 0 ? (
         <div className="video-empty">
-          {search ? 'Nincs találat.' : 'Nincsenek videók. Adj hozzá egy csatornát fent.'}
+          {search ? t('state.noResults') : t('state.noVideos')}
         </div>
       ) : (
         <>
           {someSelected && (
             <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.5rem', background: 'var(--primary-dim)', border: '1px solid var(--primary)', borderRadius: '6px', marginBottom: '0.4rem', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{selectedIds.size} kiválasztva</span>
-              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkAiNotes} title="AI notes generálás a kiválasztottakhoz">AI generálás</button>
-              <button className="btn-sm danger" disabled={bulkBusy} onClick={handleBulkDeleteAi}>AI törlés</button>
-              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkExportMd}>MD letöltés</button>
-              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkExportObsidian}>Obsidian letöltés</button>
-              <button className="btn-sm" onClick={() => downloadFile(videosToCsv(selectedVideos), `export_${selectedVideos.length}.csv`)}>CSV</button>
-              <button className="btn-sm" onClick={() => downloadFile(videosToJson(selectedVideos), `export_${selectedVideos.length}.json`)}>JSON</button>
-              <button className="btn-sm" onClick={() => setSelectedIds(new Set())} style={{ marginLeft: 'auto' }}>✕ Visszavonás</button>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{t('label.selected', { count: selectedIds.size })}</span>
+              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkAiNotes}>{t('btn.aiGenerate')}</button>
+              <button className="btn-sm danger" disabled={bulkBusy} onClick={handleBulkDeleteAi}>{t('btn.aiDelete')}</button>
+              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkExportMd}>{t('btn.mdDownload')}</button>
+              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkExportObsidian}>{t('btn.obsidianDownload')}</button>
+              <button className="btn-sm" onClick={() => downloadFile(videosToCsv(selectedVideos), `export_${selectedVideos.length}.csv`)}>{t('export.csv')}</button>
+              <button className="btn-sm" onClick={() => downloadFile(videosToJson(selectedVideos), `export_${selectedVideos.length}.json`)}>{t('export.json')}</button>
+              <button className="btn-sm" onClick={() => setSelectedIds(new Set())} style={{ marginLeft: 'auto' }}>{t('btn.cancelSelection')}</button>
             </div>
           )}
           <div className="table-scroll">
@@ -277,16 +275,16 @@ export default function VideoTable({
                     <input type="checkbox" checked={allSelected} ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }} onChange={toggleSelectAll} style={{ width: 'auto', cursor: 'pointer' }} />
                   </th>
                   <th onClick={() => handleHeaderClick('title')} style={{ width: '43%' }}>
-                    Cím{renderSortIcon('title')}
+                    {t('label.title')}{renderSortIcon('title')}
                   </th>
                   <th onClick={() => handleHeaderClick('uploaded_at')} style={{ width: '11%' }}>
-                    Feltöltve{renderSortIcon('uploaded_at')}
+                    {t('label.uploadedAt')}{renderSortIcon('uploaded_at')}
                   </th>
                   <th onClick={() => handleHeaderClick('duration_seconds')} style={{ width: '7%' }}>
-                    Hossz{renderSortIcon('duration_seconds')}
+                    {t('label.duration')}{renderSortIcon('duration_seconds')}
                   </th>
                   <th onClick={() => handleHeaderClick('status')} style={{ width: '9%' }}>
-                    Állapot{renderSortIcon('status')}
+                    {t('label.status')}{renderSortIcon('status')}
                   </th>
                   <th style={{ width: '25%' }}></th>
                 </tr>
@@ -320,13 +318,13 @@ export default function VideoTable({
                             target="_blank"
                             rel="noopener noreferrer"
                             className="video-link"
-                            title={video.title || 'Ismeretlen'}
+                            title={video.title || t('state.unknownTitle')}
                             onClick={e => e.stopPropagation()}
                           >
-                            {video.title || 'Ismeretlen'}
+                            {video.title || t('state.unknownTitle')}
                           </a>
                           {video.is_members_only && (
-                            <span className="video-badge">Members</span>
+                            <span className="video-badge">{t('label.members')}</span>
                           )}
                         </div>
                       </td>
@@ -353,27 +351,27 @@ export default function VideoTable({
                               className="btn-sm"
                               onClick={e => { e.stopPropagation(); onSelectVideo(video); }}
                             >
-                              Transzkript
+                              {t('btn.transcript')}
                             </button>
                           )}
                           {video.transcript && (
                             <button
                               className="btn-sm"
                               disabled={aiBusyId === video.id || video.ai_notes_status === 'pending'}
-                              title="AI összefoglaló, témák, tanulságok, kérdések és Obsidian jegyzet generálása"
+                              title={t('tooltip.generateAi')}
                               onClick={e => handleGenerateAiNote(e, video)}
                             >
-                              {video.ai_notes_status === 'done' ? 'AI újra' : 'AI jegyzet'}
+                              {video.ai_notes_status === 'done' ? t('btn.aiRegen') : t('btn.aiNote')}
                             </button>
                           )}
                           {(video.summary || video.ai_notes_status) && (
                             <button
                               className="btn-sm danger"
                               disabled={aiBusyId === video.id}
-                              title="A generált AI jegyzet mezők törlése"
+                              title={t('tooltip.deleteAi')}
                               onClick={e => handleDeleteAiNote(e, video)}
                             >
-                              AI törlés
+                              {t('btn.aiDelete')}
                             </button>
                           )}
                           <button
@@ -383,7 +381,7 @@ export default function VideoTable({
                               downloadFile(videoToTxt(video), `${sanitizeFilename(video.title)}.txt`);
                             }}
                           >
-                            TXT
+                            {t('export.txt')}
                           </button>
                           <button
                             className="btn-sm"
@@ -392,7 +390,7 @@ export default function VideoTable({
                               downloadFile(videoToMd(video), `${sanitizeFilename(video.title)}.md`);
                             }}
                           >
-                            MD
+                            {t('export.md')}
                           </button>
                           <button
                             className="btn-sm"
@@ -404,12 +402,12 @@ export default function VideoTable({
                               );
                             }}
                           >
-                            Obsidian
+                            {t('export.obsidian')}
                           </button>
                           {(video.obsidian_note || video.summary) && (
                             <button
                               className="btn-sm"
-                              title="Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)"
+                              title={t('tooltip.mindmap')}
                               onClick={e => {
                                 e.stopPropagation();
                                 downloadFile(
@@ -418,7 +416,7 @@ export default function VideoTable({
                                 );
                               }}
                             >
-                              Mindmap
+                              {t('export.mindmap')}
                             </button>
                           )}
                         </div>
@@ -432,11 +430,11 @@ export default function VideoTable({
 
           <div ref={loadMoreRef} className="infinite-load">
             {loadingMore ? (
-              <span>Betöltés...</span>
+              <span>{t('state.loading')}</span>
             ) : hasMore ? (
-              <button onClick={onLoadMore}>További videók betöltése</button>
+              <button onClick={onLoadMore}>{t('state.loadMore')}</button>
             ) : (
-              <span>Mind betöltve ({videos.length} / {totalCount})</span>
+              <span>{t('state.allLoaded', { count: videos.length, total: totalCount })}</span>
             )}
           </div>
         </>
