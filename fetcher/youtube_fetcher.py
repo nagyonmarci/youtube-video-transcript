@@ -113,6 +113,27 @@ def best_thumbnail_url(info: dict) -> Optional[str]:
     return max(candidates, key=lambda candidate: candidate[0])[1]
 
 
+def is_members_only_video(info: dict) -> bool:
+    """Detect videos that are restricted to channel members/subscribers."""
+    availability = str(info.get("availability") or "").lower()
+    if availability in {"subscriber_only", "premium_only"}:
+        return True
+
+    badges = info.get("badges")
+    if isinstance(badges, list):
+        for badge in badges:
+            if not isinstance(badge, dict):
+                continue
+            text = " ".join(
+                str(badge.get(key) or "").lower()
+                for key in ("label", "tooltip", "type")
+            )
+            if "member" in text or "subscriber" in text:
+                return True
+
+    return False
+
+
 def youtube_thumbnail_url(video_id: str) -> Optional[str]:
     """Build a lightweight thumbnail URL from the YouTube video id."""
     if not re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_id or ""):
@@ -144,7 +165,7 @@ def fetch_video_info(video_url_or_id: str) -> dict:
 
 
 def fetch_video_date_info(video_url_or_id: str) -> dict:
-    """Fetch only date/duration metadata for one video."""
+    """Fetch only date/duration/access metadata for one video."""
     if re.fullmatch(r"[a-zA-Z0-9_-]{11}", video_url_or_id):
         video_url = f"https://www.youtube.com/watch?v={video_url_or_id}"
     else:
@@ -153,7 +174,7 @@ def fetch_video_date_info(video_url_or_id: str) -> dict:
     cmd = [
         "yt-dlp",
         "--print",
-        "%(upload_date|)s\t%(release_date|)s\t%(timestamp|)s\t%(release_timestamp|)s\t%(duration|)s",
+        "%(upload_date|)s\t%(release_date|)s\t%(timestamp|)s\t%(release_timestamp|)s\t%(duration|)s\t%(availability|)s",
         "--no-warnings",
         "--skip-download",
         "--no-playlist",
@@ -175,12 +196,13 @@ def fetch_video_date_info(video_url_or_id: str) -> dict:
     if not line:
         return {}
 
-    upload_date, release_date, timestamp, release_timestamp, duration = (line[-1].split("\t") + [""] * 5)[:5]
+    upload_date, release_date, timestamp, release_timestamp, duration, availability = (line[-1].split("\t") + [""] * 6)[:6]
     info = {
         "upload_date": upload_date or None,
         "release_date": release_date or None,
         "timestamp": timestamp or None,
         "release_timestamp": release_timestamp or None,
+        "availability": availability or None,
     }
     if duration:
         try:
@@ -252,6 +274,7 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
                 "duration_seconds": duration_seconds,
                 "uploaded_at": parse_uploaded_at(info),
                 "thumbnail_url": best_thumbnail_url(info),
+                "is_members_only": is_members_only_video(info),
             })
         except (json.JSONDecodeError, KeyError, TypeError):
             continue

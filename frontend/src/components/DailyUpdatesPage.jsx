@@ -50,6 +50,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
   const [date, setDate] = useState(todayValue());
   const [videos, setVideos] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [titleSearch, setTitleSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -75,11 +76,16 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
   }
 
   const filteredVideos = useMemo(() => {
-    if (filter === 'with_ai') return videos.filter(video => video.summary || video.ai_notes_status === 'done');
-    if (filter === 'without_ai') return videos.filter(video => video.transcript && !video.summary);
-    if (filter === 'without_transcript') return videos.filter(video => !video.transcript);
-    return videos;
-  }, [videos, filter]);
+    let result = videos;
+    if (filter === 'with_ai') result = result.filter(v => v.summary || v.ai_notes_status === 'done');
+    else if (filter === 'without_ai') result = result.filter(v => v.transcript && !v.summary);
+    else if (filter === 'without_transcript') result = result.filter(v => !v.transcript);
+    if (titleSearch.trim()) {
+      const q = titleSearch.trim().toLowerCase();
+      result = result.filter(v => (v.title || '').toLowerCase().includes(q));
+    }
+    return result;
+  }, [videos, filter, titleSearch]);
 
   const groups = useMemo(() => groupByChannel(filteredVideos), [filteredVideos]);
   const groupEntries = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, 'hu'));
@@ -125,6 +131,13 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
             <option value="without_ai">AI hiányzik</option>
             <option value="without_transcript">Transzkript hiányzik</option>
           </select>
+          <input
+            type="search"
+            placeholder="Cím keresés..."
+            value={titleSearch}
+            onChange={e => setTitleSearch(e.target.value)}
+            style={{ width: '180px' }}
+          />
         </div>
       </div>
 

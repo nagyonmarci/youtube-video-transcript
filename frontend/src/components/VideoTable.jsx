@@ -1,6 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js';
-import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
+import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.js';
+
+async function bulkGenerateAiNotes(videos) {
+  for (const v of videos) {
+    try { await generateAiNoteForVideo(v.id); } catch {}
+  }
+}
+
+async function bulkDeleteAiNotes(videos) {
+  for (const v of videos) {
+    try { await deleteAiNoteForVideo(v.id); } catch {}
+  }
+}
 
 function formatDuration(seconds) {
   if (!seconds) return '—';
@@ -30,17 +42,22 @@ const AI_STATUS_MAP = {
   error: 'AI hiba',
 };
 
-const PAGE_SIZE = 100;
-
 export default function VideoTable({
   videos,
   totalCount,
-  page,
-  onPageChange,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   search,
   onSearchChange,
   sort,
   onSortChange,
+  statusFilter = 'all',
+  onStatusFilterChange,
+  aiFilter = 'all',
+  onAiFilterChange,
+  membersFilter = 'all',
+  onMembersFilterChange,
   loading,
   onSelectVideo,
   onVideosChanged,
@@ -49,7 +66,78 @@ export default function VideoTable({
   const searchInputRef = useRef();
   const [localSearch, setLocalSearch] = useState(search);
   const [aiBusyId, setAiBusyId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const debounceRef = useRef(null);
+  const loadMoreRef = useRef(null);
+
+  useEffect(() => { setSelectedIds(new Set()); }, [search, statusFilter, aiFilter, membersFilter, sort, selectedChannel?.id]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasMore || loading || loadingMore) return undefined;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting) onLoadMore?.();
+      },
+      { root: null, rootMargin: '600px 0px', threshold: 0.01 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, onLoadMore, videos.length]);
+
+  const allSelected = videos.length > 0 && videos.every(v => selectedIds.has(v.id));
+  const someSelected = selectedIds.size > 0;
+  const selectedVideos = videos.filter(v => selectedIds.has(v.id));
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(videos.map(v => v.id)));
+    }
+  }
+
+  async function handleBulkAiNotes() {
+    if (!selectedVideos.length) return;
+    setBulkBusy(true);
+    try {
+      await bulkGenerateAiNotes(selectedVideos.filter(v => v.transcript));
+      await onVideosChanged?.();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkDeleteAi() {
+    if (!selectedVideos.length) return;
+    if (!confirm(`Töröljük az AI noteket ${selectedVideos.length} videóhoz?`)) return;
+    setBulkBusy(true);
+    try {
+      await bulkDeleteAiNotes(selectedVideos);
+      await onVideosChanged?.();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function handleBulkExportMd() {
+    const combined = selectedVideos.map(v => videoToMd(v)).join('\n\n---\n\n');
+    downloadFile(combined, `bulk_export_${selectedVideos.length}.md`);
+  }
+
+  function handleBulkExportObsidian() {
+    const combined = selectedVideos.map(v => videoToObsidianMd(v, { channel: selectedChannel, timed: true })).join('\n\n---\n\n');
+    downloadFile(combined, `bulk_obsidian_${selectedVideos.length}.md`);
+  }
 
   // Sync local search with prop
   useEffect(() => {
@@ -64,8 +152,6 @@ export default function VideoTable({
       onSearchChange(value);
     }, 300);
   }, [onSearchChange]);
-
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const sortField = sort.startsWith('-') ? sort.slice(1) : sort;
   const sortDesc = sort.startsWith('-');
@@ -118,13 +204,49 @@ export default function VideoTable({
             : `Összes videó (${totalCount})`
           }
         </h2>
-        <input
-          ref={searchInputRef}
-          className="video-search"
-          placeholder="Keresés..."
-          value={localSearch}
-          onChange={handleSearchInput}
-        />
+        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            ref={searchInputRef}
+            className="video-search"
+            placeholder="Cím keresés..."
+            value={localSearch}
+            onChange={handleSearchInput}
+            style={{ width: '200px' }}
+          />
+          <select
+            value={statusFilter}
+            onChange={e => onStatusFilterChange?.(e.target.value)}
+            style={{ width: 'auto' }}
+            title="Transzkript állapot szűrő"
+          >
+            <option value="all">Minden állapot</option>
+            <option value="done">Kész</option>
+            <option value="pending">Várakozik</option>
+            <option value="no_transcript">Nincs transzkript</option>
+            <option value="error">Hiba</option>
+          </select>
+          <select
+            value={aiFilter}
+            onChange={e => onAiFilterChange?.(e.target.value)}
+            style={{ width: 'auto' }}
+            title="AI jegyzetek szűrő"
+          >
+            <option value="all">Minden AI</option>
+            <option value="done">AI kész</option>
+            <option value="missing">AI hiányzik</option>
+            <option value="error">AI hiba</option>
+          </select>
+          <select
+            value={membersFilter}
+            onChange={e => onMembersFilterChange?.(e.target.value)}
+            style={{ width: 'auto' }}
+            title="Members-only videók szűrője"
+          >
+            <option value="all">Members: mind</option>
+            <option value="hide">Members elrejtve</option>
+            <option value="only">Csak members</option>
+          </select>
+        </div>
       </div>
 
       {loading ? (
@@ -135,20 +257,35 @@ export default function VideoTable({
         </div>
       ) : (
         <>
+          {someSelected && (
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.5rem', background: 'var(--primary-dim)', border: '1px solid var(--primary)', borderRadius: '6px', marginBottom: '0.4rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{selectedIds.size} kiválasztva</span>
+              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkAiNotes} title="AI notes generálás a kiválasztottakhoz">AI generálás</button>
+              <button className="btn-sm danger" disabled={bulkBusy} onClick={handleBulkDeleteAi}>AI törlés</button>
+              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkExportMd}>MD letöltés</button>
+              <button className="btn-sm" disabled={bulkBusy} onClick={handleBulkExportObsidian}>Obsidian letöltés</button>
+              <button className="btn-sm" onClick={() => downloadFile(videosToCsv(selectedVideos), `export_${selectedVideos.length}.csv`)}>CSV</button>
+              <button className="btn-sm" onClick={() => downloadFile(videosToJson(selectedVideos), `export_${selectedVideos.length}.json`)}>JSON</button>
+              <button className="btn-sm" onClick={() => setSelectedIds(new Set())} style={{ marginLeft: 'auto' }}>✕ Visszavonás</button>
+            </div>
+          )}
           <div className="table-scroll">
             <table className="video-table">
               <thead>
                 <tr>
-                  <th onClick={() => handleHeaderClick('title')} style={{ width: '45%' }}>
+                  <th style={{ width: '30px', padding: '0.5rem 0.4rem' }}>
+                    <input type="checkbox" checked={allSelected} ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }} onChange={toggleSelectAll} style={{ width: 'auto', cursor: 'pointer' }} />
+                  </th>
+                  <th onClick={() => handleHeaderClick('title')} style={{ width: '43%' }}>
                     Cím{renderSortIcon('title')}
                   </th>
-                  <th onClick={() => handleHeaderClick('uploaded_at')} style={{ width: '12%' }}>
+                  <th onClick={() => handleHeaderClick('uploaded_at')} style={{ width: '11%' }}>
                     Feltöltve{renderSortIcon('uploaded_at')}
                   </th>
-                  <th onClick={() => handleHeaderClick('duration_seconds')} style={{ width: '8%' }}>
+                  <th onClick={() => handleHeaderClick('duration_seconds')} style={{ width: '7%' }}>
                     Hossz{renderSortIcon('duration_seconds')}
                   </th>
-                  <th onClick={() => handleHeaderClick('status')} style={{ width: '10%' }}>
+                  <th onClick={() => handleHeaderClick('status')} style={{ width: '9%' }}>
                     Állapot{renderSortIcon('status')}
                   </th>
                   <th style={{ width: '25%' }}></th>
@@ -157,13 +294,17 @@ export default function VideoTable({
               <tbody>
                 {videos.map((video, i) => {
                   const st = STATUS_MAP[video.status] || { icon: '', label: video.status };
+                  const isSelected = selectedIds.has(video.id);
                   return (
                     <tr
                       key={video.id}
                       className={video.transcript ? 'clickable-row' : ''}
-                      style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}
+                      style={{ background: isSelected ? 'rgba(255,68,68,0.07)' : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}
                       onClick={() => video.transcript && onSelectVideo(video)}
                     >
+                      <td style={{ padding: '0.5rem 0.4rem' }} onClick={e => { e.stopPropagation(); toggleSelect(video.id); }}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(video.id)} style={{ width: 'auto', cursor: 'pointer' }} />
+                      </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
                           {video.thumbnail_url && (
@@ -184,6 +325,9 @@ export default function VideoTable({
                           >
                             {video.title || 'Ismeretlen'}
                           </a>
+                          {video.is_members_only && (
+                            <span className="video-badge">Members</span>
+                          )}
                         </div>
                       </td>
                       <td>{formatDate(video.uploaded_at)}</td>
@@ -286,23 +430,14 @@ export default function VideoTable({
             </table>
           </div>
 
-          {/* Pagination */}
-          <div className="pagination">
-            <button
-              disabled={page <= 1}
-              onClick={() => onPageChange(page - 1)}
-            >
-              ← Előző
-            </button>
-            <span className="page-info">
-              {page} / {totalPages} oldal
-            </span>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => onPageChange(page + 1)}
-            >
-              Következő →
-            </button>
+          <div ref={loadMoreRef} className="infinite-load">
+            {loadingMore ? (
+              <span>Betöltés...</span>
+            ) : hasMore ? (
+              <button onClick={onLoadMore}>További videók betöltése</button>
+            ) : (
+              <span>Mind betöltve ({videos.length} / {totalCount})</span>
+            )}
           </div>
         </>
       )}

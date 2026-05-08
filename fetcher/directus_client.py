@@ -2,6 +2,7 @@
 
 import httpx
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote
 
@@ -16,6 +17,7 @@ AI_NOTE_FIELDS = [
     {"field": "study_guide", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "critique", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "thumbnail_url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 1024, "is_nullable": True}},
+    {"field": "is_members_only", "type": "boolean", "meta": {"interface": "boolean", "width": "half"}, "schema": {"is_nullable": True, "default_value": False}},
     {"field": "ai_notes_status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True}},
     {"field": "ai_notes_generated_at", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
     {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
@@ -46,13 +48,23 @@ class DirectusClient:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
+        self._client: Optional[httpx.AsyncClient] = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=30, headers=self.headers)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
         url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.request(method, url, headers=self.headers, **kwargs)
-            resp.raise_for_status()
-            return resp.json() if resp.content else {}
+        client = self._get_client()
+        resp = await client.request(method, url, **kwargs)
+        resp.raise_for_status()
+        return resp.json() if resp.content else {}
 
     async def health_check(self) -> bool:
         try:
@@ -124,6 +136,7 @@ class DirectusClient:
                 {"field": "title", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
                 {"field": "url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
                 {"field": "thumbnail_url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 1024, "is_nullable": True}},
+                {"field": "is_members_only", "type": "boolean", "meta": {"interface": "boolean", "width": "half"}, "schema": {"is_nullable": True, "default_value": False}},
                 {"field": "duration_seconds", "type": "integer", "meta": {"interface": "input", "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "uploaded_at", "type": "timestamp", "meta": {"interface": "datetime", "width": "half"}, "schema": {"is_nullable": True}},
                 {"field": "transcript", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
@@ -145,21 +158,30 @@ class DirectusClient:
         await self._request("POST", "/collections", json=payload)
 
     async def _ensure_videos_fields(self):
+        async def create_field_if_missing(field: dict) -> None:
+            try:
+                await self._request("POST", "/fields/videos", json=field)
+                logger.info(f"Added '{field['field']}' field to videos collection")
+            except httpx.HTTPStatusError as e:
+                message = e.response.text.lower()
+                if e.response.status_code == 500 and "already exists" in message:
+                    logger.info(f"Field '{field['field']}' already exists in videos collection")
+                    return
+                raise
+
         try:
             result = await self._request("GET", "/fields/videos")
             existing = {f["field"] for f in result.get("data", [])}
             if "transcript_timed" not in existing:
-                await self._request("POST", "/fields/videos", json={
+                await create_field_if_missing({
                     "field": "transcript_timed",
                     "type": "text",
                     "meta": {"interface": "input-multiline", "width": "full"},
                     "schema": {"is_nullable": True},
                 })
-                logger.info("Added 'transcript_timed' field to videos collection")
             for field in AI_NOTE_FIELDS:
                 if field["field"] not in existing:
-                    await self._request("POST", "/fields/videos", json=field)
-                    logger.info(f"Added '{field['field']}' field to videos collection")
+                    await create_field_if_missing(field)
         except Exception as e:
             logger.warning(f"Could not ensure videos fields: {e}")
 
@@ -427,6 +449,20 @@ class DirectusClient:
     async def delete_job(self, job_id: str) -> None:
         await self._request("DELETE", f"/items/jobs/{job_id}")
 
+    async def delete_old_jobs(self, older_than_days: int = 7) -> int:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        result = await self._request(
+            "GET",
+            f"/items/jobs?filter[status][_in]=done,cancelled&filter[created_at][_lt]={cutoff}&fields=id&limit=-1",
+        )
+        items = result.get("data", [])
+        for item in items:
+            try:
+                await self.delete_job(item["id"])
+            except Exception:
+                pass
+        return len(items)
+
     async def mark_stale_running_jobs_cancelled(self) -> int:
         result = await self._request("GET", "/items/jobs?filter[status][_eq]=running&limit=-1&fields=id")
         items = result.get("data", [])
@@ -482,6 +518,7 @@ class DirectusClient:
             "title",
             "url",
             "thumbnail_url",
+            "is_members_only",
             "uploaded_at",
             "duration_seconds",
             "transcript",
@@ -494,7 +531,7 @@ class DirectusClient:
             return None
 
     async def get_videos_by_channel(self, channel_id: str) -> list:
-        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,uploaded_at,thumbnail_url'
+        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,uploaded_at,thumbnail_url,is_members_only,status'
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 

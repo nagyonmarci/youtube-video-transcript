@@ -162,6 +162,27 @@ import App from '../App.jsx';
     flex-direction: column;
     gap: 0.75rem;
   }
+  .scroll-top-button {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 2100;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border-radius: 999px;
+    border-color: rgba(255,68,68,0.5);
+    background: rgba(36,36,36,0.94);
+    color: #fff;
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+  }
+  .scroll-top-button:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+  }
 
   .view-header {
     display: flex;
@@ -616,6 +637,17 @@ import App from '../App.jsx';
     white-space: nowrap;
   }
   .video-link:hover { text-decoration: underline; }
+  .video-badge {
+    display: inline-block;
+    margin-top: 0.25rem;
+    padding: 0.12rem 0.35rem;
+    border-radius: 4px;
+    background: rgba(255,193,7,0.16);
+    color: #ffc107;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+  }
   .btn-sm {
     font-size: 0.75rem;
     padding: 0.2rem 0.5rem;
@@ -702,19 +734,20 @@ import App from '../App.jsx';
     padding: 1rem;
   }
 
-  /* --- Pagination --- */
-  .pagination {
+  /* --- Infinite loading --- */
+  .infinite-load {
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 1rem;
-    padding: 0.75rem 0;
+    padding: 0.85rem 0;
     border-top: 1px solid var(--border);
     margin-top: 0.5rem;
-  }
-  .page-info {
     font-size: 0.85rem;
     color: var(--text2);
+  }
+  .infinite-load button {
+    padding: 0.45rem 0.9rem;
   }
 
   /* --- Responsive --- */

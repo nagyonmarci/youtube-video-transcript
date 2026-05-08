@@ -47,12 +47,35 @@ export async function updateChannel(id, data) {
 
 const PAGE_SIZE = 100;
 const VIDEO_FIELDS = [
-  'id,video_id,title,url,thumbnail_url,uploaded_at,duration_seconds,status,transcript,transcript_timed,whisper_status',
+  'id,video_id,title,url,thumbnail_url,uploaded_at,duration_seconds,status,is_members_only,transcript,transcript_timed,whisper_status',
   'summary,topics,takeaways,questions,obsidian_note,study_guide,critique,ai_notes_status,ai_notes_generated_at,ai_notes_error',
   'channel_id.id,channel_id.name,channel_id.channel_handle',
 ].join(',');
 
-export async function getVideos(channelId, { sort = '-uploaded_at', page = 1, search = '' } = {}) {
+function applyVideoFilters(params, { search, statusFilter, aiFilter, membersFilter }) {
+  if (search) {
+    params.set('filter[title][_icontains]', search);
+  }
+  if (statusFilter && statusFilter !== 'all') {
+    params.set('filter[status][_eq]', statusFilter);
+  }
+  if (aiFilter === 'done') {
+    params.set('filter[ai_notes_status][_eq]', 'done');
+  } else if (aiFilter === 'missing') {
+    params.set('filter[_and][0][transcript][_nnull]', 'true');
+    params.set('filter[_and][1][summary][_null]', 'true');
+  } else if (aiFilter === 'error') {
+    params.set('filter[ai_notes_status][_eq]', 'error');
+  }
+  if (membersFilter === 'hide') {
+    params.set('filter[_or][0][is_members_only][_neq]', 'true');
+    params.set('filter[_or][1][is_members_only][_null]', 'true');
+  } else if (membersFilter === 'only') {
+    params.set('filter[is_members_only][_eq]', 'true');
+  }
+}
+
+export async function getVideos(channelId, { sort = '-uploaded_at', page = 1, search = '', statusFilter = 'all', aiFilter = 'all', membersFilter = 'all' } = {}) {
   const params = new URLSearchParams({
     'filter[channel_id][_eq]': channelId,
     sort,
@@ -61,14 +84,12 @@ export async function getVideos(channelId, { sort = '-uploaded_at', page = 1, se
     'meta': 'filter_count',
     'fields': VIDEO_FIELDS,
   });
-  if (search) {
-    params.set('filter[title][_icontains]', search);
-  }
+  applyVideoFilters(params, { search, statusFilter, aiFilter, membersFilter });
   const data = await req('GET', `/items/videos?${params}`);
   return { items: data?.data ?? [], total: data?.meta?.filter_count ?? 0 };
 }
 
-export async function getAllVideos({ sort = '-uploaded_at', page = 1, search = '' } = {}) {
+export async function getAllVideos({ sort = '-uploaded_at', page = 1, search = '', statusFilter = 'all', aiFilter = 'all', membersFilter = 'all' } = {}) {
   const params = new URLSearchParams({
     sort,
     limit: String(PAGE_SIZE),
@@ -76,9 +97,7 @@ export async function getAllVideos({ sort = '-uploaded_at', page = 1, search = '
     'meta': 'filter_count',
     'fields': VIDEO_FIELDS,
   });
-  if (search) {
-    params.set('filter[title][_icontains]', search);
-  }
+  applyVideoFilters(params, { search, statusFilter, aiFilter, membersFilter });
   const data = await req('GET', `/items/videos?${params}`);
   return { items: data?.data ?? [], total: data?.meta?.filter_count ?? 0 };
 }
@@ -150,6 +169,61 @@ export async function getAdminStats() {
   ]);
 
   return { totalVideos, todayVideos, errorVideos, missingTranscripts, missingAiNotes };
+}
+
+export async function getChannelCoverage() {
+  const [total, transcriptDone, aiDone] = await Promise.all([
+    req('GET', '/items/videos?aggregate[count]=id&groupBy[]=channel_id&limit=-1'),
+    req('GET', '/items/videos?filter[status][_eq]=done&aggregate[count]=id&groupBy[]=channel_id&limit=-1'),
+    req('GET', '/items/videos?filter[ai_notes_status][_eq]=done&aggregate[count]=id&groupBy[]=channel_id&limit=-1'),
+  ]);
+  const totalMap = new Map((total?.data ?? []).map(r => [r.channel_id, Number(r.count?.id || 0)]));
+  const transcriptMap = new Map((transcriptDone?.data ?? []).map(r => [r.channel_id, Number(r.count?.id || 0)]));
+  const aiMap = new Map((aiDone?.data ?? []).map(r => [r.channel_id, Number(r.count?.id || 0)]));
+  return { totalMap, transcriptMap, aiMap };
+}
+
+export async function getMonthlyVideoCounts() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 11);
+  cutoff.setDate(1);
+  const params = new URLSearchParams({
+    'filter[uploaded_at][_gte]': cutoff.toISOString(),
+    'fields': 'uploaded_at',
+    'limit': '-1',
+  });
+  const data = await req('GET', `/items/videos?${params}`);
+  const counts = {};
+  for (const v of data?.data ?? []) {
+    if (!v.uploaded_at) continue;
+    const month = v.uploaded_at.slice(0, 7);
+    counts[month] = (counts[month] || 0) + 1;
+  }
+  // Fill all 12 months even if count is 0
+  const result = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    result.push({ month: key, count: counts[key] || 0 });
+  }
+  return result;
+}
+
+export async function getErrorVideos() {
+  const params = new URLSearchParams({
+    'filter[status][_eq]': 'error',
+    'fields': 'id,video_id,title,url,channel_id.name,channel_id.channel_handle',
+    'sort': '-processed_at',
+    'limit': '50',
+  });
+  const data = await req('GET', `/items/videos?${params}`);
+  return data?.data ?? [];
+}
+
+export async function updateVideoFields(id, fields) {
+  const result = await req('PATCH', `/items/videos/${id}`, fields);
+  return result?.data ?? {};
 }
 
 // Non-paginated fetch for export (all videos for a channel)

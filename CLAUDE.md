@@ -92,7 +92,7 @@ Astro shell (`src/pages/index.astro`) that mounts a single React SPA (`src/App.j
 
 1. After a transcript is fetched, `enqueue_ai_note()` creates an `ai_note_video` job in the `ai` queue
 2. `ai_worker_loop` picks it up and calls `generate_and_store_ai_notes()`
-3. `ai_notes.py::generate_ai_notes()` calls Ollama (`OLLAMA_CHAT_MODEL`, default `gemma4:31b`) and returns `{summary, topics, takeaways, questions, obsidian_note}`
+3. `ai_notes.py::generate_ai_notes()` calls Ollama (`OLLAMA_CHAT_MODEL`, default `gemma4:31b-mlx-bf16`) and returns `{summary, topics, takeaways, questions, obsidian_note}`
 4. `obsidian_note` is markmap-compatible: starts with `# Title`, uses `## Section` + `- bullets` only
 5. Frontend can export per-video markmap files via `videoToMarkmapMd()` in `export.js`
 

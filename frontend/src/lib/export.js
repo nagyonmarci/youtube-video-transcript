@@ -320,6 +320,36 @@ export function allChannelsToObsidianMd(channelGroups, options = {}) {
   return parts.join('\n');
 }
 
+export function videosToCsv(videos) {
+  const cols = ['id', 'video_id', 'title', 'url', 'channel', 'uploaded_at', 'duration_seconds', 'status', 'ai_status', 'summary'];
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = videos.map(v => [
+    v.id, v.video_id, v.title, v.url,
+    v.channel_id?.name || v.channel_id?.channel_handle || '',
+    v.uploaded_at, v.duration_seconds, v.status, v.ai_notes_status || '',
+    (v.summary || '').replace(/\n/g, ' '),
+  ].map(esc).join(','));
+  return [cols.join(','), ...rows].join('\n');
+}
+
+export function videosToJson(videos) {
+  return JSON.stringify(videos.map(v => ({
+    id: v.id,
+    video_id: v.video_id,
+    title: v.title,
+    url: v.url,
+    channel: v.channel_id?.name || v.channel_id?.channel_handle || null,
+    uploaded_at: v.uploaded_at,
+    duration_seconds: v.duration_seconds,
+    status: v.status,
+    ai_notes_status: v.ai_notes_status || null,
+    summary: v.summary || null,
+    topics: v.topics || null,
+    takeaways: v.takeaways || null,
+    questions: v.questions || null,
+  })), null, 2);
+}
+
 export function downloadFile(content, filename) {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
