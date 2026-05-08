@@ -121,11 +121,10 @@ python3 -m py_compile fetcher/main.py fetcher/directus_client.py fetcher/youtube
 # Check yt-dlp version inside container
 docker compose exec -T fetcher yt-dlp --version   # expected: 2025.12.08
 
-# Manual endpoint test through Caddy (replace the Basic Auth header)
-docker compose exec -T frontend wget -qO- \
-  --header="Host: yt.test" \
-  --header="Authorization: Basic <base64-user-colon-password>" \
-  http://caddy/api/status
+# Manual endpoint test (token-free health check)
+docker compose exec -T fetcher curl -s http://localhost:8000/health
+# or with the app token
+docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .env | cut -d= -f2)" http://localhost:8000/status
 ```
 
 > **Schema changes:** After touching `directus_client.py`, new fields only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
@@ -172,7 +171,7 @@ This tool is designed for **single-user, local-network or loopback-only** deploy
 | CORS restricted | FastAPI services use `APP_CORS_ORIGINS`; Directus CORS is disabled |
 | Non-root app containers | Fetcher, workers, Whisper, and frontend run as unprivileged users |
 | Reduced Linux capabilities | App containers use `cap_drop: ALL` and `no-new-privileges:true` |
-| Dependency audit | `npm audit --omit=dev` currently reports `0 vulnerabilities` |
+| Dependency audit | `npm audit --omit=dev` and `pip-audit` should be run periodically |
 
 Generate required auth values:
 
