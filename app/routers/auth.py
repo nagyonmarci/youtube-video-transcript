@@ -33,8 +33,8 @@ async def get_token(
 
 async def get_current_user(token: str, db: Connection = Depends(get_db)):
     """Dependency that returns the current authenticated user."""
-    # DEV MODE BYPASS: If dev_token is provided, return a dummy user
-    if settings.dev_mode and token == "dev_token":
+    # Local development bypass is opt-in and must use a caller-provided token.
+    if settings.dev_mode and settings.dev_auth_token and token == settings.dev_auth_token:
         # Ensure dev user exists in DB
         user = await db.fetchrow(
             """INSERT INTO users (google_id, email, name, picture) VALUES ($1, $2, $3, $4)
@@ -67,8 +67,8 @@ async def get_current_user(token: str, db: Connection = Depends(get_db)):
 async def google_auth(req: TokenRequest, db: Connection = Depends(get_db)):
     """Endpoint to handle Google OAuth or Developer bypass."""
     
-    # DEV MODE BYPASS: If dev_token is sent, return it as the access_token
-    if settings.dev_mode and req.token == "dev_token":
+    # Local development bypass is opt-in and must use a caller-provided token.
+    if settings.dev_mode and settings.dev_auth_token and req.token == settings.dev_auth_token:
         # Ensure dev user exists in DB
         user = await db.fetchrow(
             """INSERT INTO users (google_id, email, name, picture) VALUES ($1, $2, $3, $4)
@@ -77,7 +77,7 @@ async def google_auth(req: TokenRequest, db: Connection = Depends(get_db)):
             "dev_google_id", "dev@example.com", "Developer User", ""
         )
         return {
-            "access_token": "dev_token",
+            "access_token": settings.dev_auth_token,
             "token_type": "bearer",
             "user": dict(user)
         }

@@ -1,5 +1,23 @@
 http://yt.test {
-	reverse_proxy frontend:4321
+	basic_auth {
+		{$APP_BASIC_AUTH_USER} {$APP_BASIC_AUTH_HASH}
+	}
+
+	handle_path /api/* {
+		reverse_proxy fetcher:8000 {
+			header_up X-App-Token {$APP_API_TOKEN}
+		}
+	}
+
+	handle_path /whisper/* {
+		reverse_proxy whisper:8001 {
+			header_up X-App-Token {$APP_API_TOKEN}
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:4321
+	}
 }
 
 http://suliweb.test {

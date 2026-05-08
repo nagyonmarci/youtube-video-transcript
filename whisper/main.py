@@ -13,8 +13,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from directus_client import DirectusClient
@@ -23,8 +24,22 @@ from transcriber import MembersOnlyError, transcribe_video
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+
+def required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} must be set")
+    return value
+
+
 DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
-DIRECTUS_TOKEN = os.environ.get("DIRECTUS_TOKEN", "admin-token-change-me")
+DIRECTUS_TOKEN = required_env("DIRECTUS_TOKEN")
+APP_API_TOKEN = required_env("APP_API_TOKEN")
+APP_CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("APP_CORS_ORIGINS", "http://yt.test,http://localhost:4321").split(",")
+    if origin.strip()
+]
 WHISPER_MODEL_PATH = os.environ.get("WHISPER_MODEL_PATH", "/app/models/ggml-large-v3.bin")
 WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "4"))
 WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "auto")
@@ -238,9 +253,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Whisper Transcription Service", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def require_app_token(request: Request, call_next):
+    if APP_API_TOKEN and request.url.path not in {"/health"}:
+        if request.headers.get("x-app-token") != APP_API_TOKEN:
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=APP_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

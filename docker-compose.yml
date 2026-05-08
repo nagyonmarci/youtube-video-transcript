@@ -6,7 +6,7 @@ services:
       - app-network
     environment:
       POSTGRES_USER: directus
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: directus
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -25,19 +25,18 @@ services:
     networks:
       - app-network
     environment:
-      SECRET: ${DIRECTUS_SECRET:-change-me-in-production}
+      SECRET: ${DIRECTUS_SECRET:?DIRECTUS_SECRET must be set}
       DB_CLIENT: pg
       DB_HOST: postgres
       DB_PORT: 5432
       DB_DATABASE: directus
       DB_USER: directus
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
-      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-admin}
-      ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:?DIRECTUS_ADMIN_PASSWORD must be set}
+      ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
       PUBLIC_URL: http://directus:8055
-      CORS_ENABLED: "true"
-      CORS_ORIGIN: "true"
+      CORS_ENABLED: "false"
       WEBSOCKETS_ENABLED: "false"
     volumes:
       - directus_uploads:/directus/uploads
@@ -46,18 +45,24 @@ services:
   fetcher:
     build: ./fetcher
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - directus
     networks:
       - app-network
     environment:
       DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
+      APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: directus
       POSTGRES_USER: directus
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       FETCHER_ROLE: api
       FETCH_WORKER_CONCURRENCY: 0
       AI_WORKER_CONCURRENCY: 0
@@ -72,6 +77,10 @@ services:
   fetch-worker:
     build: ./fetcher
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     command: ["python", "worker.py"]
     depends_on:
       - directus
@@ -79,12 +88,14 @@ services:
       - app-network
     environment:
       DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
+      APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: directus
       POSTGRES_USER: directus
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       FETCHER_ROLE: worker
       WORKER_ID: fetch-worker
       WORKER_QUEUES: fetch
@@ -100,6 +111,10 @@ services:
   ai-worker:
     build: ./fetcher
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     command: ["python", "worker.py"]
     depends_on:
       - directus
@@ -107,12 +122,14 @@ services:
       - app-network
     environment:
       DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
+      APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: directus
       POSTGRES_USER: directus
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-directus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       FETCHER_ROLE: worker
       WORKER_ID: ai-worker
       WORKER_QUEUES: ai
@@ -128,13 +145,19 @@ services:
   whisper:
     build: ./whisper
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - directus
     networks:
       - app-network
     environment:
       DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:-admin-token-change-me}
+      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
+      APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       WHISPER_MODEL_PATH: /app/models/ggml-large-v3.bin
       WHISPER_THREADS: ${WHISPER_THREADS:-4}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
@@ -146,6 +169,10 @@ services:
   frontend:
     build: ./frontend
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - directus
       - fetcher
@@ -155,6 +182,7 @@ services:
       DIRECTUS_HOST: directus
       FETCHER_HOST: fetcher
       WHISPER_HOST: whisper
+      APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
 
   caddy:
     image: caddy:2-alpine
@@ -165,6 +193,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
+      APP_BASIC_AUTH_USER: ${APP_BASIC_AUTH_USER:?APP_BASIC_AUTH_USER must be set}
+      APP_BASIC_AUTH_HASH: ${APP_BASIC_AUTH_HASH:?APP_BASIC_AUTH_HASH must be set}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/etc/caddy/certs:ro

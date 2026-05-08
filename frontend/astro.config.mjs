@@ -12,9 +12,16 @@ export default defineConfig({
   vite: {
     server: {
       proxy: {
-        '/admin':   { target: `http://${process.env.DIRECTUS_HOST || 'localhost'}:8055`, rewrite: path => path.replace(/^\/admin/, '') },
-        '/api':     { target: `http://${process.env.FETCHER_HOST  || 'localhost'}:8000`, rewrite: path => path.replace(/^\/api/, '') },
-        '/whisper': { target: `http://${process.env.WHISPER_HOST  || 'localhost'}:8001`, rewrite: path => path.replace(/^\/whisper/, '') },
+        '/api': {
+          target: `http://${process.env.FETCHER_HOST || 'localhost'}:8000`,
+          rewrite: path => path.replace(/^\/api/, ''),
+          headers: { 'X-App-Token': process.env.APP_API_TOKEN || '' },
+        },
+        '/whisper': {
+          target: `http://${process.env.WHISPER_HOST || 'localhost'}:8001`,
+          rewrite: path => path.replace(/^\/whisper/, ''),
+          headers: { 'X-App-Token': process.env.APP_API_TOKEN || '' },
+        },
       },
     },
   },

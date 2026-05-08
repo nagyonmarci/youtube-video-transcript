@@ -23,26 +23,24 @@ docker compose logs --tail=120 fetcher
 docker compose exec -T fetcher yt-dlp --version  # expected: 2025.12.08
 
 # Hit fetcher endpoints manually
-docker compose exec -T fetcher curl -s http://localhost:8000/status
-docker compose exec -T fetcher curl -s -X POST http://localhost:8000/refresh-dates
+docker compose exec -T frontend wget -qO- --header="X-App-Token: $APP_API_TOKEN" http://fetcher:8000/status
 ```
 
 The app runs at **http://yt.test** (requires dnsmasq; see README).  
-Directus admin UI: **http://yt.test/admin**
+The Caddy entrypoint is protected by Basic Auth. Directus is intentionally not exposed through `yt.test`; access it only from the Docker network or add a temporary local-only route when needed.
 
 ## Architecture
 
 ```
 http://yt.test
       │
-   Caddy ──► Frontend (Astro+React :4321)
-                  │  Vite dev proxy (astro.config.mjs)
-                  ├─ /admin   ──► Directus :8055 ──► PostgreSQL
-                  ├─ /api     ──► Fetcher :8000
-                  └─ /whisper ──► Whisper :8001
+   Caddy ──► Frontend (Astro+React preview :4321)
+      │
+      ├─ /api     ──► Fetcher :8000 ──► Directus :8055 ──► PostgreSQL
+      └─ /whisper ──► Whisper :8001 ──► Directus :8055
 ```
 
-**Five Docker services:** `postgres`, `directus`, `fetcher`, `frontend`, `caddy`. Caddy also proxies `suliweb.test` (external project) via the shared `web` Docker network.
+Core Docker services: `postgres`, `directus`, `fetcher`, `fetch-worker`, `ai-worker`, `whisper`, `frontend`, `caddy`.
 
 ## Data Model
 
@@ -76,7 +74,7 @@ Rate limits are enforced inside `youtube_fetcher.py` (`rate_limited_sleep_transc
 Astro shell (`src/pages/index.astro`) that mounts a single React SPA (`src/App.jsx`). All interactivity is React; Astro is only used for the HTML shell and Vite/dev-server.
 
 **Data access split:**
-- `src/lib/directus.js` — reads data directly from Directus (`/admin/items/...`) with the hardcoded admin token
+- `src/lib/directus.js` — reads/writes UI data through fetcher facade endpoints under `/api/ui/*`; no Directus token is exposed to the browser
 - `src/lib/fetcher.js` — all write/action calls go through the Fetcher API (`/api/...`)
 - `src/lib/export.js` — pure client-side export helpers (TXT, MD, Obsidian MD, Markmap MD); no network calls
 
@@ -99,13 +97,14 @@ Astro shell (`src/pages/index.astro`) that mounts a single React SPA (`src/App.j
 ## Job Queue Patterns
 
 - `enqueue_fetch_job(task)` / `enqueue_ai_job(task)` — create jobs; return the created job dict (includes `id`)
-- `get_active_job_by_type(queue, type)` — check for existing queued/running job before creating a duplicate
+- `dedupe_key` on queued jobs prevents duplicate work at enqueue time
+- SQL lock based claiming prevents multiple workers from taking the same job
 - `cancel_jobs(queue, predicate)` — batch cancel; used by `/stop`
-- Job `sort_order` field controls processing priority (lower = sooner); default increments by 1000
+- Job `sort_order`, `progress_current`, `progress_total`, `progress_message`, `locked_by`, and `locked_at` drive priority, status, and UI progress
 
 ## Workflow Notes
 
 - Enter plan mode for any task with 3+ steps or architectural decisions
 - After schema-touching changes to `directus_client.py`: the new fields only appear after `docker compose up -d fetcher` (schema bootstrap runs on startup)
-- No test suite — verify with `py_compile` + manual curl + log inspection
-- `DIRECTUS_TOKEN` in `frontend/src/lib/directus.js` is hardcoded to match `.env`; update both if changed
+- No full test suite — verify with `py_compile`, `npm run build`, `npm audit --omit=dev`, `docker compose config --quiet`, manual HTTP checks, and log inspection
+- Browser code must not call Directus directly or contain static service tokens

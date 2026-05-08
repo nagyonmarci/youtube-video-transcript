@@ -21,11 +21,13 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 ```
 http://yt.test
       │
-   Caddy ──► Frontend (Astro+React :4321)
-                  │  Vite dev proxy
-                  ├─ /admin   ──► Directus :8055 ──► PostgreSQL
-                  ├─ /api     ──► Fetcher   :8000
-                  └─ /whisper ──► Whisper   :8001
+   Caddy ──► Basic Auth ──► Frontend (Astro+React preview :4321)
+                  ├─ /api     ──► Fetcher   :8000  (X-App-Token injected by Caddy)
+                  └─ /whisper ──► Whisper   :8001  (X-App-Token injected by Caddy)
+
+Directus :8055 ──► PostgreSQL
+     ▲
+     └── internal service-token traffic only
 
 Fetcher API ──► jobs table ──► fetch-worker / ai-worker
 ```
@@ -66,7 +68,9 @@ docker network create web
 docker compose up -d
 ```
 
-App: **http://yt.test** — Directus admin: **http://yt.test/admin**
+App: **http://yt.test**
+
+The app is protected by Caddy Basic Auth. Use `APP_BASIC_AUTH_USER` and the plaintext password you generated before hashing it. Directus is intentionally not exposed through `yt.test`; access it only from the Docker network or add a temporary local-only admin route when needed.
 
 > First start: Whisper downloads `ggml-large-v3.bin` (~3 GB) to a Docker volume. This happens once.
 
@@ -80,7 +84,11 @@ All configuration lives in `.env` (git-ignored). Copy `.env.example` and set eve
 | `DIRECTUS_SECRET` | Directus JWT signing secret | `change-me-random-string` (**change**) |
 | `DIRECTUS_ADMIN_EMAIL` | Directus admin login email | `admin@example.com` |
 | `DIRECTUS_ADMIN_PASSWORD` | Directus admin UI password | `admin` (**change**) |
-| `DIRECTUS_ADMIN_TOKEN` | Static API token for all internal services | `admin-token-change-me` (**change**) |
+| `DIRECTUS_ADMIN_TOKEN` | Static API token for internal Directus calls | random value required |
+| `APP_API_TOKEN` | Internal Caddy-to-FastAPI/Whisper service token | required |
+| `APP_CORS_ORIGINS` | Allowed browser origins for FastAPI services | `http://yt.test,http://localhost:4321` |
+| `APP_BASIC_AUTH_USER` | Username for the Caddy gate in front of the app | required |
+| `APP_BASIC_AUTH_HASH` | Caddy bcrypt hash for the Basic Auth password | required |
 | `REFRESH_CRON` | Automatic channel refresh schedule | `0 7 * * *` |
 | `SCHEDULER_TIMEZONE` | Cron timezone | `Europe/Budapest` |
 | `OLLAMA_BASE_URL` | Ollama API base URL | `http://host.docker.internal:11434` |
@@ -113,9 +121,11 @@ python3 -m py_compile fetcher/main.py fetcher/directus_client.py fetcher/youtube
 # Check yt-dlp version inside container
 docker compose exec -T fetcher yt-dlp --version   # expected: 2025.12.08
 
-# Manual endpoint test
-docker compose exec -T fetcher curl -s http://localhost:8000/status
-docker compose exec -T fetcher curl -s -X POST http://localhost:8000/refresh-dates
+# Manual endpoint test through Caddy (replace the Basic Auth header)
+docker compose exec -T frontend wget -qO- \
+  --header="Host: yt.test" \
+  --header="Authorization: Basic <base64-user-colon-password>" \
+  http://caddy/api/status
 ```
 
 > **Schema changes:** After touching `directus_client.py`, new fields only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
@@ -145,7 +155,7 @@ Limits are enforced inside `youtube_fetcher.py`:
 
 ## Security Posture
 
-This tool is designed for **single-user, local-network or loopback-only** deployment. The notes below describe the current posture honestly and give a hardening checklist for anyone who needs stricter controls.
+This tool is designed for **single-user, local-network or loopback-only** deployment. The current stack now uses a single Caddy ingress, Basic Auth at the edge, and an internal app token between Caddy and the FastAPI services.
 
 ### What is protected
 
@@ -156,33 +166,45 @@ This tool is designed for **single-user, local-network or loopback-only** deploy
 | YouTube auth cookies | `cookie.txt` is git-ignored |
 | Internal network isolation | All services communicate on the internal `app-network`; no service ports are bound to the host except Caddy (80, 443) |
 | Single ingress | Caddy is the only externally reachable entry point |
+| Browser cannot see Directus admin token | Frontend calls `/api/ui/*`; fetcher talks to Directus server-side |
+| Directus admin not publicly proxied | `/admin` is no longer routed through Caddy/frontend |
+| Fetcher/Whisper API token | `/api/*` and `/whisper/*` require `X-App-Token`; Caddy injects it |
+| CORS restricted | FastAPI services use `APP_CORS_ORIGINS`; Directus CORS is disabled |
+| Non-root app containers | Fetcher, workers, Whisper, and frontend run as unprivileged users |
+| Reduced Linux capabilities | App containers use `cap_drop: ALL` and `no-new-privileges:true` |
+| Dependency audit | `npm audit --omit=dev` currently reports `0 vulnerabilities` |
 
-### Known limitations (accepted for single-user use)
+Generate required auth values:
 
-| Finding | Location | Notes |
-|---|---|---|
-| No authentication on the Fetcher API | `fetcher/main.py` | All `/api/*` endpoints are open; intended for localhost/LAN only |
-| CORS `allow_origins=["*"]` | `fetcher/main.py` | Permissive; safe when not exposed to the public internet |
-| Admin token in client-side JS | `frontend/src/lib/directus.js` | Token is visible in browser DevTools; acceptable when the admin is the only user |
-| All internal services share one admin token | `docker-compose.yml` | No role separation; fine for a personal tool, not for multi-user |
-| Containers run as root | `fetcher/Dockerfile`, `frontend/Dockerfile` | No non-root user defined |
-| Directus `CORS_ORIGIN: "true"` | `docker-compose.yml` | Allows any origin to call Directus directly; safe only on loopback |
-| Dev servers in containers | `frontend/Dockerfile` | Runs Astro dev server with `--host`, not a production build |
-| No CI/CD or image scanning | — | No automated vulnerability scanning |
-| Weak example defaults | `.env.example` | All placeholder values must be changed before first run |
+```bash
+APP_API_TOKEN="$(openssl rand -hex 32)"
+APP_BASIC_AUTH_PASSWORD="$(openssl rand -base64 18)"
+APP_BASIC_AUTH_HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$APP_BASIC_AUTH_PASSWORD")"
+```
+
+When writing a bcrypt hash to `.env`, wrap it in single quotes because it contains `$` characters:
+
+```bash
+APP_BASIC_AUTH_HASH='$2a$14$...'
+```
+
+### Remaining limitations
+
+| Finding | Notes |
+|---|---|
+| Directus internal services still use the admin token | Good enough for a personal stack, but split into least-privilege Directus roles for multi-user/public deployments |
+| Caddy Basic Auth is coarse-grained | Replace with proper SSO/JWT sessions if multiple users need different permissions |
+| Whisper model is downloaded at runtime | Pin and verify checksum for stricter supply-chain control |
+| Whisper.cpp is cloned during image build | Pin a commit SHA and/or vendor a verified release artifact for stricter reproducibility |
+| Python dependency scanning is not automated | Add `pip-audit`, Trivy, or Grype in CI |
 
 ### Hardening checklist (for public or multi-user deployments)
 
-- [ ] **Rotate all credentials** — generate random `POSTGRES_PASSWORD`, `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_PASSWORD`, and `DIRECTUS_ADMIN_TOKEN` before first start
-- [ ] **Add API authentication** — add an `X-API-Key` or JWT middleware to `fetcher/main.py` and pass the key from the frontend
-- [ ] **Restrict CORS** — change `allow_origins=["*"]` to the specific frontend origin; set `CORS_ORIGIN` in Directus to the same value
-- [ ] **Create a read-only Directus token** for the frontend and a separate write token for the fetcher (instead of sharing the admin token)
-- [ ] **Add non-root users to Dockerfiles** — `RUN adduser --disabled-password appuser && USER appuser`
-- [ ] **Build the frontend for production** — replace `npm run dev` with `npm run build && npx astro preview` (or a static file server)
-- [ ] **Pin dependency versions** — lock `requirements.txt` with exact versions and run `pip-audit` or Trivy in CI
+- [ ] **Rotate all credentials** — generate random `POSTGRES_PASSWORD`, `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_PASSWORD`, `DIRECTUS_ADMIN_TOKEN`, `APP_API_TOKEN`, and Basic Auth password before first start
+- [ ] **Create least-privilege Directus tokens** — separate schema bootstrap/admin operations from read/write runtime operations
+- [ ] **Pin Python dependency versions** — keep `fetcher/requirements.txt` and `whisper/requirements.txt` exact and scan with `pip-audit` or Trivy
 - [ ] **Scan images** — add `trivy image` or `grype` to a CI step before deployment
 - [ ] **Set up real TLS** — replace mkcert certs with Let's Encrypt (Caddy handles this automatically with a public domain)
-- [ ] **Restrict Directus `CORS_ORIGIN`** — set to the specific public domain instead of `"true"`
 - [ ] **Add a firewall rule** — block direct access to ports 8000, 8055, 5432 from outside the host; all traffic should flow through Caddy
 
 ### Secrets never to commit

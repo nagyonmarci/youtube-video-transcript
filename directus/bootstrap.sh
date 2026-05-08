@@ -4,7 +4,7 @@
 set -e
 
 DIRECTUS_URL="${DIRECTUS_URL:-http://directus:8055}"
-DIRECTUS_TOKEN="${DIRECTUS_TOKEN:-admin-token-change-me}"
+: "${DIRECTUS_TOKEN:?DIRECTUS_TOKEN must be set}"
 MAX_WAIT=120
 WAITED=0
 
