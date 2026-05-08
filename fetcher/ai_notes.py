@@ -112,13 +112,12 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
         "format": "json",
     }
 
-    # Stream the response so the per-chunk read timeout resets with each token,
-    # avoiding ReadTimeout on slow/large models.
+    # Stream the response. read=None disables the per-chunk read timeout so
+    # large models that take >10 min to load or generate don't timeout.
+    # connect=30 still guards against an unreachable server.
     chunks = []
-    connect_timeout = 30
-    read_timeout = OLLAMA_TIMEOUT  # per-chunk, not total
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(read_timeout, connect=connect_timeout)
+        timeout=httpx.Timeout(None, connect=30)
     ) as client:
         async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
             response.raise_for_status()
