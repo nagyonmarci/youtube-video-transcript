@@ -1,5 +1,7 @@
 # YouTube Transcript & AI Notes
 
+[![CI / DevSecOps](https://github.com/nagyonmarci/youtube-video-transcript/actions/workflows/ci.yml/badge.svg)](https://github.com/nagyonmarci/youtube-video-transcript/actions/workflows/ci.yml)
+
 A self-hosted tool for downloading, searching, and AI-annotating YouTube channel transcripts. If a video has no available caption track, Whisper.cpp transcribes the audio automatically.
 
 ## Features
