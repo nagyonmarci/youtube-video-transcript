@@ -1,8 +1,8 @@
-fastapi==0.115.6
+fastapi==0.136.1
 uvicorn[standard]==0.32.1
 httpx==0.28.1
-yt-dlp==2025.12.08
+yt-dlp==2026.3.17
 youtube-transcript-api==0.6.3
 apscheduler==3.10.4
-python-multipart==0.0.20
+python-multipart==0.0.27
 asyncpg==0.30.0
