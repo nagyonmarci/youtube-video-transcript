@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import asyncpg
+import httpx
 
 from ai_notes import configure_ai_notes, generate_ai_notes
 from directus_client import DirectusClient
@@ -79,6 +80,8 @@ AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = max(1, int(os.environ.get("AI_NOTES_YEAR_BA
 AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE", "100")))
 AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = max(30, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS", "300")))
 AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = max(10, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS", "60")))
+AI_NOTES_WORKER_ENABLED = os.environ.get("AI_NOTES_WORKER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+AI_NOTES_JOB_COOLDOWN_SECONDS = max(0, int(os.environ.get("AI_NOTES_JOB_COOLDOWN_SECONDS", "0")))
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
 OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
 AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
@@ -170,6 +173,8 @@ def current_app_settings() -> dict:
         "ai_notes_year_backfill_target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
         "ai_notes_year_backfill_interval_seconds": AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
         "ai_notes_year_backfill_idle_seconds": AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS,
+        "ai_notes_worker_enabled": AI_NOTES_WORKER_ENABLED,
+        "ai_notes_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
     }
 
 
@@ -179,6 +184,7 @@ def apply_app_settings(settings: dict) -> None:
     global AI_NOTES_YEAR_BACKFILL_ENABLED, AI_NOTES_YEAR_BACKFILL_YEAR
     global AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE
     global AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS
+    global AI_NOTES_WORKER_ENABLED, AI_NOTES_JOB_COOLDOWN_SECONDS
 
     OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
     OLLAMA_CHAT_MODEL = str(settings.get("ollama_chat_model") or OLLAMA_CHAT_MODEL).strip()
@@ -193,6 +199,8 @@ def apply_app_settings(settings: dict) -> None:
     AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = int_setting(settings.get("ai_notes_year_backfill_target_active"), AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE, 1)
     AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = int_setting(settings.get("ai_notes_year_backfill_interval_seconds"), AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, 30)
     AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = int_setting(settings.get("ai_notes_year_backfill_idle_seconds"), AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS, 10)
+    AI_NOTES_WORKER_ENABLED = bool_setting(settings.get("ai_notes_worker_enabled", AI_NOTES_WORKER_ENABLED))
+    AI_NOTES_JOB_COOLDOWN_SECONDS = int_setting(settings.get("ai_notes_job_cooldown_seconds"), AI_NOTES_JOB_COOLDOWN_SECONDS, 0, 3600)
     configure_ai_notes(
         base_url=OLLAMA_BASE_URL,
         model=OLLAMA_CHAT_MODEL,
@@ -238,6 +246,75 @@ async def load_app_settings():
 async def refresh_app_settings_if_due(max_age_seconds: int = 30, force: bool = False):
     if force or time.monotonic() - last_runtime_settings_load >= max_age_seconds:
         await load_app_settings()
+
+
+async def get_ollama_resource_status() -> dict:
+    result = {
+        "online": False,
+        "base_url": OLLAMA_BASE_URL,
+        "configured_model": OLLAMA_CHAT_MODEL,
+        "models": [],
+        "sampled_at": datetime.now(timezone.utc).isoformat(),
+        "error": None,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=1.0)) as client:
+            response = await client.get(f"{OLLAMA_BASE_URL}/api/ps")
+            response.raise_for_status()
+            data = response.json()
+    except Exception as e:
+        result["error"] = str(e)[:300]
+        return result
+
+    models = []
+    for item in data.get("models", []):
+        size = int(item.get("size") or 0)
+        size_vram = int(item.get("size_vram") or 0)
+        processor_percent = round((size_vram / size) * 100) if size > 0 and size_vram > 0 else None
+        details = item.get("details") or {}
+        models.append({
+            "name": item.get("name") or item.get("model"),
+            "model": item.get("model") or item.get("name"),
+            "size": size,
+            "size_vram": size_vram,
+            "processor_percent": processor_percent,
+            "context_length": item.get("context_length"),
+            "expires_at": item.get("expires_at"),
+            "parameter_size": details.get("parameter_size"),
+            "quantization_level": details.get("quantization_level"),
+        })
+
+    result["online"] = True
+    result["models"] = models
+    return result
+
+
+async def apply_ai_worker_queue_gate(enabled: bool) -> int:
+    pool = await get_pg_pool()
+    async with pool.acquire() as conn:
+        if enabled:
+            result = await conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'queued', error_message = NULL
+                WHERE queue = 'ai'
+                  AND status = 'paused'
+                  AND error_message = 'Paused by AI worker control'
+                """
+            )
+        else:
+            result = await conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'paused', error_message = 'Paused by AI worker control'
+                WHERE queue = 'ai'
+                  AND status = 'queued'
+                """
+            )
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError):
+        return 0
 
 
 async def get_pg_pool() -> asyncpg.Pool:
@@ -603,6 +680,10 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
         if stop_flag:
             await asyncio.sleep(1)
             continue
+        await refresh_app_settings_if_due()
+        if not AI_NOTES_WORKER_ENABLED:
+            await asyncio.sleep(2)
+            continue
         try:
             job = await claim_next_job("ai", worker_name)
         except Exception as e:
@@ -657,6 +738,8 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             current_task_info_var.reset(task_info_token)
             current_ai_task_info = {}
             current_ai_job_id = None
+            if AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag:
+                await asyncio.sleep(AI_NOTES_JOB_COOLDOWN_SECONDS)
 
 
 async def process_channel_task(task: dict):
@@ -1497,6 +1580,8 @@ class AppSettingsRequest(BaseModel):
     ai_notes_year_backfill_target_active: Optional[int] = None
     ai_notes_year_backfill_interval_seconds: Optional[int] = None
     ai_notes_year_backfill_idle_seconds: Optional[int] = None
+    ai_notes_worker_enabled: Optional[bool] = None
+    ai_notes_job_cooldown_seconds: Optional[int] = None
 
 
 class AiNotesRequest(BaseModel):
@@ -1772,6 +1857,7 @@ async def health():
 async def status():
     fetch_current = await current_job_snapshot("fetch", current_task_info, current_job_id)
     ai_current = await current_job_snapshot("ai", current_ai_task_info, current_ai_job_id)
+    ollama_resources = await get_ollama_resource_status()
     ai_year_missing = None
     if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
         ai_year_missing = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
@@ -1783,6 +1869,11 @@ async def status():
         "stop_flag": stop_flag,
         "current_task": fetch_current,
         "current_ai_task": ai_current,
+        "resources": {
+            "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
+            "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+            "ollama": ollama_resources,
+        },
         "schedule": {
             "cron": REFRESH_CRON,
             "timezone": SCHEDULER_TIMEZONE,
@@ -1814,6 +1905,15 @@ async def list_jobs():
             "fetch": current_job_id,
             "ai": current_ai_job_id,
         },
+    }
+
+
+@app.get("/resources")
+async def resources():
+    return {
+        "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
+        "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+        "ollama": await get_ollama_resource_status(),
     }
 
 
@@ -1967,11 +2067,14 @@ async def update_settings(request: AppSettingsRequest):
     updates = request.model_dump(exclude_unset=True)
     next_settings = {**current_app_settings(), **updates}
     apply_app_settings(next_settings)
+    gated_jobs = None
+    if "ai_notes_worker_enabled" in updates:
+        gated_jobs = await apply_ai_worker_queue_gate(AI_NOTES_WORKER_ENABLED)
     for key, value in current_app_settings().items():
         await directus.set_setting(key, str(value).lower() if isinstance(value, bool) else str(value))
     if FETCHER_ROLE in {"api", "all"}:
         start_refresh_scheduler()
-    return current_app_settings()
+    return {**current_app_settings(), "ai_worker_gated_jobs": gated_jobs}
 
 
 @app.post("/fetch-channels")

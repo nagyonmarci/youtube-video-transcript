@@ -17,6 +17,7 @@
     "schedule": "Schedule",
     "quickActions": "Quick actions",
     "aiNotes": "AI Notes",
+    "aiStatus": "AI status",
     "statistics": "Statistics",
     "setup": "Setup",
     "coverage": "Coverage by channel",
@@ -172,6 +173,8 @@
     "aiBackfillBatch": "Backfill batch",
     "aiBackfillTarget": "Backfill active-job target",
     "aiBackfillInterval": "Backfill interval (sec)",
+    "aiJobCooldown": "AI cooldown between jobs (sec)",
+    "aiWorkerEnabled": "AI worker may run",
     "aiAutoAfterTranscript": "Start AI automatically after a new transcript",
     "aiYearBackfill": "Enable continuous yearly AI backfill"
   },
@@ -213,6 +216,36 @@
     "missingAi": "Missing AI notes",
     "errorVideos": "Error videos",
     "monthlyChart": "Monthly videos (last 12 months)"
+  },
+  "aiStatus": {
+    "runningTitle": "AI is working now",
+    "runningDetail": "{queue} AI task(s) active. Current step: {task}.",
+    "currentTaskFallback": "AI note generation",
+    "pausedTitle": "The AI queue is paused",
+    "pausedDetail": "{count} AI job(s) are paused. Use Resume in the job table to continue.",
+    "workerOffTitle": "The AI worker is off",
+    "workerOffDetail": "{count} videos are missing AI notes, but the AI worker will not claim new jobs. Turn it back on in Setup, or start manually later.",
+    "queuedTitle": "AI is waiting in the queue",
+    "queuedDetail": "{count} AI job(s) are queued. If they do not start, check that the ai-worker container is running.",
+    "completeTitle": "No AI work pending",
+    "completeDetail": "There are no missing AI notes right now, so AI will not start new work.",
+    "manualTitle": "AI is waiting in manual mode",
+    "manualDetail": "{count} videos are missing AI notes, but automatic start is off. Use Generate missing to start it.",
+    "backfillTitle": "AI backfill is waiting for its timer",
+    "backfillDetail": "{count} AI notes are missing. Continuous backfill is active and tops up to the configured limit about every {interval} seconds.",
+    "autoTitle": "AI is waiting for automatic triggers",
+    "autoDetail": "{count} existing videos are missing AI notes. Automatic mode starts after new transcripts; use Generate missing for older gaps."
+  },
+  "resource": {
+    "ollama": "Ollama",
+    "gpu": "GPU/VRAM",
+    "aiWorker": "AI worker",
+    "notAvailable": "Not available",
+    "noLoadedModel": "No loaded model",
+    "vramUsage": "{used} / {total} VRAM",
+    "cooldown": "Cooldown between AI jobs: {seconds}s",
+    "refreshedAt": "Refreshed: {time}",
+    "realtimeHint": "Refreshes every 2s; Ollama reports GPU/VRAM placement, not native compute load."
   },
   "sort": {
     "nameAZ": "Name A–Z",

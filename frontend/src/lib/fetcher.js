@@ -41,6 +41,12 @@ export async function getStatus() {
   return res.json();
 }
 
+export async function getResources() {
+  const res = await fetch(`${FETCHER_URL}/resources`);
+  if (!res.ok) throw new Error(`resources → ${res.status}`);
+  return res.json();
+}
+
 export async function getJobs() {
   const res = await fetch(`${FETCHER_URL}/jobs`);
   if (!res.ok) throw new Error(`jobs → ${res.status}`);

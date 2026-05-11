@@ -5,6 +5,7 @@ import {
   generateAiNotes,
   getAppSettings,
   getJobs,
+  getResources,
   getSchedule,
   moveJob,
   pauseJob,
@@ -64,6 +65,95 @@ function normalizeSettings(settings = {}) {
     ai_notes_year_backfill_target_active: Number(settings.ai_notes_year_backfill_target_active ?? 100),
     ai_notes_year_backfill_interval_seconds: Number(settings.ai_notes_year_backfill_interval_seconds ?? 300),
     ai_notes_year_backfill_idle_seconds: Number(settings.ai_notes_year_backfill_idle_seconds ?? 60),
+    ai_notes_worker_enabled: settings.ai_notes_worker_enabled ?? true,
+    ai_notes_job_cooldown_seconds: Number(settings.ai_notes_job_cooldown_seconds ?? 0),
+  };
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return '-';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
+  const aiQueueSize = Number(fetcherStatus?.ai_active_size ?? fetcherStatus?.ai_queue_size ?? 0);
+  const currentAiTask = fetcherStatus?.current_ai_task;
+  const aiJobs = jobs.filter(job => job.queue === 'ai' && !['done', 'cancelled'].includes(job.status));
+  const runningJobs = aiJobs.filter(job => job.status === 'running').length;
+  const queuedJobs = aiJobs.filter(job => job.status === 'queued').length;
+  const pausedJobs = aiJobs.filter(job => job.status === 'paused').length;
+  const isActive = aiQueueSize > 0 || Boolean(currentAiTask?.type) || runningJobs > 0;
+  const missingCount = Number(missingAiNotes || 0);
+
+  if (isActive) {
+    return {
+      tone: 'running',
+      title: t('aiStatus.runningTitle'),
+      detail: t('aiStatus.runningDetail', {
+        queue: aiQueueSize || queuedJobs || runningJobs,
+        task: currentAiTask?.phase || currentAiTask?.video || currentAiTask?.video_id || t('aiStatus.currentTaskFallback'),
+      }),
+    };
+  }
+
+  if (!appSettings.ai_notes_worker_enabled) {
+    return {
+      tone: 'paused',
+      title: t('aiStatus.workerOffTitle'),
+      detail: t('aiStatus.workerOffDetail', { count: missingCount }),
+    };
+  }
+
+  if (pausedJobs > 0) {
+    return {
+      tone: 'paused',
+      title: t('aiStatus.pausedTitle'),
+      detail: t('aiStatus.pausedDetail', { count: pausedJobs }),
+    };
+  }
+
+  if (queuedJobs > 0) {
+    return {
+      tone: 'queued',
+      title: t('aiStatus.queuedTitle'),
+      detail: t('aiStatus.queuedDetail', { count: queuedJobs }),
+    };
+  }
+
+  if (missingCount <= 0) {
+    return {
+      tone: 'idle',
+      title: t('aiStatus.completeTitle'),
+      detail: t('aiStatus.completeDetail'),
+    };
+  }
+
+  if (!appSettings.ai_notes_auto && !appSettings.ai_notes_year_backfill_enabled) {
+    return {
+      tone: 'manual',
+      title: t('aiStatus.manualTitle'),
+      detail: t('aiStatus.manualDetail', { count: missingCount }),
+    };
+  }
+
+  if (appSettings.ai_notes_year_backfill_enabled) {
+    return {
+      tone: 'waiting',
+      title: t('aiStatus.backfillTitle'),
+      detail: t('aiStatus.backfillDetail', {
+        count: missingCount,
+        interval: appSettings.ai_notes_year_backfill_interval_seconds,
+      }),
+    };
+  }
+
+  return {
+    tone: 'waiting',
+    title: t('aiStatus.autoTitle'),
+    detail: t('aiStatus.autoDetail', { count: missingCount }),
   };
 }
 
@@ -239,6 +329,7 @@ export default function AdminDashboard({
   const [settingsDirty, setSettingsDirty] = useState(false);
   const settingsDirtyRef = useRef(false);
   const [jobs, setJobs] = useState([]);
+  const [resourceSnapshot, setResourceSnapshot] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
@@ -274,6 +365,24 @@ export default function AdminDashboard({
     loadAdminData();
     const interval = setInterval(loadAdminData, 10000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadResources() {
+      try {
+        const resources = await getResources();
+        if (alive) setResourceSnapshot(resources);
+      } catch {
+        if (alive) setResourceSnapshot(prev => prev);
+      }
+    }
+    loadResources();
+    const interval = setInterval(loadResources, 2000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
   }, []);
 
   function showMsg(text, isError = false) {
@@ -325,6 +434,16 @@ export default function AdminDashboard({
   const channelCount = channels.length;
   const totalChannelVideos = channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
   const displayedTotalVideos = stats?.totalVideos ?? totalChannelVideos;
+  const missingAiNotes = Number(stats?.missingAiNotes || 0);
+  const aiStatus = getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t });
+  const aiBatchLimit = Number(appSettings.ai_notes_batch_limit || 10);
+  const aiCanStart = missingAiNotes > 0;
+  const resourceStatus = resourceSnapshot || fetcherStatus?.resources || {};
+  const ollamaStatus = resourceStatus.ollama || {};
+  const ollamaModels = ollamaStatus.models || [];
+  const primaryOllamaModel = ollamaModels[0];
+  const processorPercent = primaryOllamaModel?.processor_percent;
+  const sampledAt = ollamaStatus.sampled_at ? new Date(ollamaStatus.sampled_at).toLocaleTimeString('hu-HU') : '-';
 
   return (
     <section className="admin-dashboard">
@@ -479,10 +598,10 @@ export default function AdminDashboard({
             <button
               disabled={busy}
               onClick={() => runAction(
-                () => generateAiNotes(stats?.missingAiNotes || 20000),
+                () => generateAiNotes(),
                 result => result?.existing
                   ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                  : t('msg.aiQueued', { count: result?.limit ?? stats?.missingAiNotes ?? '' })
+                  : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
               )}
             >
               {t('header.aiNotes')}
@@ -508,6 +627,50 @@ export default function AdminDashboard({
             current={whisperStatus?.current_task}
             onStop={() => runAction(stopWhisper, t('msg.queueRefreshed'))}
           />
+        </div>
+        <div className={`ai-status-panel ai-status-${aiStatus.tone}`}>
+          <div className="ai-status-main">
+            <div className="ai-status-kicker">{t('header.aiStatus')}</div>
+            <strong>{aiStatus.title}</strong>
+            <p>{aiStatus.detail}</p>
+          </div>
+          <div className="ai-status-side">
+            <span className="ai-status-pill">{t('metric.missingAi')}: {missingAiNotes}</span>
+            <span className="ai-status-pill">{t('label.aiBatchLimit')}: {aiBatchLimit}</span>
+            <button
+              disabled={busy || !aiCanStart}
+              onClick={() => runAction(
+                () => generateAiNotes(),
+                result => result?.existing
+                  ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
+                  : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
+              )}
+            >
+              {t('btn.generateMissing')}
+            </button>
+          </div>
+        </div>
+        <div className="resource-panel">
+          <div className="resource-card">
+            <span>{t('resource.ollama')}</span>
+            <strong>{ollamaStatus.online ? t('status.running') : t('status.empty')}</strong>
+            <p>{ollamaStatus.online ? (primaryOllamaModel?.name || t('resource.noLoadedModel')) : (ollamaStatus.error || t('resource.notAvailable'))}</p>
+            <small>{t('resource.refreshedAt', { time: sampledAt })}</small>
+          </div>
+          <div className="resource-card">
+            <span>{t('resource.gpu')}</span>
+            <strong>{processorPercent == null ? '-' : `${processorPercent}%`}</strong>
+            <p>{primaryOllamaModel ? t('resource.vramUsage', {
+              used: formatBytes(primaryOllamaModel.size_vram),
+              total: formatBytes(primaryOllamaModel.size),
+            }) : t('resource.noLoadedModel')}</p>
+            <small>{t('resource.realtimeHint')}</small>
+          </div>
+          <div className="resource-card">
+            <span>{t('resource.aiWorker')}</span>
+            <strong>{resourceStatus.ai_worker_enabled ? t('status.running') : t('status.paused')}</strong>
+            <p>{t('resource.cooldown', { seconds: resourceStatus.ai_job_cooldown_seconds ?? appSettings.ai_notes_job_cooldown_seconds })}</p>
+          </div>
         </div>
         <JobQueuePanel jobs={jobs} busy={busy} onAction={runJobAction} />
       </section>
@@ -636,6 +799,24 @@ export default function AdminDashboard({
               value={settingsDraft.ai_notes_year_backfill_interval_seconds}
               onChange={e => updateSettingsDraft('ai_notes_year_backfill_interval_seconds', Number(e.target.value))}
             />
+          </label>
+          <label>
+            {t('label.aiJobCooldown')}
+            <input
+              type="number"
+              min="0"
+              max="3600"
+              value={settingsDraft.ai_notes_job_cooldown_seconds}
+              onChange={e => updateSettingsDraft('ai_notes_job_cooldown_seconds', Number(e.target.value))}
+            />
+          </label>
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={settingsDraft.ai_notes_worker_enabled}
+              onChange={e => updateSettingsDraft('ai_notes_worker_enabled', e.target.checked)}
+            />
+            {t('label.aiWorkerEnabled')}
           </label>
           <label className="settings-check">
             <input

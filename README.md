@@ -15,6 +15,7 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - AI fields are regenerable individually; AI processing runs on a separate queue and never blocks transcript fetching
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
 - Admin dashboard shows both job queues (fetch + AI), running/stuck jobs, and allows pause/resume/delete
+- Admin resource monitor polls Ollama every 2 seconds and shows loaded model, GPU/VRAM placement, AI worker state, and AI cooldown
 - Daily automatic channel refresh (default: 07:00 `Europe/Budapest`)
 - UI language toggle: English / Hungarian (persisted in `localStorage`)
 
@@ -102,7 +103,7 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
 | `WHISPER_BATCH_LIMIT` | Max videos per Whisper batch | `50` |
 
-AI/Ollama settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, AI batch limits, transcript character limit, automatic AI-after-transcript, and yearly AI backfill. The defaults keep AI manual-only to avoid continuous GPU load.
+AI/Ollama settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
 
 ## Development Workflow
 
@@ -129,6 +130,14 @@ docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .en
 > **Schema changes:** After touching `directus_client.py`, new fields only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
 
 AI/Ollama runtime settings can be changed in **Admin → Setup**. Fetch and AI workers reload these settings before work, so changing the model, Ollama URL, AI batch size, or manual/automatic AI mode does not require a container restart.
+
+The Admin processing screen includes a lightweight resource monitor. It calls `/api/resources` every 2 seconds and displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
+
+To reduce AI load from the UI:
+
+- Turn off **AI worker may run** to stop claiming new AI jobs. Queued AI jobs are paused and can be resumed later.
+- Increase **AI cooldown between jobs** to insert a pause after each AI job. This reduces sustained load, but the running job can still use the model heavily while it is generating.
+- Keep **Start AI automatically after a new transcript** off when you want fully manual AI generation.
 
 ## Job Queue
 
@@ -217,6 +226,8 @@ All three are covered by `.gitignore`.
 | New schema fields not visible | Bootstrap runs at startup | `docker compose up -d fetcher` |
 | yt-dlp errors or blocked requests | Outdated binary | Check version with `docker compose exec -T fetcher yt-dlp --version`; rebuild if outdated |
 | Ollama connection refused | Wrong base URL or Ollama not running | Verify the Ollama URL in **Admin → Setup**; `http://host.docker.internal:11434` works on Docker Desktop (Mac/Windows) |
+| Ollama shows `100%` GPU/VRAM but fans vary | Ollama reports model placement, not live compute utilization | Use Admin → Processing for the live loaded-model/VRAM view; macOS Activity Monitor or `ollama ps` can help inspect host-side load |
+| AI still uses GPU after disabling auto mode | Existing AI jobs were already queued | Use **AI worker may run** off, Stop on the AI worker line, or pause/delete queued AI jobs in Admin |
 | Whisper model not found | First-start download incomplete | Check `docker compose logs whisper`; the download retries on restart |
 | Job stuck in `running` | Worker crashed mid-job | Jobs are automatically re-queued after `STALE_JOB_MINUTES`; or use the Admin dashboard to cancel manually |
 | `web` network not found | Network not created | `docker network create web` |

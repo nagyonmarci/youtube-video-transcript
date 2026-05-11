@@ -455,6 +455,102 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     gap: 0.35rem;
     flex-shrink: 0;
   }
+  .ai-status-panel {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.85rem;
+    align-items: flex-start;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+  .ai-status-running { border-left-color: #64b5f6; }
+  .ai-status-manual { border-left-color: #ffb74d; }
+  .ai-status-paused { border-left-color: #f88; }
+  .ai-status-queued,
+  .ai-status-waiting { border-left-color: #b39ddb; }
+  .ai-status-idle { border-left-color: #6fcf73; }
+  .ai-status-main {
+    min-width: 0;
+  }
+  .ai-status-kicker {
+    color: var(--text2);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    margin-bottom: 0.2rem;
+  }
+  .ai-status-main strong {
+    display: block;
+    font-size: 0.92rem;
+    margin-bottom: 0.25rem;
+  }
+  .ai-status-main p {
+    color: var(--text2);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    max-width: 56rem;
+  }
+  .ai-status-side {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .ai-status-pill {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text2);
+    font-size: 0.75rem;
+    padding: 0.18rem 0.5rem;
+    background: rgba(255,255,255,0.03);
+    white-space: nowrap;
+  }
+  .resource-panel {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .resource-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem;
+    min-width: 0;
+  }
+  .resource-card span {
+    display: block;
+    color: var(--text2);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+  }
+  .resource-card strong {
+    display: block;
+    font-size: 1.05rem;
+    margin-bottom: 0.2rem;
+  }
+  .resource-card p {
+    color: var(--text2);
+    font-size: 0.78rem;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .resource-card small {
+    display: block;
+    color: var(--text2);
+    font-size: 0.68rem;
+    line-height: 1.35;
+    margin-top: 0.35rem;
+  }
   .schedule-form {
     display: flex;
     align-items: flex-end;
@@ -858,7 +954,9 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     .app-header { align-items: flex-start; flex-wrap: wrap; }
     .header-status { margin-left: 0; width: 100%; }
     .top-actions { grid-template-columns: 1fr; }
-    .metric-grid, .process-panel, .settings-form { grid-template-columns: 1fr; }
+    .metric-grid, .process-panel, .settings-form, .resource-panel { grid-template-columns: 1fr; }
+    .ai-status-panel { flex-direction: column; }
+    .ai-status-side { justify-content: flex-start; }
     .daily-video-list { grid-template-columns: 1fr; }
     .daily-video-card { flex-direction: column; }
     .daily-video-actions { flex-direction: row; flex-wrap: wrap; }

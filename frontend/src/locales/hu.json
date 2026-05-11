@@ -17,6 +17,7 @@
     "schedule": "Ütemezés",
     "quickActions": "Gyors műveletek",
     "aiNotes": "AI jegyzetek",
+    "aiStatus": "AI állapot",
     "statistics": "Statisztika",
     "setup": "Setup",
     "coverage": "Lefedettség csatornánként",
@@ -173,6 +174,8 @@
     "aiBackfillBatch": "Backfill batch",
     "aiBackfillTarget": "Backfill cél aktív job",
     "aiBackfillInterval": "Backfill időköz (mp)",
+    "aiJobCooldown": "AI pihenő két job között (mp)",
+    "aiWorkerEnabled": "AI worker dolgozhat",
     "aiAutoAfterTranscript": "AI automatikus indítása új transzkript után",
     "aiYearBackfill": "Folyamatos éves AI backfill engedélyezése"
   },
@@ -214,6 +217,36 @@
     "missingAi": "AI jegyzet hiány",
     "errorVideos": "Hibás videók",
     "monthlyChart": "Havi videók (utolsó 12 hónap)"
+  },
+  "aiStatus": {
+    "runningTitle": "Az AI most dolgozik",
+    "runningDetail": "{queue} AI feladat aktív. Aktuális lépés: {task}.",
+    "currentTaskFallback": "AI jegyzet generálás",
+    "pausedTitle": "Az AI sor szünetel",
+    "pausedDetail": "{count} AI job szünetel. A job táblában a Folytat gombbal lehet továbbindítani.",
+    "workerOffTitle": "Az AI worker ki van kapcsolva",
+    "workerOffDetail": "{count} videónál hiányzik AI jegyzet, de az AI worker most nem vesz fel új jobot. Kapcsold vissza a Setupban, vagy indíts kézzel később.",
+    "queuedTitle": "Az AI várakozik a sorban",
+    "queuedDetail": "{count} AI job sorban áll. Ha nem indul, ellenőrizd, hogy az ai-worker konténer fut-e.",
+    "completeTitle": "Nincs AI teendő",
+    "completeDetail": "Jelenleg nincs hiányzó AI jegyzet, ezért az AI nem indít új munkát.",
+    "manualTitle": "Az AI kézi módban vár",
+    "manualDetail": "{count} videónál hiányzik AI jegyzet, de az automatikus indítás ki van kapcsolva. Indítsd a Hiányzók generálása gombbal.",
+    "backfillTitle": "Az AI backfill időzítőre vár",
+    "backfillDetail": "{count} hiányzó AI jegyzet van. A folyamatos backfill aktív, és kb. {interval} másodpercenként tölt után a beállított limitig.",
+    "autoTitle": "Az AI automatikus módra vár",
+    "autoDetail": "{count} meglévő videónál hiányzik AI jegyzet. Automatikusan új transzkript után indul; régi hiányokat a Hiányzók generálása gombbal lehet sorba tenni."
+  },
+  "resource": {
+    "ollama": "Ollama",
+    "gpu": "GPU/VRAM",
+    "aiWorker": "AI worker",
+    "notAvailable": "Nem elérhető",
+    "noLoadedModel": "Nincs betöltött modell",
+    "vramUsage": "{used} / {total} VRAM",
+    "cooldown": "Pihenő két AI job között: {seconds} mp",
+    "refreshedAt": "Frissítve: {time}",
+    "realtimeHint": "2 mp-enként frissül; az Ollama API GPU/VRAM elhelyezést mutat, nem natív compute terhelést."
   },
   "sort": {
     "nameAZ": "Név A–Z",
