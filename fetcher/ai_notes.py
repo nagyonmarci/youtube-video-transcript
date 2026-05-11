@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import time
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
@@ -119,7 +119,10 @@ def ns_to_seconds(value: Any) -> Optional[float]:
     return round(number / 1_000_000_000, 3) if number > 0 else None
 
 
-async def generate_ai_notes(video: dict) -> Optional[dict]:
+ProgressCallback = Callable[[dict], Awaitable[None]]
+
+
+async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCallback] = None) -> Optional[dict]:
     transcript = video.get("transcript") or video.get("transcript_timed")
     if not transcript:
         return None
@@ -149,6 +152,13 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
     final_chunk = {}
     stream_started = time.monotonic()
     first_token_seconds = None
+    if progress_callback:
+        await progress_callback({
+            "phase": "waiting_first_token",
+            "progress_label": "Waiting for Ollama first token",
+            "prompt_chars": len(prompt),
+            "transcript_chars": len(transcript),
+        })
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(None, connect=30)
     ) as client:
@@ -165,11 +175,26 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
                 if delta:
                     if first_token_seconds is None:
                         first_token_seconds = round(time.monotonic() - stream_started, 3)
+                        if progress_callback:
+                            await progress_callback({
+                                "phase": "generating",
+                                "progress_label": f"Ollama is generating JSON (first token after {first_token_seconds}s)",
+                                "first_token_seconds": first_token_seconds,
+                                "prompt_chars": len(prompt),
+                                "transcript_chars": len(transcript),
+                            })
                     chunks.append(delta)
                 if chunk.get("done"):
                     final_chunk = chunk
 
     content = "".join(chunks)
+    if progress_callback:
+        await progress_callback({
+            "phase": "parsing_json",
+            "progress_label": "Parsing Ollama JSON response",
+            "first_token_seconds": first_token_seconds,
+            "output_chars": len(content),
+        })
     parse_start = time.monotonic()
     parsed = extract_json(content)
     parse_seconds = round(time.monotonic() - parse_start, 3)

@@ -80,13 +80,16 @@ function formatBytes(value) {
 }
 
 function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
-  const aiQueueSize = Number(fetcherStatus?.ai_active_size ?? fetcherStatus?.ai_queue_size ?? 0);
+  const aiQueue = fetcherStatus?.queues?.ai || {};
+  const aiQueueSize = Number(aiQueue.queued ?? fetcherStatus?.ai_queue_size ?? 0);
+  const actualRunning = Number(aiQueue.running ?? 0);
+  const workerConcurrency = Number(fetcherStatus?.workers?.ai_concurrency ?? fetcherStatus?.resources?.ai_worker_concurrency ?? 0);
   const currentAiTask = fetcherStatus?.current_ai_task;
   const aiJobs = jobs.filter(job => job.queue === 'ai' && !['done', 'cancelled'].includes(job.status));
-  const runningJobs = aiJobs.filter(job => job.status === 'running').length;
-  const queuedJobs = aiJobs.filter(job => job.status === 'queued').length;
+  const runningJobs = actualRunning || aiJobs.filter(job => job.status === 'running').length;
+  const queuedJobs = aiQueueSize || aiJobs.filter(job => job.status === 'queued').length;
   const pausedJobs = aiJobs.filter(job => job.status === 'paused').length;
-  const isActive = aiQueueSize > 0 || Boolean(currentAiTask?.type) || runningJobs > 0;
+  const isActive = Boolean(currentAiTask?.type) || runningJobs > 0;
   const missingCount = Number(missingAiNotes || 0);
 
   if (isActive) {
@@ -94,7 +97,9 @@ function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
       tone: 'running',
       title: t('aiStatus.runningTitle'),
       detail: t('aiStatus.runningDetail', {
-        queue: aiQueueSize || queuedJobs || runningJobs,
+        queued: queuedJobs,
+        running: runningJobs,
+        workers: workerConcurrency || 1,
         task: currentAiTask?.phase || currentAiTask?.video || currentAiTask?.video_id || t('aiStatus.currentTaskFallback'),
       }),
     };
@@ -158,9 +163,12 @@ function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
   };
 }
 
-function StatusLine({ title, queueSize, current, onStop }) {
+function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop }) {
   const { t } = useT();
-  const active = queueSize > 0 || Boolean(current?.type);
+  const queued = Number(queueStats?.queued ?? queueSize ?? 0);
+  const running = Number(queueStats?.running ?? (current?.type ? 1 : 0));
+  const paused = Number(queueStats?.paused ?? 0);
+  const active = queued > 0 || running > 0 || Boolean(current?.type);
   const progressText = formatProgress(current?.progress_current, current?.progress_total);
   const runtimeText = formatDuration(current?.duration_seconds);
   return (
@@ -170,7 +178,8 @@ function StatusLine({ title, queueSize, current, onStop }) {
         <p>
           {active ? (
             <>
-              <span>{t('label.queueSize', { count: queueSize })}</span>
+              <span>{t('label.queueBreakdown', { queued, running, paused })}</span>
+              {workerCount !== undefined && <span> · {t('label.workerSlots', { count: workerCount })}</span>}
               {current?.phase && <span> · {current.phase}</span>}
               {current?.video && <span> · {current.video}</span>}
               {current?.video_id && !current?.video && <span> · {current.video_id}</span>}
@@ -539,6 +548,10 @@ export default function AdminDashboard({
   const primaryOllamaModel = ollamaModels[0];
   const processorPercent = primaryOllamaModel?.processor_percent;
   const sampledAt = ollamaStatus.sampled_at ? new Date(ollamaStatus.sampled_at).toLocaleTimeString('hu-HU') : '-';
+  const fetchQueue = fetcherStatus?.queues?.fetch || {};
+  const aiQueue = fetcherStatus?.queues?.ai || resourceStatus.ai_queue || {};
+  const fetchWorkers = fetcherStatus?.workers?.fetch_concurrency;
+  const aiWorkers = fetcherStatus?.workers?.ai_concurrency ?? resourceStatus.ai_worker_concurrency;
 
   return (
     <section className="admin-dashboard">
@@ -706,13 +719,17 @@ export default function AdminDashboard({
         <div className="process-panel">
           <StatusLine
             title={t('label.fetcher')}
-            queueSize={fetcherStatus?.fetch_active_size ?? fetcherStatus?.queue_size ?? 0}
+            queueSize={fetcherStatus?.queue_size ?? 0}
+            queueStats={fetchQueue}
+            workerCount={fetchWorkers}
             current={fetcherStatus?.current_task}
             onStop={() => runAction(() => stopProcessing('fetch'), t('msg.queueRefreshed'))}
           />
           <StatusLine
             title={t('label.aiWorker')}
-            queueSize={fetcherStatus?.ai_active_size ?? fetcherStatus?.ai_queue_size ?? 0}
+            queueSize={fetcherStatus?.ai_queue_size ?? 0}
+            queueStats={aiQueue}
+            workerCount={aiWorkers}
             current={fetcherStatus?.current_ai_task}
             onStop={() => runAction(() => stopProcessing('ai'), t('msg.queueRefreshed'))}
           />
@@ -731,6 +748,11 @@ export default function AdminDashboard({
           </div>
           <div className="ai-status-side">
             <span className="ai-status-pill">{t('metric.missingAi')}: {missingAiNotes}</span>
+            <span className="ai-status-pill">{t('label.queueBreakdown', {
+              queued: Number(aiQueue.queued ?? 0),
+              running: Number(aiQueue.running ?? 0),
+              paused: Number(aiQueue.paused ?? 0),
+            })}</span>
             <span className="ai-status-pill">{t('label.aiBatchLimit')}: {aiBatchLimit}</span>
             <button
               disabled={busy || !aiCanStart}
@@ -764,7 +786,12 @@ export default function AdminDashboard({
           <div className="resource-card">
             <span>{t('resource.aiWorker')}</span>
             <strong>{resourceStatus.ai_worker_enabled ? t('status.running') : t('status.paused')}</strong>
-            <p>{t('resource.cooldown', { seconds: resourceStatus.ai_job_cooldown_seconds ?? appSettings.ai_notes_job_cooldown_seconds })}</p>
+            <p>{t('resource.workerDetails', {
+              workers: aiWorkers ?? 0,
+              queued: Number(aiQueue.queued ?? 0),
+              running: Number(aiQueue.running ?? 0),
+            })}</p>
+            <small>{t('resource.cooldown', { seconds: resourceStatus.ai_job_cooldown_seconds ?? appSettings.ai_notes_job_cooldown_seconds })}</small>
           </div>
         </div>
         <JobQueuePanel jobs={jobs} busy={busy} onAction={runJobAction} />

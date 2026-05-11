@@ -134,7 +134,7 @@ docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .en
 
 AI/Ollama runtime settings can be changed in **Admin → Setup**. Fetch and AI workers reload these settings before work, so changing the model, Ollama URL, AI batch size, or manual/automatic AI mode does not require a container restart.
 
-The Admin processing screen includes a lightweight resource monitor. It uses `/api/resources/stream` for live server-sent updates and falls back to `/api/resources` polling if the stream drops. It displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
+The Admin processing screen includes a lightweight resource monitor. It uses `/api/resources/stream` for live server-sent updates and falls back to `/api/resources` polling if the stream drops. It displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, worker concurrency, queued/running/paused AI job counts, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
 
 To reduce AI load from the UI:
 
@@ -149,7 +149,7 @@ The `jobs` Directus collection is the shared work queue. Two separate workers po
 - `fetch-worker` — `fetch` queue: channel refresh, video fetch, metadata backfill, date backfill
 - `ai-worker` — `ai` queue: per-video AI note generation
 
-Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), progress tracking, and runtime measurement. Running jobs show elapsed time in the Admin dashboard, and completed jobs persist `duration_seconds` for later comparison. AI note jobs also persist Ollama timing metrics in `jobs.metrics`: model load time, time to first token, prompt eval time/count, generation time/count, token throughput, prompt size, output size, and JSON parse time. The Admin job table highlights the largest AI phase as the likely bottleneck. A channel refresh error on one video does not stop the rest.
+Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), progress tracking, and runtime measurement. Worker startup re-queues jobs left behind by the same previous worker instance, and stale running jobs are re-queued periodically after `STALE_JOB_MINUTES`. Running jobs show elapsed time in the Admin dashboard, and completed jobs persist `duration_seconds` for later comparison. AI note jobs update their phase while they run (`waiting for first token`, `generating`, `parsing JSON`) and persist Ollama timing metrics in `jobs.metrics`: model load time, time to first token, prompt eval time/count, generation time/count, token throughput, prompt size, output size, and JSON parse time. The Admin job table highlights the largest AI phase as the likely bottleneck. A channel refresh error on one video does not stop the rest.
 
 `FETCH_WORKER_CONCURRENCY` and `AI_WORKER_CONCURRENCY` increase parallelism — raise them only where the bottleneck (YouTube rate limits or LLM throughput) allows.
 

@@ -150,6 +150,8 @@
     "aiWorker": "AI jegyzetek",
     "whisper": "Whisper",
     "queueSize": "Sor: {count}",
+    "queueBreakdown": "Sor: {queued} · fut: {running} · szünetel: {paused}",
+    "workerSlots": "Worker slot: {count}",
     "processingBadge": "Feldolgozás: {count} a sorban",
     "whisperBadge": "🎙 Whisper: {count} a sorban",
     "aiChip": "AI: {count}",
@@ -224,7 +226,7 @@
   },
   "aiStatus": {
     "runningTitle": "Az AI most dolgozik",
-    "runningDetail": "{queue} AI feladat aktív. Aktuális lépés: {task}.",
+    "runningDetail": "{running} AI job fut, {queued} várakozik, {workers} worker slot érhető el. Aktuális lépés: {task}.",
     "currentTaskFallback": "AI jegyzet generálás",
     "pausedTitle": "Az AI sor szünetel",
     "pausedDetail": "{count} AI job szünetel. A job táblában a Folytat gombbal lehet továbbindítani.",
@@ -249,6 +251,7 @@
     "noLoadedModel": "Nincs betöltött modell",
     "vramUsage": "{used} / {total} VRAM",
     "cooldown": "Pihenő két AI job között: {seconds} mp",
+    "workerDetails": "{workers} worker slot · {running} fut · {queued} vár",
     "refreshedAt": "Frissítve: {time}",
     "realtimeHint": "Élő streamen frissül; az Ollama API GPU/VRAM elhelyezést mutat, nem natív compute terhelést."
   },

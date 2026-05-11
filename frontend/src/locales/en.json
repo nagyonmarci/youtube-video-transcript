@@ -150,6 +150,8 @@
     "aiWorker": "AI Notes",
     "whisper": "Whisper",
     "queueSize": "Queue: {count}",
+    "queueBreakdown": "Queued: {queued} · running: {running} · paused: {paused}",
+    "workerSlots": "Worker slots: {count}",
     "processingBadge": "Processing: {count} in queue",
     "whisperBadge": "🎙 Whisper: {count} in queue",
     "aiChip": "AI: {count}",
@@ -223,7 +225,7 @@
   },
   "aiStatus": {
     "runningTitle": "AI is working now",
-    "runningDetail": "{queue} AI task(s) active. Current step: {task}.",
+    "runningDetail": "{running} AI job(s) running, {queued} queued, {workers} worker slot(s) available. Current step: {task}.",
     "currentTaskFallback": "AI note generation",
     "pausedTitle": "The AI queue is paused",
     "pausedDetail": "{count} AI job(s) are paused. Use Resume in the job table to continue.",
@@ -248,6 +250,7 @@
     "noLoadedModel": "No loaded model",
     "vramUsage": "{used} / {total} VRAM",
     "cooldown": "Cooldown between AI jobs: {seconds}s",
+    "workerDetails": "{workers} worker slot(s) · {running} running · {queued} queued",
     "refreshedAt": "Refreshed: {time}",
     "realtimeHint": "Updates over a live stream; Ollama reports GPU/VRAM placement, not native compute load."
   },

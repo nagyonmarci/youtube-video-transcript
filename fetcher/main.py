@@ -113,6 +113,7 @@ current_job_queue_var: ContextVar[Optional[str]] = ContextVar("current_job_queue
 current_task_info_var: ContextVar[dict] = ContextVar("current_task_info", default={})
 last_ai_year_backfill_attempt = 0.0
 last_runtime_settings_load = 0.0
+last_stale_job_reset = 0.0
 AI_NOTE_GENERATED_FIELDS = {
     "summary",
     "topics",
@@ -290,9 +291,12 @@ async def get_ollama_resource_status() -> dict:
 
 
 async def current_resource_status() -> dict:
+    ai_counts = await job_status_counts("ai")
     return {
         "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
         "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+        "ai_worker_concurrency": AI_WORKER_CONCURRENCY,
+        "ai_queue": ai_counts,
         "ollama": await get_ollama_resource_status(),
     }
 
@@ -429,6 +433,46 @@ async def update_job_progress(queue: str, current: int, total: int, label: Optio
         "progress_total": total,
         "progress_label": (label or "")[:512] if label else None,
     })
+
+
+async def update_current_job_phase(queue: str, phase: str, label: Optional[str] = None, extra: Optional[dict] = None):
+    job_id = current_job_id_var.get() or (current_ai_job_id if queue == "ai" else current_job_id)
+    state = current_task_info_var.get()
+    if not state:
+        state = current_ai_task_info if queue == "ai" else current_task_info
+    state["phase"] = phase
+    if label:
+        state["progress_label"] = label
+    if extra:
+        state.update(extra)
+    if not job_id:
+        return
+    payload = {}
+    if label:
+        payload["progress_label"] = label[:512]
+    if payload:
+        await directus.update_job(job_id, payload)
+
+
+async def job_status_counts(queue: str) -> dict:
+    statuses = ["queued", "running", "paused", "error"]
+    counts = {}
+    for status in statuses:
+        counts[status] = await directus.count_jobs(queue, status)
+    counts["active"] = counts["queued"] + counts["running"] + counts["paused"]
+    return counts
+
+
+async def reset_stale_running_jobs_if_due(force: bool = False) -> int:
+    global last_stale_job_reset
+    now = time.monotonic()
+    if not force and now - last_stale_job_reset < 60:
+        return 0
+    last_stale_job_reset = now
+    stale = await reset_stale_running_jobs()
+    if stale:
+        logger.info(f"Re-queued {stale} stale running jobs")
+    return stale
 
 
 async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
@@ -598,6 +642,35 @@ async def reset_stale_running_jobs(max_age_minutes: int = STALE_JOB_MINUTES) -> 
         return 0
 
 
+async def reset_owned_running_jobs(worker_id: str, queues: set[str]) -> int:
+    """Re-queue jobs left behind by a previous instance of this worker service."""
+    if not worker_id or not queues:
+        return 0
+    pool = await get_pg_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE jobs
+            SET
+                status = 'queued',
+                error_message = 'Re-queued running job after worker restart',
+                duration_seconds = NULL,
+                metrics = NULL,
+                locked_at = NULL,
+                locked_by = NULL
+            WHERE status = 'running'
+              AND locked_by LIKE $1
+              AND queue = ANY($2::text[])
+            """,
+            f"{worker_id}:%",
+            sorted(queues),
+        )
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 async def ensure_database_indexes():
     statements = [
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ",
@@ -672,6 +745,10 @@ async def worker_loop(worker_name: str = "fetch-worker"):
             await asyncio.sleep(1)
             continue
         try:
+            await reset_stale_running_jobs_if_due()
+        except Exception as e:
+            logger.warning(f"Could not reset stale fetch jobs: {e}")
+        try:
             job = await claim_next_job("fetch", worker_name)
         except Exception as e:
             logger.warning(f"Could not poll fetch jobs: {e}")
@@ -744,6 +821,10 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
         if not AI_NOTES_WORKER_ENABLED:
             await asyncio.sleep(2)
             continue
+        try:
+            await reset_stale_running_jobs_if_due()
+        except Exception as e:
+            logger.warning(f"Could not reset stale AI jobs: {e}")
         try:
             job = await claim_next_job("ai", worker_name)
         except Exception as e:
@@ -1173,7 +1254,16 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
         "ai_notes_error": None,
     })
     try:
-        notes = await generate_ai_notes(video)
+        async def ai_progress(progress: dict) -> None:
+            phase = progress.get("phase") or "generating"
+            label = progress.get("progress_label")
+            extra = {key: value for key, value in progress.items() if key not in {"phase", "progress_label"}}
+            try:
+                await update_current_job_phase("ai", phase, label, extra)
+            except Exception as progress_error:
+                logger.warning(f"Could not update AI progress: {progress_error}")
+
+        notes = await generate_ai_notes(video, progress_callback=ai_progress)
         if not notes:
             await directus.update_video(directus_video_id, {
                 "ai_notes_status": "error",
@@ -1486,15 +1576,16 @@ async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Op
     if not running:
         return {}
     payload = running.get("payload") or {}
+    progress_label = running.get("progress_label")
     return {
         "type": running.get("type") or payload.get("type"),
-        "phase": "running",
+        "phase": progress_label or "running",
         "video": running.get("label"),
         "video_id": payload.get("video_id"),
         "job_id": running.get("id"),
         "progress_current": running.get("progress_current"),
         "progress_total": running.get("progress_total"),
-        "progress_label": running.get("progress_label"),
+        "progress_label": progress_label,
         "started_at": running.get("started_at"),
         "duration_seconds": running.get("duration_seconds") or job_duration_seconds(running),
         "metrics": running.get("metrics"),
@@ -1570,6 +1661,9 @@ def create_worker_tasks() -> list[asyncio.Task]:
 
 async def run_worker_service():
     await bootstrap_runtime(cleanup_pending=True)
+    owned = await reset_owned_running_jobs(WORKER_ID, WORKER_QUEUES)
+    if owned:
+        logger.info(f"Re-queued {owned} jobs left by previous {WORKER_ID} instance")
     tasks = create_worker_tasks()
     if not tasks:
         logger.warning("Worker service started with no queues enabled")
@@ -1930,12 +2024,22 @@ async def ui_channel_videos(channel_id: str, sort: str = "-uploaded_at"):
 
 @app.get("/health")
 async def health():
+    fetch_counts = await job_status_counts("fetch")
+    ai_counts = await job_status_counts("ai")
     return {
         "status": "ok",
-        "queue_size": await directus.count_jobs("fetch", "queued"),
-        "ai_queue_size": await directus.count_jobs("ai", "queued"),
-        "fetch_active_size": await directus.count_jobs("fetch", "queued,running,paused"),
-        "ai_active_size": await directus.count_jobs("ai", "queued,running,paused"),
+        "queue_size": fetch_counts["queued"],
+        "ai_queue_size": ai_counts["queued"],
+        "fetch_active_size": fetch_counts["active"],
+        "ai_active_size": ai_counts["active"],
+        "queues": {
+            "fetch": fetch_counts,
+            "ai": ai_counts,
+        },
+        "workers": {
+            "fetch_concurrency": FETCH_WORKER_CONCURRENCY,
+            "ai_concurrency": AI_WORKER_CONCURRENCY,
+        },
     }
 
 
@@ -1944,20 +2048,32 @@ async def status():
     fetch_current = await current_job_snapshot("fetch", current_task_info, current_job_id)
     ai_current = await current_job_snapshot("ai", current_ai_task_info, current_ai_job_id)
     ollama_resources = await get_ollama_resource_status()
+    fetch_counts = await job_status_counts("fetch")
+    ai_counts = await job_status_counts("ai")
     ai_year_missing = None
     if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
         ai_year_missing = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
     return {
-        "queue_size": await directus.count_jobs("fetch", "queued"),
-        "ai_queue_size": await directus.count_jobs("ai", "queued"),
-        "fetch_active_size": await directus.count_jobs("fetch", "queued,running,paused"),
-        "ai_active_size": await directus.count_jobs("ai", "queued,running,paused"),
+        "queue_size": fetch_counts["queued"],
+        "ai_queue_size": ai_counts["queued"],
+        "fetch_active_size": fetch_counts["active"],
+        "ai_active_size": ai_counts["active"],
+        "queues": {
+            "fetch": fetch_counts,
+            "ai": ai_counts,
+        },
+        "workers": {
+            "fetch_concurrency": FETCH_WORKER_CONCURRENCY,
+            "ai_concurrency": AI_WORKER_CONCURRENCY,
+        },
         "stop_flag": stop_flag,
         "current_task": fetch_current,
         "current_ai_task": ai_current,
         "resources": {
             "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
             "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+            "ai_worker_concurrency": AI_WORKER_CONCURRENCY,
+            "ai_queue": ai_counts,
             "ollama": ollama_resources,
         },
         "schedule": {
@@ -1984,8 +2100,8 @@ async def list_jobs():
     return {
         "jobs": active + completed,
         "counts": {
-            "fetch": await directus.count_jobs("fetch", "queued"),
-            "ai": await directus.count_jobs("ai", "queued"),
+            "fetch": await job_status_counts("fetch"),
+            "ai": await job_status_counts("ai"),
         },
         "current": {
             "fetch": current_job_id,
