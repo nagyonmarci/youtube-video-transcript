@@ -6,11 +6,12 @@ import {
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
+import { useMessage } from '../lib/useMessage.js';
 
 export default function ChannelGrid({ channels, totalVideos, selectedChannel, onSelect, onChannelsChanged }) {
   const { t } = useT();
+  const { msg, showMsg } = useMessage();
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState('name_asc');
 
@@ -27,11 +28,6 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     done: t('status.done'),
     error: t('status.error'),
   };
-
-  function showMsg(text, isError = false) {
-    setMsg({ text, isError });
-    setTimeout(() => setMsg(null), 4000);
-  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

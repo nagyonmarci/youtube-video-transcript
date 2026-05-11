@@ -3,8 +3,10 @@ import { getDailyVideos } from '../lib/directus.js';
 import { generateAiNoteForVideo } from '../lib/fetcher.js';
 import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
+import { useMessage } from '../lib/useMessage.js';
+import { DEFAULT_TIMEZONE } from '../lib/constants.js';
 
-const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Budapest';
+const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
 
 function todayValue() {
   const now = new Date();
@@ -53,14 +55,14 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
   const [titleSearch, setTitleSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
-  const [msg, setMsg] = useState(null);
+  const { msg, showMsg } = useMessage();
 
   async function load() {
     setLoading(true);
     try {
       setVideos(await getDailyVideos(date, LOCAL_TIMEZONE));
     } catch (e) {
-      setMsg({ text: t('msg.errDaily', { error: e.message }), isError: true });
+      showMsg(t('msg.errDaily', { error: e.message }), true);
     } finally {
       setLoading(false);
     }
@@ -69,11 +71,6 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
   useEffect(() => {
     load();
   }, [date]);
-
-  function showMsg(text, isError = false) {
-    setMsg({ text, isError });
-    setTimeout(() => setMsg(null), 4000);
-  }
 
   const filteredVideos = useMemo(() => {
     let result = videos;

@@ -7,13 +7,14 @@ import {
 } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
 import { parseChannelFile } from '../lib/channelUtils.js';
+import { useMessage } from '../lib/useMessage.js';
 
 export default function ChannelSidebar({ channels, selectedChannel, onSelect, onChannelsChanged, videos }) {
   const { t } = useT();
+  const { msg, showMsg } = useMessage();
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
   const fileInputRef = useRef();
 
   const STATUS_LABEL = {
@@ -22,11 +23,6 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
     done: t('status.done'),
     error: t('status.error'),
   };
-
-  function showMsg(text, isError = false) {
-    setMsg({ text, isError });
-    setTimeout(() => setMsg(null), 4000);
-  }
 
   async function addChannels(urls) {
     if (!urls.length) return;

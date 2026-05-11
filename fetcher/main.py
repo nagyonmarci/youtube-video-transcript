@@ -33,7 +33,7 @@ from constants import (
     STOPPED_BY_USER,
     QUEUE_FETCH, QUEUE_AI,
 )
-from directus_client import DirectusClient
+from directus_client import DirectusClient, now_iso
 from youtube_fetcher import (
     fetch_channel_videos,
     fetch_channel_name,
@@ -104,8 +104,6 @@ directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
 pg_pool: Optional[asyncpg.Pool] = None
 
 # Worker state
-task_queue: asyncio.Queue = asyncio.Queue()
-ai_task_queue: asyncio.Queue = asyncio.Queue()
 worker_task: Optional[asyncio.Task] = None
 ai_worker_task: Optional[asyncio.Task] = None
 stop_flag = False
@@ -261,7 +259,7 @@ async def get_ollama_resource_status() -> dict:
         "base_url": OLLAMA_BASE_URL,
         "configured_model": OLLAMA_CHAT_MODEL,
         "models": [],
-        "sampled_at": datetime.now(timezone.utc).isoformat(),
+        "sampled_at": now_iso(),
         "error": None,
     }
     try:
@@ -485,7 +483,7 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
     attempts = int(job.get("attempts") or 0) + 1
     max_attempts = max(1, int(job.get("max_attempts") or 3))
     error_message = STOPPED_BY_USER if stopped else (str(error) or repr(error))[:1000]
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_iso()
     duration_seconds = job_duration_seconds(job)
     if stopped or attempts >= max_attempts:
         await directus.update_job(job["id"], {
@@ -512,11 +510,15 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
     logger.warning(f"Retrying job {job['id']} ({attempts}/{max_attempts}) after error: {error_message}")
 
 
+async def update_video_ai_status(video_id: str, status: str, error: Optional[str] = None):
+    await directus.update_video(video_id, {"ai_notes_status": status, "ai_notes_error": error})
+
+
 async def heartbeat_job(job_id: str):
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL)
         try:
-            await directus.update_job(job_id, {"locked_at": datetime.now(timezone.utc).isoformat()})
+            await directus.update_job(job_id, {"locked_at": now_iso()})
         except Exception as e:
             logger.warning(f"Could not heartbeat job {job_id}: {e}")
 
@@ -1014,7 +1016,7 @@ async def process_channel_task(task: dict):
                 )
 
                 update_data = {
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "processed_at": now_iso(),
                     "status": "done" if transcript else "no_transcript",
                     "transcript": transcript or "",
                     "transcript_timed": transcript_timed or "",
@@ -1034,7 +1036,7 @@ async def process_channel_task(task: dict):
                     try:
                         await directus.update_video(existing[video["video_id"]]["id"], {
                             "status": "error",
-                            "processed_at": datetime.now(timezone.utc).isoformat(),
+                            "processed_at": now_iso(),
                         })
                     except Exception:
                         pass
@@ -1044,7 +1046,7 @@ async def process_channel_task(task: dict):
         if channel_id:
             await directus.update_channel(channel_id, {
                 "status": "done",
-                "last_refreshed": datetime.now(timezone.utc).isoformat(),
+                "last_refreshed": now_iso(),
             })
 
     except Exception as e:
@@ -1133,7 +1135,7 @@ async def process_single_video_task(task: dict):
     transcript, transcript_timed = await loop.run_in_executor(None, fetch_transcript_variants, yt_id)
 
     update_data = {
-        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "processed_at": now_iso(),
         "status": "done" if transcript else "no_transcript",
         "transcript": transcript or "",
         "transcript_timed": transcript_timed or "",
@@ -1255,10 +1257,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
         "video_id": directus_video_id,
         "video": video.get("title") or video.get("video_id") or directus_video_id,
     }
-    await directus.update_video(directus_video_id, {
-        "ai_notes_status": "pending",
-        "ai_notes_error": None,
-    })
+    await update_video_ai_status(directus_video_id, "pending")
     try:
         async def ai_progress(progress: dict) -> None:
             phase = progress.get("phase") or "generating"
@@ -1271,10 +1270,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
 
         notes = await generate_ai_notes(video, progress_callback=ai_progress)
         if not notes:
-            await directus.update_video(directus_video_id, {
-                "ai_notes_status": "error",
-                "ai_notes_error": "No transcript available for AI notes",
-            })
+            await update_video_ai_status(directus_video_id, "error", "No transcript available for AI notes")
             return False
 
         metrics = notes.pop("_metrics", None)
@@ -1291,27 +1287,21 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
             **notes,
             "ai_notes_status": "done",
             "ai_notes_error": None,
-            "ai_notes_generated_at": datetime.now(timezone.utc).isoformat(),
+            "ai_notes_generated_at": now_iso(),
         })
         logger.info(f"AI notes generated for {video.get('video_id') or directus_video_id}")
         return True
     except asyncio.CancelledError:
         logger.info(f"AI notes stopped for {video.get('video_id') or directus_video_id}")
         try:
-            await asyncio.shield(directus.update_video(directus_video_id, {
-                "ai_notes_status": "error",
-                "ai_notes_error": STOPPED_BY_USER,
-            }))
+            await asyncio.shield(update_video_ai_status(directus_video_id, "error", STOPPED_BY_USER))
         except Exception as update_error:
             logger.warning(f"Could not persist stopped AI note status: {update_error}")
         raise
     except Exception as e:
         error_message = str(e) or repr(e)
         logger.warning(f"AI notes failed for {video.get('video_id') or directus_video_id}: {error_message}")
-        await directus.update_video(directus_video_id, {
-            "ai_notes_status": "error",
-            "ai_notes_error": error_message[:1000],
-        })
+        await update_video_ai_status(directus_video_id, "error", error_message[:1000])
         return False
 
 
@@ -1339,10 +1329,7 @@ async def process_ai_notes_task(task: dict):
         if video_id in active_video_ids:
             skipped += 1
             continue
-        await directus.update_video(video_id, {
-            "ai_notes_status": "pending",
-            "ai_notes_error": None,
-        })
+        await update_video_ai_status(video_id, "pending")
         job = await enqueue_ai_job({"type": "ai_note_video", "video_id": video_id})
         active_video_ids.add(video_id)
         if job.get("existing"):
@@ -1362,10 +1349,7 @@ async def process_single_ai_note_task(task: dict):
         logger.warning(f"AI notes video not found: {video_id}")
         return
     if not (video.get("transcript") or video.get("transcript_timed")):
-        await directus.update_video(video_id, {
-            "ai_notes_status": "error",
-            "ai_notes_error": "No transcript available for AI notes",
-        })
+        await update_video_ai_status(video_id, "error", "No transcript available for AI notes")
         return
 
     current_ai_task_info = {
@@ -1373,7 +1357,7 @@ async def process_single_ai_note_task(task: dict):
         "phase": "generating",
         "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": now_iso(),
     }
     if current_ai_job_id:
         await directus.update_job(current_ai_job_id, {"progress_label": "AI generation started"})
@@ -1389,10 +1373,7 @@ async def process_single_ai_note_task(task: dict):
 
 async def enqueue_ai_note(video_id: str):
     """Mark a video as queued for AI notes and enqueue it on the AI worker."""
-    await directus.update_video(video_id, {
-        "ai_notes_status": "pending",
-        "ai_notes_error": None,
-    })
+    await update_video_ai_status(video_id, "pending")
     task = {"type": "ai_note_video", "video_id": video_id}
     return await directus.create_job("ai", task, dedupe_key=job_dedupe_key("ai", task))
 
@@ -1458,10 +1439,7 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
         if video_id in active_video_ids:
             skipped += 1
             continue
-        await directus.update_video(video_id, {
-            "ai_notes_status": "pending",
-            "ai_notes_error": None,
-        })
+        await update_video_ai_status(video_id, "pending")
         job = await enqueue_ai_job({
             "type": "ai_note_video",
             "video_id": video_id,
@@ -1509,26 +1487,6 @@ async def clear_ai_notes(video_id: str) -> dict:
     })
 
 
-async def drain_queue(queue: asyncio.Queue, predicate=None) -> int:
-    """Drain queued items. Return count of removed items."""
-    removed = 0
-    kept = []
-    while not queue.empty():
-        try:
-            task = queue.get_nowait()
-            if predicate is None or predicate(task):
-                removed += 1
-                queue.task_done()
-            else:
-                kept.append(task)
-                queue.task_done()
-        except asyncio.QueueEmpty:
-            break
-    for task in kept:
-        await queue.put(task)
-    return removed
-
-
 async def cancel_jobs(queue: Optional[str] = None, predicate=None, include_running: bool = False) -> int:
     """Mark queued/paused (and optionally running) jobs as cancelled. Return count."""
     cancellable = {"queued", "paused"}
@@ -1545,7 +1503,7 @@ async def cancel_jobs(queue: Optional[str] = None, predicate=None, include_runni
             continue
         await directus.update_job(job["id"], {
             "status": "cancelled",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": now_iso(),
             "error_message": "Cancelled by user",
         })
         removed += 1
@@ -2139,7 +2097,7 @@ async def resource_stream():
                         "base_url": OLLAMA_BASE_URL,
                         "configured_model": OLLAMA_CHAT_MODEL,
                         "models": [],
-                        "sampled_at": datetime.now(timezone.utc).isoformat(),
+                        "sampled_at": now_iso(),
                         "error": str(e)[:300],
                     },
                 }
@@ -2252,7 +2210,7 @@ async def delete_job(job_id: str):
     if job.get("status") == "running":
         await directus.update_job(job_id, {
             "status": "cancelled",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": now_iso(),
             "error_message": "Cancelled by user",
             "locked_at": None,
             "locked_by": None,

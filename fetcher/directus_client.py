@@ -8,6 +8,10 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 AI_NOTE_FIELDS = [
     {"field": "summary", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "topics", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
