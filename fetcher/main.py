@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import asyncpg
@@ -289,6 +289,14 @@ async def get_ollama_resource_status() -> dict:
     return result
 
 
+async def current_resource_status() -> dict:
+    return {
+        "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
+        "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+        "ollama": await get_ollama_resource_status(),
+    }
+
+
 async def apply_ai_worker_queue_gate(enabled: bool) -> int:
     pool = await get_pg_pool()
     async with pool.acquire() as conn:
@@ -428,11 +436,13 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
     max_attempts = max(1, int(job.get("max_attempts") or 3))
     error_message = "Stopped by user" if stopped else (str(error) or repr(error))[:1000]
     now = datetime.now(timezone.utc).isoformat()
+    duration_seconds = job_duration_seconds(job)
     if stopped or attempts >= max_attempts:
         await directus.update_job(job["id"], {
             "status": "cancelled" if stopped else "error",
             "attempts": attempts,
             "finished_at": now,
+            "duration_seconds": duration_seconds,
             "error_message": error_message,
             "last_error": error_message,
             "locked_at": None,
@@ -479,6 +489,31 @@ def normalize_claimed_job(row) -> Optional[dict]:
     return job
 
 
+def parse_datetime(value) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def job_duration_seconds(job: dict, end: Optional[datetime] = None) -> Optional[int]:
+    started = parse_datetime(job.get("started_at"))
+    if not started:
+        return None
+    finished = end or parse_datetime(job.get("finished_at")) or datetime.now(timezone.utc)
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=timezone.utc)
+    return max(0, int((finished - started).total_seconds()))
+
+
 async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
     pool = await get_pg_pool()
     async with pool.acquire() as conn:
@@ -502,6 +537,7 @@ async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
                 progress_current = NULL,
                 progress_total = NULL,
                 progress_label = NULL,
+                duration_seconds = NULL,
                 locked_at = NOW(),
                 locked_by = $2
             WHERE id = (SELECT id FROM next_job)
@@ -509,7 +545,7 @@ async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
                 id, queue, type, label, status, sort_order, payload, dedupe_key,
                 attempts, max_attempts, progress_current, progress_total, progress_label,
                 locked_at, locked_by, created_at, started_at, finished_at,
-                error_message, last_error
+                error_message, last_error, duration_seconds
             """,
             queue,
             worker_name,
@@ -526,6 +562,7 @@ async def reset_stale_running_jobs(max_age_minutes: int = STALE_JOB_MINUTES) -> 
             SET
                 status = 'queued',
                 error_message = 'Re-queued stale running job after worker heartbeat timeout',
+                duration_seconds = NULL,
                 locked_at = NULL,
                 locked_by = NULL
             WHERE status = 'running'
@@ -648,9 +685,11 @@ async def worker_loop(worker_name: str = "fetch-worker"):
                 raise ValueError(f"Unknown fetch job type: {task_type}")
             latest = await directus.get_job(job["id"])
             if latest and latest.get("status") != "cancelled":
+                finished = datetime.now(timezone.utc)
                 await directus.update_job(job["id"], {
                     "status": "done",
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "finished_at": finished.isoformat(),
+                    "duration_seconds": job_duration_seconds(job, finished),
                     "locked_at": None,
                     "locked_by": None,
                 })
@@ -715,9 +754,11 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
                 raise ValueError(f"Unknown AI job type: {task_type}")
             latest = await directus.get_job(job["id"])
             if latest and latest.get("status") != "cancelled":
+                finished = datetime.now(timezone.utc)
                 await directus.update_job(job["id"], {
                     "status": "done",
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "finished_at": finished.isoformat(),
+                    "duration_seconds": job_duration_seconds(job, finished),
                     "locked_at": None,
                     "locked_by": None,
                 })
@@ -1207,9 +1248,18 @@ async def process_single_ai_note_task(task: dict):
         "phase": "generating",
         "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
+        "started_at": datetime.now(timezone.utc).isoformat(),
     }
+    if current_ai_job_id:
+        await directus.update_job(current_ai_job_id, {"progress_label": "AI generation started"})
     fields = task.get("fields")
     await generate_and_store_ai_notes(video_id, video, fields if isinstance(fields, list) else None)
+    elapsed = job_duration_seconds({"started_at": current_ai_task_info.get("started_at")})
+    current_ai_task_info["duration_seconds"] = elapsed
+    if current_ai_job_id and elapsed is not None:
+        await directus.update_job(current_ai_job_id, {
+            "progress_label": f"AI generation finished in {elapsed}s",
+        })
 
 
 async def enqueue_ai_note(video_id: str):
@@ -1398,7 +1448,11 @@ async def cleanup_orphan_ai_pending_videos() -> int:
 async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Optional[str]) -> dict:
     """Return current in-memory job info, falling back to a persisted running job."""
     if in_memory_job_id:
-        return {**in_memory, "job_id": in_memory_job_id}
+        started = in_memory.get("started_at")
+        duration = in_memory.get("duration_seconds")
+        if started and duration is None:
+            duration = job_duration_seconds({"started_at": started})
+        return {**in_memory, "job_id": in_memory_job_id, "duration_seconds": duration}
     running = await directus.get_running_job(queue)
     if not running:
         return {}
@@ -1412,6 +1466,8 @@ async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Op
         "progress_current": running.get("progress_current"),
         "progress_total": running.get("progress_total"),
         "progress_label": running.get("progress_label"),
+        "started_at": running.get("started_at"),
+        "duration_seconds": running.get("duration_seconds") or job_duration_seconds(running),
     }
 
 
@@ -1910,11 +1966,43 @@ async def list_jobs():
 
 @app.get("/resources")
 async def resources():
-    return {
-        "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
-        "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
-        "ollama": await get_ollama_resource_status(),
-    }
+    return await current_resource_status()
+
+
+@app.get("/resources/stream")
+async def resource_stream():
+    async def events():
+        while True:
+            try:
+                payload = await current_resource_status()
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                payload = {
+                    "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
+                    "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+                    "ollama": {
+                        "online": False,
+                        "base_url": OLLAMA_BASE_URL,
+                        "configured_model": OLLAMA_CHAT_MODEL,
+                        "models": [],
+                        "sampled_at": datetime.now(timezone.utc).isoformat(),
+                        "error": str(e)[:300],
+                    },
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/ai-notes/cleanup-stale")

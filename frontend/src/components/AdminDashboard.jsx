@@ -7,6 +7,7 @@ import {
   getJobs,
   getResources,
   getSchedule,
+  openResourceStream,
   moveJob,
   pauseJob,
   refreshDates,
@@ -161,6 +162,7 @@ function StatusLine({ title, queueSize, current, onStop }) {
   const { t } = useT();
   const active = queueSize > 0 || Boolean(current?.type);
   const progressText = formatProgress(current?.progress_current, current?.progress_total);
+  const runtimeText = formatDuration(current?.duration_seconds);
   return (
     <div className="process-line">
       <div>
@@ -173,6 +175,7 @@ function StatusLine({ title, queueSize, current, onStop }) {
               {current?.video && <span> · {current.video}</span>}
               {current?.video_id && !current?.video && <span> · {current.video_id}</span>}
               {progressText && <span> · {progressText}</span>}
+              {runtimeText && <span> · {t('label.runningFor', { duration: runtimeText })}</span>}
             </>
           ) : (
             <span>{t('state.noRunning')}</span>
@@ -204,6 +207,24 @@ function formatJobTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatDuration(seconds) {
+  const total = Number(seconds || 0);
+  if (!total) return '';
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours) return `${hours}h ${minutes}m ${secs}s`;
+  if (minutes) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+function jobRuntimeSeconds(job) {
+  if (job.duration_seconds) return Number(job.duration_seconds);
+  if (!job.started_at) return 0;
+  const end = job.finished_at ? new Date(job.finished_at) : new Date();
+  return Math.max(0, Math.round((end.getTime() - new Date(job.started_at).getTime()) / 1000));
 }
 
 function JobQueuePanel({ jobs, onAction, busy }) {
@@ -249,6 +270,7 @@ function JobQueuePanel({ jobs, onAction, busy }) {
               const paused = job.status === 'paused';
               const reorderable = ['queued', 'paused'].includes(job.status);
               const progressText = formatProgress(job.progress_current, job.progress_total);
+              const runtimeText = formatDuration(jobRuntimeSeconds(job));
               return (
                 <tr key={job.id}>
                   <td>
@@ -258,6 +280,11 @@ function JobQueuePanel({ jobs, onAction, busy }) {
                   </td>
                   <td>
                     <div className="job-label">{job.label || job.type}</div>
+                    {runtimeText && (
+                      <div className="job-progress-text">
+                        {running ? t('label.runningFor', { duration: runtimeText }) : t('label.duration', { duration: runtimeText })}
+                      </div>
+                    )}
                     {progressText && <div className="job-progress-text">{progressText}</div>}
                     {progressText && (
                       <progress
@@ -369,6 +396,9 @@ export default function AdminDashboard({
 
   useEffect(() => {
     let alive = true;
+    let fallbackInterval = null;
+    let stream = null;
+
     async function loadResources() {
       try {
         const resources = await getResources();
@@ -377,11 +407,36 @@ export default function AdminDashboard({
         if (alive) setResourceSnapshot(prev => prev);
       }
     }
-    loadResources();
-    const interval = setInterval(loadResources, 2000);
+
+    function startFallbackPolling() {
+      if (fallbackInterval) return;
+      loadResources();
+      fallbackInterval = setInterval(loadResources, 2000);
+    }
+
+    if (typeof EventSource === 'undefined') {
+      startFallbackPolling();
+    } else {
+      stream = openResourceStream();
+      stream.onmessage = event => {
+        try {
+          const resources = JSON.parse(event.data);
+          if (alive) setResourceSnapshot(resources);
+        } catch {
+          if (alive) setResourceSnapshot(prev => prev);
+        }
+      };
+      stream.onerror = () => {
+        stream?.close();
+        stream = null;
+        startFallbackPolling();
+      };
+    }
+
     return () => {
       alive = false;
-      clearInterval(interval);
+      stream?.close();
+      if (fallbackInterval) clearInterval(fallbackInterval);
     };
   }, []);
 

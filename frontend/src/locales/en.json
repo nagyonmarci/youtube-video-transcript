@@ -155,6 +155,8 @@
     "aiChip": "AI: {count}",
     "selected": "{count} selected",
     "attempts": "Attempt {current}/{max}",
+    "runningFor": "Runtime: {duration}",
+    "duration": "Duration: {duration}",
     "activeJobs": "{count} active jobs",
     "activeOnly": "Active only",
     "plusCompleted": "+ {count} completed",
@@ -245,7 +247,7 @@
     "vramUsage": "{used} / {total} VRAM",
     "cooldown": "Cooldown between AI jobs: {seconds}s",
     "refreshedAt": "Refreshed: {time}",
-    "realtimeHint": "Refreshes every 2s; Ollama reports GPU/VRAM placement, not native compute load."
+    "realtimeHint": "Updates over a live stream; Ollama reports GPU/VRAM placement, not native compute load."
   },
   "sort": {
     "nameAZ": "Name A–Z",

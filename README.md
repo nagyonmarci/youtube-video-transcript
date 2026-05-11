@@ -14,8 +14,8 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note — generated via Ollama
 - AI fields are regenerable individually; AI processing runs on a separate queue and never blocks transcript fetching
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
-- Admin dashboard shows both job queues (fetch + AI), running/stuck jobs, and allows pause/resume/delete
-- Admin resource monitor polls Ollama every 2 seconds and shows loaded model, GPU/VRAM placement, AI worker state, and AI cooldown
+- Admin dashboard shows both job queues (fetch + AI), running/stuck jobs, per-job runtime/duration, and allows pause/resume/delete
+- Admin resource monitor streams Ollama status live and shows loaded model, GPU/VRAM placement, AI worker state, and AI cooldown
 - Daily automatic channel refresh (default: 07:00 `Europe/Budapest`)
 - UI language toggle: English / Hungarian (persisted in `localStorage`)
 
@@ -131,7 +131,7 @@ docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .en
 
 AI/Ollama runtime settings can be changed in **Admin → Setup**. Fetch and AI workers reload these settings before work, so changing the model, Ollama URL, AI batch size, or manual/automatic AI mode does not require a container restart.
 
-The Admin processing screen includes a lightweight resource monitor. It calls `/api/resources` every 2 seconds and displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
+The Admin processing screen includes a lightweight resource monitor. It uses `/api/resources/stream` for live server-sent updates and falls back to `/api/resources` polling if the stream drops. It displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
 
 To reduce AI load from the UI:
 
@@ -146,7 +146,7 @@ The `jobs` Directus collection is the shared work queue. Two separate workers po
 - `fetch-worker` — `fetch` queue: channel refresh, video fetch, metadata backfill, date backfill
 - `ai-worker` — `ai` queue: per-video AI note generation
 
-Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), and progress tracking. A channel refresh error on one video does not stop the rest.
+Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), progress tracking, and runtime measurement. Running jobs show elapsed time in the Admin dashboard, and completed jobs persist `duration_seconds` for later comparison. A channel refresh error on one video does not stop the rest.
 
 `FETCH_WORKER_CONCURRENCY` and `AI_WORKER_CONCURRENCY` increase parallelism — raise them only where the bottleneck (YouTube rate limits or LLM throughput) allows.
 

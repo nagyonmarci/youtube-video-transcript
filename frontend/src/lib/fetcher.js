@@ -47,6 +47,10 @@ export async function getResources() {
   return res.json();
 }
 
+export function openResourceStream() {
+  return new EventSource(`${FETCHER_URL}/resources/stream`);
+}
+
 export async function getJobs() {
   const res = await fetch(`${FETCHER_URL}/jobs`);
   if (!res.ok) throw new Error(`jobs → ${res.status}`);

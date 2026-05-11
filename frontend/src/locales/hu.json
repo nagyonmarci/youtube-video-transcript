@@ -155,6 +155,8 @@
     "aiChip": "AI: {count}",
     "selected": "{count} kiválasztva",
     "attempts": "Próba {current}/{max}",
+    "runningFor": "Futási idő: {duration}",
+    "duration": "Időtartam: {duration}",
     "activeJobs": "{count} aktív job",
     "activeOnly": "Csak aktív",
     "plusCompleted": "+ {count} befejezett",
@@ -246,7 +248,7 @@
     "vramUsage": "{used} / {total} VRAM",
     "cooldown": "Pihenő két AI job között: {seconds} mp",
     "refreshedAt": "Frissítve: {time}",
-    "realtimeHint": "2 mp-enként frissül; az Ollama API GPU/VRAM elhelyezést mutat, nem natív compute terhelést."
+    "realtimeHint": "Élő streamen frissül; az Ollama API GPU/VRAM elhelyezést mutat, nem natív compute terhelést."
   },
   "sort": {
     "nameAZ": "Név A–Z",
