@@ -111,6 +111,9 @@ AI/Ollama settings are configured in **Admin → Setup** instead of `.env`: Olla
 # Rebuild and restart a single service after code change
 docker compose build fetcher && docker compose up -d fetcher
 
+# After fetcher/worker Python changes, rebuild all services that share fetcher code
+docker compose build fetcher fetch-worker ai-worker && docker compose up -d fetcher fetch-worker ai-worker
+
 # Tail logs
 docker compose logs -f fetcher
 docker compose logs --tail=120 fetch-worker
@@ -224,6 +227,8 @@ All three are covered by `.gitignore`.
 | Symptom | Cause | Fix |
 |---|---|---|
 | New schema fields not visible | Bootstrap runs at startup | `docker compose up -d fetcher` |
+| Admin data load error: `settings -> 404` | Fetcher container is running an old image without the current API routes | Rebuild/restart backend services: `docker compose build fetcher fetch-worker ai-worker && docker compose up -d fetcher fetch-worker ai-worker` |
+| `/api/resources` or `/api/resources/stream` returns 404 | Same as above: frontend is newer than the fetcher image | Rebuild/restart `fetcher`, `fetch-worker`, and `ai-worker` |
 | yt-dlp errors or blocked requests | Outdated binary | Check version with `docker compose exec -T fetcher yt-dlp --version`; rebuild if outdated |
 | Ollama connection refused | Wrong base URL or Ollama not running | Verify the Ollama URL in **Admin → Setup**; `http://host.docker.internal:11434` works on Docker Desktop (Mac/Windows) |
 | Ollama shows `100%` GPU/VRAM but fans vary | Ollama reports model placement, not live compute utilization | Use Admin → Processing for the live loaded-model/VRAM view; macOS Activity Monitor or `ollama ps` can help inspect host-side load |
