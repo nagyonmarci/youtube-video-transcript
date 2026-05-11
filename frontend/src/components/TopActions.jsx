@@ -8,24 +8,21 @@ import {
 import { useT } from '../lib/i18n.jsx';
 import { parseChannelFile } from '../lib/channelUtils.js';
 import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
+import { useMessage } from '../lib/useMessage.js';
+import { DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.js';
 
 export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }) {
   const { t } = useT();
+  const { msg, showMsg } = useMessage();
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
-  const [scheduleCron, setScheduleCron] = useState('0 7 * * *');
-  const [scheduleTimezone, setScheduleTimezone] = useState('Europe/Budapest');
-  const [scheduleTime, setScheduleTime] = useState('07:00');
+  const [scheduleCron, setScheduleCron] = useState(DEFAULT_CRON);
+  const [scheduleTimezone, setScheduleTimezone] = useState(DEFAULT_TIMEZONE);
+  const [scheduleTime, setScheduleTime] = useState(DEFAULT_CRON_TIME);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [advancedSchedule, setAdvancedSchedule] = useState(false);
   const fileInputRef = useRef();
-
-  function showMsg(text, isError = false) {
-    setMsg({ text, isError });
-    setTimeout(() => setMsg(null), 4000);
-  }
 
   async function addChannels(urls) {
     if (!urls.length) return;

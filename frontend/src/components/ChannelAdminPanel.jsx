@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { deleteChannel, updateChannel } from '../lib/directus.js';
 import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
 import { useT } from '../lib/i18n.jsx';
+import { useMessage } from '../lib/useMessage.js';
 
 function editableChannel(ch) {
   return {
@@ -40,7 +41,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
   }, [channels]);
 
   const [busyId, setBusyId] = useState(null);
-  const [msg, setMsg] = useState(null);
+  const { msg, showMsg } = useMessage();
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -51,11 +52,6 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
         .includes(q)
     ));
   }, [channels, search]);
-
-  function showMsg(text, isError = false) {
-    setMsg({ text, isError });
-    setTimeout(() => setMsg(null), 4000);
-  }
 
   function updateDraft(id, field, value) {
     setDrafts(prev => ({

@@ -24,6 +24,8 @@ import TopActions from './TopActions.jsx';
 import { useT } from '../lib/i18n.jsx';
 import { keepIfSame } from '../lib/dataUtils.js';
 import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
+import { useMessage } from '../lib/useMessage.js';
+import { POLL_INTERVAL_MS, DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.js';
 
 function formatProgress(current, total) {
   const cur = Number(current || 0);
@@ -378,9 +380,9 @@ export default function AdminDashboard({
   const [monthlyData, setMonthlyData] = useState([]);
   const [errorVideos, setErrorVideos] = useState(null);
   const [showErrorVideos, setShowErrorVideos] = useState(false);
-  const [scheduleCron, setScheduleCron] = useState('0 7 * * *');
-  const [scheduleTime, setScheduleTime] = useState('07:00');
-  const [scheduleTimezone, setScheduleTimezone] = useState('Europe/Budapest');
+  const [scheduleCron, setScheduleCron] = useState(DEFAULT_CRON);
+  const [scheduleTime, setScheduleTime] = useState(DEFAULT_CRON_TIME);
+  const [scheduleTimezone, setScheduleTimezone] = useState(DEFAULT_TIMEZONE);
   const [appSettings, setAppSettings] = useState(() => normalizeSettings());
   const [settingsDraft, setSettingsDraft] = useState(() => normalizeSettings());
   const [settingsDirty, setSettingsDirty] = useState(false);
@@ -388,7 +390,7 @@ export default function AdminDashboard({
   const [jobs, setJobs] = useState([]);
   const [resourceSnapshot, setResourceSnapshot] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
+  const { msg, showMsg } = useMessage();
 
   async function loadAdminData() {
     try {
@@ -400,9 +402,9 @@ export default function AdminDashboard({
         getMonthlyVideoCounts(),
         getAppSettings(),
       ]);
-      const nextCron = schedule.cron || '0 7 * * *';
+      const nextCron = schedule.cron || DEFAULT_CRON;
       const nextTime = cronToDailyTime(nextCron);
-      const nextTimezone = schedule.timezone || 'Europe/Budapest';
+      const nextTimezone = schedule.timezone || DEFAULT_TIMEZONE;
       setStats(prev => keepIfSame(prev, nextStats));
       setJobs(prev => keepIfSame(prev, jobData.jobs || []));
       setCoverage(cov);
@@ -414,13 +416,13 @@ export default function AdminDashboard({
       setAppSettings(normalizedSettings);
       if (!settingsDirtyRef.current) setSettingsDraft(normalizedSettings);
     } catch (e) {
-      setMsg({ text: t('msg.errAdmin', { error: e.message }), isError: true });
+      showMsg(t('msg.errAdmin', { error: e.message }), true);
     }
   }
 
   useEffect(() => {
     loadAdminData();
-    const interval = setInterval(loadAdminData, 10000);
+    const interval = setInterval(loadAdminData, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -469,11 +471,6 @@ export default function AdminDashboard({
       if (fallbackInterval) clearInterval(fallbackInterval);
     };
   }, []);
-
-  function showMsg(text, isError = false) {
-    setMsg({ text, isError });
-    setTimeout(() => setMsg(null), 4000);
-  }
 
   async function runAction(action, successText) {
     setBusy(true);

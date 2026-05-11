@@ -3,6 +3,8 @@ import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js'
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
 import { formatDuration, formatDate } from '../lib/formatUtils.js';
+import { useMessage } from '../lib/useMessage.js';
+import { TOAST_TIMEOUT_MS, SEARCH_DEBOUNCE_MS } from '../lib/constants.js';
 
 async function bulkGenerateAiNotes(videos) {
   const errors = [];
@@ -50,7 +52,7 @@ export default function VideoTable({
   const [exportMenuId, setExportMenuId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [actionMsg, setActionMsg] = useState(null);
+  const { msg: actionMsg, showMsg: showActionMsg } = useMessage(TOAST_TIMEOUT_MS);
   const debounceRef = useRef(null);
   const loadMoreRef = useRef(null);
 
@@ -93,11 +95,6 @@ export default function VideoTable({
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
   }, [exportMenuId]);
-
-  function showActionMsg(text, isError = false) {
-    setActionMsg({ text, isError });
-    setTimeout(() => setActionMsg(null), 5000);
-  }
 
   const allSelected = videos.length > 0 && videos.every(v => selectedIds.has(v.id));
   const someSelected = selectedIds.size > 0;
@@ -172,7 +169,7 @@ export default function VideoTable({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       onSearchChange(value);
-    }, 300);
+    }, SEARCH_DEBOUNCE_MS);
   }, [onSearchChange]);
 
   const sortField = sort.startsWith('-') ? sort.slice(1) : sort;

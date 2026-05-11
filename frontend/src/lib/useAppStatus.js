@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { getStatus, stopProcessing, getWhisperStatus, startWhisperBatch, stopWhisper } from './fetcher.js';
 import { keepIfSame } from './dataUtils.js';
+import { POLL_INTERVAL_MS } from './constants.js';
 
 export function useAppStatus(tRef) {
   const [fetcherStatus, setFetcherStatus] = useState(null);
@@ -23,7 +24,7 @@ export function useAppStatus(tRef) {
 
   useEffect(() => {
     loadStatus();
-    const id = setInterval(loadStatus, 10000);
+    const id = setInterval(loadStatus, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [loadStatus]);
 

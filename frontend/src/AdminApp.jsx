@@ -5,10 +5,12 @@ import AppHeader from './components/AppHeader.jsx';
 import { useAppStatus } from './lib/useAppStatus.js';
 import { I18nProvider, useT } from './lib/i18n.jsx';
 import { sameData, keepIfSame } from './lib/dataUtils.js';
+import { useTheme } from './lib/useTheme.js';
+import { TOAST_TIMEOUT_MS, POLL_INTERVAL_MS } from './lib/constants.js';
 
 function AdminAppInner() {
   const { t, lang, setLanguage } = useT();
-  const [theme, setTheme] = useState(() => localStorage.getItem('yt_theme') || 'dark');
+  const { theme, handleThemeToggle } = useTheme();
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [toasts, setToasts] = useState([]);
@@ -23,15 +25,7 @@ function AdminAppInner() {
   function addToast(text) {
     const id = Date.now();
     setToasts(prev => [...prev, { id, text }]);
-    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), 5000);
-  }
-
-  function handleThemeToggle() {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    localStorage.setItem('yt_theme', next);
-    if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
-    else document.documentElement.removeAttribute('data-theme');
+    setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), TOAST_TIMEOUT_MS);
   }
 
   const loadChannels = useCallback(async () => {
@@ -51,7 +45,7 @@ function AdminAppInner() {
 
   useEffect(() => {
     loadChannels();
-    const interval = setInterval(loadChannels, 10000);
+    const interval = setInterval(loadChannels, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [loadChannels]);
 
