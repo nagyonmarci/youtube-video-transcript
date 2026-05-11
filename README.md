@@ -78,7 +78,7 @@ The app is protected by Caddy Basic Auth. Use `APP_BASIC_AUTH_USER` and the plai
 
 ## Configuration
 
-All configuration lives in `.env` (git-ignored). Copy `.env.example` and set every value marked as required.
+Bootstrap, secret, and container-level configuration lives in `.env` (git-ignored). Copy `.env.example` and set every value marked as required. Runtime AI/Ollama settings live in **Admin → Setup** and are stored in Directus, so they can be changed without editing `.env`.
 
 | Variable | Description | Default |
 |---|---|---|
@@ -93,17 +93,6 @@ All configuration lives in `.env` (git-ignored). Copy `.env.example` and set eve
 | `APP_BASIC_AUTH_HASH` | Caddy bcrypt hash for the Basic Auth password | required |
 | `REFRESH_CRON` | Automatic channel refresh schedule | `0 7 * * *` |
 | `SCHEDULER_TIMEZONE` | Cron timezone | `Europe/Budapest` |
-| `OLLAMA_BASE_URL` | Ollama API base URL | `http://host.docker.internal:11434` |
-| `OLLAMA_CHAT_MODEL` | Chat model for AI notes | `gemma4:31b-mlx-bf16` |
-| `AI_NOTES_AUTO` | Auto-generate notes after each transcript | `true` |
-| `AI_NOTES_BATCH_LIMIT` | Notes generated per batch run | `10` |
-| `AI_NOTES_MAX_BATCH_LIMIT` | Hard cap on batch size | `20000` |
-| `AI_NOTES_YEAR_BACKFILL_ENABLED` | Keep AI notes running for missing videos in one upload year | `true` |
-| `AI_NOTES_YEAR_BACKFILL_YEAR` | Upload year to continuously backfill | `2026` |
-| `AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT` | Max year-backfill jobs to enqueue per refill | `50` |
-| `AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE` | Target queued/running/paused AI jobs to keep available | `100` |
-| `AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS` | API scheduler refill interval | `300` |
-| `AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS` | AI worker idle refill throttle | `60` |
 | `FETCH_WORKER_CONCURRENCY` | Parallel fetch-worker threads | `1` |
 | `AI_WORKER_CONCURRENCY` | Parallel AI-worker threads | `1` |
 | `STALE_JOB_MINUTES` | Re-queue jobs stuck in `running` after N minutes | `30` |
@@ -112,6 +101,8 @@ All configuration lives in `.env` (git-ignored). Copy `.env.example` and set eve
 | `WHISPER_LANGUAGE` | Recognition language (`auto` detects) | `auto` |
 | `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
 | `WHISPER_BATCH_LIMIT` | Max videos per Whisper batch | `50` |
+
+AI/Ollama settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, AI batch limits, transcript character limit, automatic AI-after-transcript, and yearly AI backfill. The defaults keep AI manual-only to avoid continuous GPU load.
 
 ## Development Workflow
 
@@ -127,7 +118,7 @@ docker compose logs --tail=120 fetch-worker
 python3 -m py_compile fetcher/main.py fetcher/directus_client.py fetcher/youtube_fetcher.py fetcher/ai_notes.py
 
 # Check yt-dlp version inside container
-docker compose exec -T fetcher yt-dlp --version   # expected: 2025.12.08
+docker compose exec -T fetcher yt-dlp --version   # expected: 2026.3.17
 
 # Manual endpoint test (token-free health check)
 docker compose exec -T fetcher curl -s http://localhost:8000/health
@@ -137,10 +128,7 @@ docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .en
 
 > **Schema changes:** After touching `directus_client.py`, new fields only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
 
-After switching the Ollama model, restart both workers:
-```bash
-docker compose up -d fetcher fetch-worker ai-worker
-```
+AI/Ollama runtime settings can be changed in **Admin → Setup**. Fetch and AI workers reload these settings before work, so changing the model, Ollama URL, AI batch size, or manual/automatic AI mode does not require a container restart.
 
 ## Job Queue
 
@@ -228,7 +216,7 @@ All three are covered by `.gitignore`.
 |---|---|---|
 | New schema fields not visible | Bootstrap runs at startup | `docker compose up -d fetcher` |
 | yt-dlp errors or blocked requests | Outdated binary | Check version with `docker compose exec -T fetcher yt-dlp --version`; rebuild if outdated |
-| Ollama connection refused | Wrong base URL or Ollama not running | Verify `OLLAMA_BASE_URL` in `.env`; `http://host.docker.internal:11434` works on Docker Desktop (Mac/Windows) |
+| Ollama connection refused | Wrong base URL or Ollama not running | Verify the Ollama URL in **Admin → Setup**; `http://host.docker.internal:11434` works on Docker Desktop (Mac/Windows) |
 | Whisper model not found | First-start download incomplete | Check `docker compose logs whisper`; the download retries on restart |
 | Job stuck in `running` | Worker crashed mid-job | Jobs are automatically re-queued after `STALE_JOB_MINUTES`; or use the Admin dashboard to cancel manually |
 | `web` network not found | Network not created | `docker network create web` |

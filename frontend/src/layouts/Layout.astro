@@ -472,6 +472,34 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   .schedule-form select {
     width: 190px;
   }
+  .settings-form {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(170px, 1fr));
+    gap: 0.65rem;
+    align-items: end;
+  }
+  .settings-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: var(--text2);
+    font-size: 0.78rem;
+    min-width: 0;
+  }
+  .settings-check {
+    flex-direction: row !important;
+    align-items: center;
+    color: var(--text);
+    min-height: 2.25rem;
+  }
+  .settings-check input {
+    width: auto;
+  }
+  .settings-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
   .job-table-wrap {
     overflow-x: auto;
     border: 1px solid var(--border);
@@ -642,6 +670,7 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   }
   .video-table {
     width: 100%;
+    min-width: 1040px;
     border-collapse: collapse;
     font-size: 0.85rem;
   }
@@ -685,7 +714,7 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   .export-menu-item {
     background: none;
     border: none;
-    color: var(--text1);
+    color: var(--text);
     padding: 0.4rem 0.75rem;
     text-align: left;
     font-size: 0.82rem;
@@ -693,6 +722,12 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     width: 100%;
   }
   .export-menu-item:hover { background: rgba(255,255,255,0.07); }
+  .video-row-actions {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
   .video-table .clickable-row { cursor: pointer; }
   .video-table .clickable-row:hover { background: rgba(255,255,255,0.04); }
   .video-link {
@@ -823,7 +858,7 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     .app-header { align-items: flex-start; flex-wrap: wrap; }
     .header-status { margin-left: 0; width: 100%; }
     .top-actions { grid-template-columns: 1fr; }
-    .metric-grid, .process-panel { grid-template-columns: 1fr; }
+    .metric-grid, .process-panel, .settings-form { grid-template-columns: 1fr; }
     .daily-video-list { grid-template-columns: 1fr; }
     .daily-video-card { flex-direction: column; }
     .daily-video-actions { flex-direction: row; flex-wrap: wrap; }

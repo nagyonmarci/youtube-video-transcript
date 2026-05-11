@@ -4,6 +4,8 @@ import { generateAiNoteForVideo } from '../lib/fetcher.js';
 import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
 
+const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Budapest';
+
 function todayValue() {
   const now = new Date();
   return [
@@ -56,7 +58,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
   async function load() {
     setLoading(true);
     try {
-      setVideos(await getDailyVideos(date, Intl.DateTimeFormat().resolvedOptions().timeZone));
+      setVideos(await getDailyVideos(date, LOCAL_TIMEZONE));
     } catch (e) {
       setMsg({ text: t('msg.errDaily', { error: e.message }), isError: true });
     } finally {

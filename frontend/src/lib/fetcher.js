@@ -105,11 +105,11 @@ export async function refreshThumbnails() {
   return res.json();
 }
 
-export async function generateAiNotes(limit = 20000) {
+export async function generateAiNotes(limit) {
   const res = await fetch(`${FETCHER_URL}/ai-notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ limit }),
+    body: JSON.stringify(limit === undefined ? {} : { limit }),
   });
   if (!res.ok) throw new Error(`ai-notes → ${res.status}`);
   return res.json();
@@ -194,6 +194,29 @@ export async function updateSchedule(cron, timezone) {
       detail = data.detail ? `: ${data.detail}` : '';
     } catch {}
     throw new Error(`schedule → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
+export async function getAppSettings() {
+  const res = await fetch(`${FETCHER_URL}/settings`);
+  if (!res.ok) throw new Error(`settings → ${res.status}`);
+  return res.json();
+}
+
+export async function updateAppSettings(settings) {
+  const res = await fetch(`${FETCHER_URL}/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`settings → ${res.status}${detail}`);
   }
   return res.json();
 }

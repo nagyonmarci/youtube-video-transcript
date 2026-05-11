@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getAdminStats, getChannelCoverage, getMonthlyVideoCounts, getErrorVideos } from '../lib/directus.js';
 import {
   deleteJob,
   generateAiNotes,
+  getAppSettings,
   getJobs,
   getSchedule,
   moveJob,
@@ -13,6 +14,7 @@ import {
   startJob,
   stopProcessing,
   stopWhisper,
+  updateAppSettings,
   updateSchedule,
 } from '../lib/fetcher.js';
 import ChannelAdminPanel from './ChannelAdminPanel.jsx';
@@ -45,6 +47,24 @@ function cronToDailyTime(cron) {
 function dailyTimeToCron(time) {
   const [hour = '7', minute = '0'] = (time || '07:00').split(':');
   return `${Number(minute)} ${Number(hour)} * * *`;
+}
+
+function normalizeSettings(settings = {}) {
+  return {
+    ollama_base_url: settings.ollama_base_url || 'http://host.docker.internal:11434',
+    ollama_chat_model: settings.ollama_chat_model || 'gemma4:31b-mlx-bf16',
+    ollama_timeout: Number(settings.ollama_timeout ?? 600),
+    ai_notes_max_chars: Number(settings.ai_notes_max_chars ?? 45000),
+    ai_notes_auto: Boolean(settings.ai_notes_auto),
+    ai_notes_batch_limit: Number(settings.ai_notes_batch_limit ?? 10),
+    ai_notes_max_batch_limit: Number(settings.ai_notes_max_batch_limit ?? 20000),
+    ai_notes_year_backfill_enabled: Boolean(settings.ai_notes_year_backfill_enabled),
+    ai_notes_year_backfill_year: Number(settings.ai_notes_year_backfill_year ?? new Date().getFullYear()),
+    ai_notes_year_backfill_batch_limit: Number(settings.ai_notes_year_backfill_batch_limit ?? 50),
+    ai_notes_year_backfill_target_active: Number(settings.ai_notes_year_backfill_target_active ?? 100),
+    ai_notes_year_backfill_interval_seconds: Number(settings.ai_notes_year_backfill_interval_seconds ?? 300),
+    ai_notes_year_backfill_idle_seconds: Number(settings.ai_notes_year_backfill_idle_seconds ?? 60),
+  };
 }
 
 function StatusLine({ title, queueSize, current, onStop }) {
@@ -214,18 +234,23 @@ export default function AdminDashboard({
   const [scheduleCron, setScheduleCron] = useState('0 7 * * *');
   const [scheduleTime, setScheduleTime] = useState('07:00');
   const [scheduleTimezone, setScheduleTimezone] = useState('Europe/Budapest');
+  const [appSettings, setAppSettings] = useState(() => normalizeSettings());
+  const [settingsDraft, setSettingsDraft] = useState(() => normalizeSettings());
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const settingsDirtyRef = useRef(false);
   const [jobs, setJobs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
   async function loadAdminData() {
     try {
-      const [nextStats, schedule, jobData, cov, monthly] = await Promise.all([
+      const [nextStats, schedule, jobData, cov, monthly, settings] = await Promise.all([
         getAdminStats(),
         getSchedule(),
         getJobs(),
         getChannelCoverage(),
         getMonthlyVideoCounts(),
+        getAppSettings(),
       ]);
       const nextCron = schedule.cron || '0 7 * * *';
       const nextTime = cronToDailyTime(nextCron);
@@ -237,6 +262,9 @@ export default function AdminDashboard({
       setScheduleCron(prev => (prev === nextCron ? prev : nextCron));
       setScheduleTime(prev => (prev === nextTime ? prev : nextTime));
       setScheduleTimezone(prev => (prev === nextTimezone ? prev : nextTimezone));
+      const normalizedSettings = normalizeSettings(settings);
+      setAppSettings(normalizedSettings);
+      if (!settingsDirtyRef.current) setSettingsDraft(normalizedSettings);
     } catch (e) {
       setMsg({ text: t('msg.errAdmin', { error: e.message }), isError: true });
     }
@@ -276,6 +304,22 @@ export default function AdminDashboard({
       () => updateSchedule(dailyTimeToCron(scheduleTime), scheduleTimezone),
       t('msg.scheduleUpdated')
     );
+  }
+
+  function updateSettingsDraft(field, value) {
+    settingsDirtyRef.current = true;
+    setSettingsDirty(true);
+    setSettingsDraft(prev => ({ ...prev, [field]: value }));
+  }
+
+  async function saveAppSettings(e) {
+    e.preventDefault();
+    await runAction(
+      () => updateAppSettings(settingsDraft),
+      t('msg.settingsUpdated')
+    );
+    settingsDirtyRef.current = false;
+    setSettingsDirty(false);
   }
 
   const channelCount = channels.length;
@@ -489,6 +533,140 @@ export default function AdminDashboard({
             </select>
           </label>
           <button type="submit" disabled={busy}>{t('btn.save')}</button>
+        </form>
+      </section>
+
+      <section className="admin-section">
+        <div className="admin-section-header">
+          <div>
+            <h3>{t('header.setup')}</h3>
+            <span>
+              {appSettings.ai_notes_auto ? t('label.aiAutoOn') : t('label.aiManualOnly')}
+              {' · '}
+              {appSettings.ollama_chat_model}
+            </span>
+          </div>
+        </div>
+        <form className="settings-form" onSubmit={saveAppSettings}>
+          <label>
+            {t('label.ollamaBaseUrl')}
+            <input
+              value={settingsDraft.ollama_base_url}
+              onChange={e => updateSettingsDraft('ollama_base_url', e.target.value)}
+              placeholder="http://host.docker.internal:11434"
+            />
+          </label>
+          <label>
+            {t('label.ollamaModel')}
+            <input
+              value={settingsDraft.ollama_chat_model}
+              onChange={e => updateSettingsDraft('ollama_chat_model', e.target.value)}
+              placeholder="gemma4:31b-mlx-bf16"
+            />
+          </label>
+          <label>
+            {t('label.ollamaTimeout')}
+            <input
+              type="number"
+              min="30"
+              value={settingsDraft.ollama_timeout}
+              onChange={e => updateSettingsDraft('ollama_timeout', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiMaxChars')}
+            <input
+              type="number"
+              min="1000"
+              step="1000"
+              value={settingsDraft.ai_notes_max_chars}
+              onChange={e => updateSettingsDraft('ai_notes_max_chars', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiBatchLimit')}
+            <input
+              type="number"
+              min="1"
+              value={settingsDraft.ai_notes_batch_limit}
+              onChange={e => updateSettingsDraft('ai_notes_batch_limit', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiMaxBatchLimit')}
+            <input
+              type="number"
+              min="1"
+              value={settingsDraft.ai_notes_max_batch_limit}
+              onChange={e => updateSettingsDraft('ai_notes_max_batch_limit', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiBackfillYear')}
+            <input
+              type="number"
+              min="2005"
+              value={settingsDraft.ai_notes_year_backfill_year}
+              onChange={e => updateSettingsDraft('ai_notes_year_backfill_year', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiBackfillBatch')}
+            <input
+              type="number"
+              min="1"
+              value={settingsDraft.ai_notes_year_backfill_batch_limit}
+              onChange={e => updateSettingsDraft('ai_notes_year_backfill_batch_limit', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiBackfillTarget')}
+            <input
+              type="number"
+              min="1"
+              value={settingsDraft.ai_notes_year_backfill_target_active}
+              onChange={e => updateSettingsDraft('ai_notes_year_backfill_target_active', Number(e.target.value))}
+            />
+          </label>
+          <label>
+            {t('label.aiBackfillInterval')}
+            <input
+              type="number"
+              min="30"
+              value={settingsDraft.ai_notes_year_backfill_interval_seconds}
+              onChange={e => updateSettingsDraft('ai_notes_year_backfill_interval_seconds', Number(e.target.value))}
+            />
+          </label>
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={settingsDraft.ai_notes_auto}
+              onChange={e => updateSettingsDraft('ai_notes_auto', e.target.checked)}
+            />
+            {t('label.aiAutoAfterTranscript')}
+          </label>
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={settingsDraft.ai_notes_year_backfill_enabled}
+              onChange={e => updateSettingsDraft('ai_notes_year_backfill_enabled', e.target.checked)}
+            />
+            {t('label.aiYearBackfill')}
+          </label>
+          <div className="settings-actions">
+            <button type="submit" disabled={busy || !settingsDirty}>{t('btn.save')}</button>
+            <button
+              type="button"
+              disabled={busy || !settingsDirty}
+              onClick={() => {
+                settingsDirtyRef.current = false;
+                setSettingsDirty(false);
+                setSettingsDraft(appSettings);
+              }}
+            >
+              {t('btn.cancel')}
+            </button>
+          </div>
         </form>
       </section>
 

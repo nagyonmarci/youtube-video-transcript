@@ -16,6 +16,23 @@ AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
 
 
+def configure_ai_notes(
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    max_chars: Optional[int] = None,
+    timeout: Optional[int] = None,
+) -> None:
+    global OLLAMA_BASE_URL, OLLAMA_CHAT_MODEL, AI_NOTES_MAX_CHARS, OLLAMA_TIMEOUT
+    if base_url:
+        OLLAMA_BASE_URL = base_url.rstrip("/")
+    if model:
+        OLLAMA_CHAT_MODEL = model
+    if max_chars is not None:
+        AI_NOTES_MAX_CHARS = max(1000, int(max_chars))
+    if timeout is not None:
+        OLLAMA_TIMEOUT = max(30, int(timeout))
+
+
 def compact_transcript(video: dict) -> str:
     transcript = video.get("transcript_timed") or video.get("transcript") or ""
     transcript = re.sub(r"\n{3,}", "\n\n", transcript.strip())

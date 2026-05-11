@@ -28,9 +28,12 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
   ));
   useEffect(() => {
     setDrafts(prev => {
-      const next = { ...prev };
+      const next = {};
       channels.forEach(ch => {
-        if (!next[ch.id]) next[ch.id] = editableChannel(ch);
+        next[ch.id] = {
+          ...editableChannel(ch),
+          ...(prev[ch.id] || {}),
+        };
       });
       return next;
     });
@@ -67,7 +70,10 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
   async function handleSave(ch) {
     setBusyId(ch.id);
     try {
-      const draft = drafts[ch.id] || editableChannel(ch);
+      const draft = {
+        ...editableChannel(ch),
+        ...(drafts[ch.id] || {}),
+      };
       await updateChannel(ch.id, {
         name: draft.name.trim(),
         channel_url: draft.channel_url.trim(),

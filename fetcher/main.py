@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 import asyncpg
 
-from ai_notes import generate_ai_notes
+from ai_notes import configure_ai_notes, generate_ai_notes
 from directus_client import DirectusClient
 from youtube_fetcher import (
     fetch_channel_videos,
@@ -70,15 +70,19 @@ POSTGRES_USER = os.environ.get("POSTGRES_USER", "directus")
 POSTGRES_PASSWORD = required_env("POSTGRES_PASSWORD")
 REFRESH_CRON = os.environ.get("REFRESH_CRON", "0 7 * * *")
 SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
-AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "true").lower() in {"1", "true", "yes", "on"}
+AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "false").lower() in {"1", "true", "yes", "on"}
 AI_NOTES_BATCH_LIMIT = int(os.environ.get("AI_NOTES_BATCH_LIMIT", "10"))
 AI_NOTES_MAX_BATCH_LIMIT = int(os.environ.get("AI_NOTES_MAX_BATCH_LIMIT", "20000"))
-AI_NOTES_YEAR_BACKFILL_ENABLED = os.environ.get("AI_NOTES_YEAR_BACKFILL_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+AI_NOTES_YEAR_BACKFILL_ENABLED = os.environ.get("AI_NOTES_YEAR_BACKFILL_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 AI_NOTES_YEAR_BACKFILL_YEAR = int(os.environ.get("AI_NOTES_YEAR_BACKFILL_YEAR", "2026"))
 AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT", "50")))
 AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE", "100")))
 AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = max(30, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS", "300")))
 AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = max(10, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS", "60")))
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
+OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
+AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
+OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
 FETCHER_ROLE = os.environ.get("FETCHER_ROLE", "all").lower()
 WORKER_QUEUES = {item.strip() for item in os.environ.get("WORKER_QUEUES", "fetch,ai").split(",") if item.strip()}
 FETCH_WORKER_CONCURRENCY = max(0, int(os.environ.get("FETCH_WORKER_CONCURRENCY", "1")))
@@ -105,6 +109,7 @@ current_job_id_var: ContextVar[Optional[str]] = ContextVar("current_job_id", def
 current_job_queue_var: ContextVar[Optional[str]] = ContextVar("current_job_queue", default=None)
 current_task_info_var: ContextVar[dict] = ContextVar("current_task_info", default={})
 last_ai_year_backfill_attempt = 0.0
+last_runtime_settings_load = 0.0
 AI_NOTE_GENERATED_FIELDS = {
     "summary",
     "topics",
@@ -135,6 +140,67 @@ def validate_schedule(cron: str, timezone_name: str):
     return cron_parts
 
 
+def bool_setting(value) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def int_setting(value, default: int, minimum: int = 0, maximum: Optional[int] = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def current_app_settings() -> dict:
+    return {
+        "ollama_base_url": OLLAMA_BASE_URL,
+        "ollama_chat_model": OLLAMA_CHAT_MODEL,
+        "ollama_timeout": OLLAMA_TIMEOUT,
+        "ai_notes_max_chars": AI_NOTES_MAX_CHARS,
+        "ai_notes_auto": AI_NOTES_AUTO,
+        "ai_notes_batch_limit": AI_NOTES_BATCH_LIMIT,
+        "ai_notes_max_batch_limit": AI_NOTES_MAX_BATCH_LIMIT,
+        "ai_notes_year_backfill_enabled": AI_NOTES_YEAR_BACKFILL_ENABLED,
+        "ai_notes_year_backfill_year": AI_NOTES_YEAR_BACKFILL_YEAR,
+        "ai_notes_year_backfill_batch_limit": AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+        "ai_notes_year_backfill_target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+        "ai_notes_year_backfill_interval_seconds": AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
+        "ai_notes_year_backfill_idle_seconds": AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS,
+    }
+
+
+def apply_app_settings(settings: dict) -> None:
+    global OLLAMA_BASE_URL, OLLAMA_CHAT_MODEL, OLLAMA_TIMEOUT, AI_NOTES_MAX_CHARS
+    global AI_NOTES_AUTO, AI_NOTES_BATCH_LIMIT, AI_NOTES_MAX_BATCH_LIMIT
+    global AI_NOTES_YEAR_BACKFILL_ENABLED, AI_NOTES_YEAR_BACKFILL_YEAR
+    global AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE
+    global AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS
+
+    OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
+    OLLAMA_CHAT_MODEL = str(settings.get("ollama_chat_model") or OLLAMA_CHAT_MODEL).strip()
+    OLLAMA_TIMEOUT = int_setting(settings.get("ollama_timeout"), OLLAMA_TIMEOUT, 30)
+    AI_NOTES_MAX_CHARS = int_setting(settings.get("ai_notes_max_chars"), AI_NOTES_MAX_CHARS, 1000)
+    AI_NOTES_AUTO = bool_setting(settings.get("ai_notes_auto", AI_NOTES_AUTO))
+    AI_NOTES_BATCH_LIMIT = int_setting(settings.get("ai_notes_batch_limit"), AI_NOTES_BATCH_LIMIT, 1)
+    AI_NOTES_MAX_BATCH_LIMIT = int_setting(settings.get("ai_notes_max_batch_limit"), AI_NOTES_MAX_BATCH_LIMIT, 1)
+    AI_NOTES_YEAR_BACKFILL_ENABLED = bool_setting(settings.get("ai_notes_year_backfill_enabled", AI_NOTES_YEAR_BACKFILL_ENABLED))
+    AI_NOTES_YEAR_BACKFILL_YEAR = int_setting(settings.get("ai_notes_year_backfill_year"), AI_NOTES_YEAR_BACKFILL_YEAR, 2005)
+    AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = int_setting(settings.get("ai_notes_year_backfill_batch_limit"), AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, 1)
+    AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = int_setting(settings.get("ai_notes_year_backfill_target_active"), AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE, 1)
+    AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = int_setting(settings.get("ai_notes_year_backfill_interval_seconds"), AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, 30)
+    AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = int_setting(settings.get("ai_notes_year_backfill_idle_seconds"), AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS, 10)
+    configure_ai_notes(
+        base_url=OLLAMA_BASE_URL,
+        model=OLLAMA_CHAT_MODEL,
+        max_chars=AI_NOTES_MAX_CHARS,
+        timeout=OLLAMA_TIMEOUT,
+    )
+
+
 async def load_schedule_settings():
     global REFRESH_CRON, SCHEDULER_TIMEZONE
     try:
@@ -152,6 +218,26 @@ async def load_schedule_settings():
 async def save_schedule_settings(cron: str, timezone_name: str):
     await directus.set_setting("refresh_cron", cron)
     await directus.set_setting("scheduler_timezone", timezone_name)
+
+
+async def load_app_settings():
+    global last_runtime_settings_load
+    settings = current_app_settings()
+    try:
+        stored = {}
+        for key in settings.keys():
+            value = await directus.get_setting(key)
+            if value is not None:
+                stored[key] = value
+        apply_app_settings({**settings, **stored})
+        last_runtime_settings_load = time.monotonic()
+    except Exception as e:
+        logger.warning(f"Could not load app settings, using current values: {e}")
+
+
+async def refresh_app_settings_if_due(max_age_seconds: int = 30, force: bool = False):
+    if force or time.monotonic() - last_runtime_settings_load >= max_age_seconds:
+        await load_app_settings()
 
 
 async def get_pg_pool() -> asyncpg.Pool:
@@ -461,6 +547,7 @@ async def worker_loop(worker_name: str = "fetch-worker"):
             await asyncio.sleep(1)
             continue
 
+        await refresh_app_settings_if_due(force=True)
         task = job.get("payload") or {}
         task_type = task.get("type")
         current_job_id = job["id"]
@@ -524,10 +611,12 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             continue
 
         if not job:
+            await refresh_app_settings_if_due()
             await maybe_enqueue_ai_year_backfill(source=worker_name)
             await asyncio.sleep(1)
             continue
 
+        await refresh_app_settings_if_due(force=True)
         task = job.get("payload") or {}
         task_type = task.get("type")
         current_ai_job_id = job["id"]
@@ -1294,6 +1383,7 @@ async def bootstrap_runtime(cleanup_pending: bool = True):
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
     await load_schedule_settings()
+    await load_app_settings()
 
 
 def create_worker_tasks() -> list[asyncio.Task]:
@@ -1393,8 +1483,24 @@ class ScheduleRequest(BaseModel):
     timezone: str
 
 
+class AppSettingsRequest(BaseModel):
+    ollama_base_url: Optional[str] = None
+    ollama_chat_model: Optional[str] = None
+    ollama_timeout: Optional[int] = None
+    ai_notes_max_chars: Optional[int] = None
+    ai_notes_auto: Optional[bool] = None
+    ai_notes_batch_limit: Optional[int] = None
+    ai_notes_max_batch_limit: Optional[int] = None
+    ai_notes_year_backfill_enabled: Optional[bool] = None
+    ai_notes_year_backfill_year: Optional[int] = None
+    ai_notes_year_backfill_batch_limit: Optional[int] = None
+    ai_notes_year_backfill_target_active: Optional[int] = None
+    ai_notes_year_backfill_interval_seconds: Optional[int] = None
+    ai_notes_year_backfill_idle_seconds: Optional[int] = None
+
+
 class AiNotesRequest(BaseModel):
-    limit: int = AI_NOTES_BATCH_LIMIT
+    limit: Optional[int] = None
 
 
 class ChannelAiNotesRequest(BaseModel):
@@ -1520,14 +1626,15 @@ async def ui_videos(
 
 
 @app.get("/ui/videos/daily")
-async def ui_daily_videos(date: str, tz: str = "UTC"):
+async def ui_daily_videos(date: str, tz: str = "Europe/Budapest"):
     try:
         local_tz = ZoneInfo(tz)
     except (ZoneInfoNotFoundError, KeyError):
         local_tz = timezone.utc
     year, month, day = (int(x) for x in date.split("-"))
-    start = datetime(year, month, day, tzinfo=local_tz).astimezone(timezone.utc)
-    end = start + timedelta(days=1)
+    local_start = datetime(year, month, day, tzinfo=local_tz)
+    start = local_start.astimezone(timezone.utc)
+    end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
     params = {
         "filter[uploaded_at][_gte]": start.isoformat(),
         "filter[uploaded_at][_lt]": end.isoformat(),
@@ -1546,9 +1653,10 @@ async def ui_video_count():
 
 @app.get("/ui/admin-stats")
 async def ui_admin_stats():
-    today = datetime.now(timezone.utc)
-    start = today.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
+    local_tz = get_scheduler_timezone()
+    local_start = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = local_start.astimezone(timezone.utc)
+    end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
     total, today_count, errors, missing_transcripts, missing_ai = await asyncio.gather(
         count_ui_videos(),
         count_ui_videos({
@@ -1847,6 +1955,23 @@ async def update_schedule(request: ScheduleRequest):
     start_refresh_scheduler()
     await save_schedule_settings(cron, timezone_name)
     return {"cron": REFRESH_CRON, "timezone": SCHEDULER_TIMEZONE}
+
+
+@app.get("/settings")
+async def get_settings():
+    return current_app_settings()
+
+
+@app.patch("/settings")
+async def update_settings(request: AppSettingsRequest):
+    updates = request.model_dump(exclude_unset=True)
+    next_settings = {**current_app_settings(), **updates}
+    apply_app_settings(next_settings)
+    for key, value in current_app_settings().items():
+        await directus.set_setting(key, str(value).lower() if isinstance(value, bool) else str(value))
+    if FETCHER_ROLE in {"api", "all"}:
+        start_refresh_scheduler()
+    return current_app_settings()
 
 
 @app.post("/fetch-channels")

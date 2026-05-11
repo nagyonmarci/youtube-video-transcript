@@ -63,6 +63,7 @@ export default function VideoTable({
   const [exportMenuId, setExportMenuId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [actionMsg, setActionMsg] = useState(null);
   const debounceRef = useRef(null);
   const loadMoreRef = useRef(null);
 
@@ -81,6 +82,10 @@ export default function VideoTable({
   };
 
   useEffect(() => { setSelectedIds(new Set()); }, [search, statusFilter, aiFilter, membersFilter, sort, selectedChannel?.id]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -101,6 +106,11 @@ export default function VideoTable({
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
   }, [exportMenuId]);
+
+  function showActionMsg(text, isError = false) {
+    setActionMsg({ text, isError });
+    setTimeout(() => setActionMsg(null), 5000);
+  }
 
   const allSelected = videos.length > 0 && videos.every(v => selectedIds.has(v.id));
   const someSelected = selectedIds.size > 0;
@@ -128,7 +138,11 @@ export default function VideoTable({
     try {
       const errors = await bulkGenerateAiNotes(selectedVideos.filter(v => v.transcript));
       await onVideosChanged?.();
-      if (errors.length) alert(t('msg.bulkAiErrors', { count: errors.length, titles: errors.slice(0, 3).join(', ') }));
+      if (errors.length) {
+        showActionMsg(t('msg.bulkAiErrors', { count: errors.length, titles: errors.slice(0, 3).join(', ') }), true);
+      } else {
+        showActionMsg(t('msg.aiQueued', { count: selectedVideos.filter(v => v.transcript).length }));
+      }
     } finally {
       setBulkBusy(false);
     }
@@ -141,7 +155,11 @@ export default function VideoTable({
     try {
       const errors = await bulkDeleteAiNotes(selectedVideos);
       await onVideosChanged?.();
-      if (errors.length) alert(t('msg.bulkDeleteErrors', { count: errors.length, titles: errors.slice(0, 3).join(', ') }));
+      if (errors.length) {
+        showActionMsg(t('msg.bulkDeleteErrors', { count: errors.length, titles: errors.slice(0, 3).join(', ') }), true);
+      } else {
+        showActionMsg(t('msg.saved'));
+      }
     } finally {
       setBulkBusy(false);
     }
@@ -191,9 +209,10 @@ export default function VideoTable({
     setAiBusyId(video.id);
     try {
       await generateAiNoteForVideo(video.id);
+      showActionMsg(t('msg.aiQueued', { count: 1 }));
       await onVideosChanged?.();
     } catch (err) {
-      alert(t('msg.errAi', { error: err.message }));
+      showActionMsg(t('msg.errAi', { error: err.message }), true);
     } finally {
       setAiBusyId(null);
     }
@@ -263,6 +282,12 @@ export default function VideoTable({
           </select>
         </div>
       </div>
+
+      {actionMsg && (
+        <div className={`status-msg ${actionMsg.isError ? 'status-error' : 'status-success'}`}>
+          {actionMsg.text}
+        </div>
+      )}
 
       {loading ? (
         <div className="video-empty">{t('state.loading')}</div>
@@ -362,7 +387,7 @@ export default function VideoTable({
                         )}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                        <div className="video-row-actions">
                           {video.transcript && (
                             <button
                               className="btn-sm"
