@@ -1,9 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { getStatus, stopProcessing, getWhisperStatus, startWhisperBatch, stopWhisper } from './fetcher.js';
-
-function keepIfSame(prev, next) {
-  return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
-}
+import { keepIfSame } from './dataUtils.js';
 
 export function useAppStatus(tRef) {
   const [fetcherStatus, setFetcherStatus] = useState(null);
