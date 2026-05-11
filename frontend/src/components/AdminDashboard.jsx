@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getAdminStats, getChannelCoverage, getMonthlyVideoCounts, getErrorVideos } from '../lib/directus.js';
+import { getAdminStats, getChannelCoverage, getMonthlyVideoCounts } from '../lib/directus.js';
 import {
   deleteJob,
   generateAiNotes,
@@ -21,6 +21,9 @@ import {
 } from '../lib/fetcher.js';
 import ChannelAdminPanel from './ChannelAdminPanel.jsx';
 import TopActions from './TopActions.jsx';
+import ScheduleForm from './ScheduleForm.jsx';
+import SettingsForm from './SettingsForm.jsx';
+import StatisticsPanel from './StatisticsPanel.jsx';
 import { useT } from '../lib/i18n.jsx';
 import { keepIfSame } from '../lib/dataUtils.js';
 import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
@@ -378,8 +381,6 @@ export default function AdminDashboard({
   const [stats, setStats] = useState(null);
   const [coverage, setCoverage] = useState(null);
   const [monthlyData, setMonthlyData] = useState([]);
-  const [errorVideos, setErrorVideos] = useState(null);
-  const [showErrorVideos, setShowErrorVideos] = useState(false);
   const [scheduleCron, setScheduleCron] = useState(DEFAULT_CRON);
   const [scheduleTime, setScheduleTime] = useState(DEFAULT_CRON_TIME);
   const [scheduleTimezone, setScheduleTimezone] = useState(DEFAULT_TIMEZONE);
@@ -565,111 +566,12 @@ export default function AdminDashboard({
         </div>
       </div>
 
-      <section className="admin-section">
-        <div className="admin-section-header">
-          <h3>{t('header.statistics')}</h3>
-        </div>
-
-        {monthlyData.length > 0 && (() => {
-          const max = Math.max(...monthlyData.map(d => d.count), 1);
-          return (
-            <div style={{ marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text2)', marginBottom: '0.4rem' }}>{t('metric.monthlyChart')}</div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: '80px' }}>
-                {monthlyData.map(({ month, count }) => (
-                  <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', height: '100%', justifyContent: 'flex-end' }} title={`${month}: ${count}`}>
-                    <div style={{ width: '100%', background: 'rgba(100,181,246,0.7)', borderRadius: '3px 3px 0 0', height: `${Math.max(2, Math.round((count / max) * 72))}px` }} />
-                    <span style={{ fontSize: '0.6rem', color: 'var(--text2)', transform: 'rotate(-45deg)', transformOrigin: 'top right', whiteSpace: 'nowrap', marginTop: '2px' }}>
-                      {month.slice(5)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-
-        {coverage && channels.length > 0 && (
-          <div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text2)', marginBottom: '0.4rem' }}>{t('header.coverage')}</div>
-            <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', background: 'var(--bg2)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{t('label.channel')}</th>
-                    <th style={{ textAlign: 'right', padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '60px' }}>{t('label.videos')}</th>
-                    <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '160px' }}>{t('label.transcript')}</th>
-                    <th style={{ padding: '0.4rem 0.6rem', color: 'var(--text2)', borderBottom: '1px solid var(--border)', fontWeight: 600, width: '160px' }}>{t('label.aiNote')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {channels.map((ch, i) => {
-                    const total = coverage.totalMap.get(ch.id) || ch.video_count || 0;
-                    const tr = coverage.transcriptMap.get(ch.id) || 0;
-                    const ai = coverage.aiMap.get(ch.id) || 0;
-                    const trPct = total ? Math.round((tr / total) * 100) : 0;
-                    const aiPct = total ? Math.round((ai / total) * 100) : 0;
-                    return (
-                      <tr key={ch.id} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
-                        <td style={{ padding: '0.35rem 0.6rem' }}>{ch.name || ch.channel_handle}</td>
-                        <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', color: 'var(--text2)' }}>{total}</td>
-                        <td style={{ padding: '0.35rem 0.6rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <div style={{ flex: 1, height: '6px', background: 'var(--bg3)', borderRadius: '3px', overflow: 'hidden' }}>
-                              <div style={{ width: `${trPct}%`, height: '100%', background: trPct === 100 ? '#4caf50' : 'rgba(100,181,246,0.8)', borderRadius: '3px' }} />
-                            </div>
-                            <span style={{ fontSize: '0.72rem', color: 'var(--text2)', width: '32px', textAlign: 'right' }}>{trPct}%</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: '0.35rem 0.6rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <div style={{ flex: 1, height: '6px', background: 'var(--bg3)', borderRadius: '3px', overflow: 'hidden' }}>
-                              <div style={{ width: `${aiPct}%`, height: '100%', background: aiPct === 100 ? '#4caf50' : 'rgba(156,39,176,0.7)', borderRadius: '3px' }} />
-                            </div>
-                            <span style={{ fontSize: '0.72rem', color: 'var(--text2)', width: '32px', textAlign: 'right' }}>{aiPct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {(stats?.errorVideos > 0) && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <button
-              style={{ fontSize: '0.8rem' }}
-              onClick={async () => {
-                if (!showErrorVideos) {
-                  const list = await getErrorVideos();
-                  setErrorVideos(list);
-                }
-                setShowErrorVideos(v => !v);
-              }}
-            >
-              {showErrorVideos ? t('label.hideErrors') : t('label.showErrors', { count: stats.errorVideos })}
-            </button>
-            {showErrorVideos && errorVideos && (
-              <div style={{ marginTop: '0.5rem', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', background: 'var(--bg2)' }}>
-                {errorVideos.map(v => (
-                  <div key={v.id} style={{ padding: '0.4rem 0.7rem', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '0.82rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <span style={{ color: 'var(--text2)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
-                      {v.channel_id?.name || v.channel_id?.channel_handle || '—'}
-                    </span>
-                    <a href={v.url} target="_blank" rel="noopener noreferrer" style={{ color: '#f88', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {v.title || v.video_id}
-                    </a>
-                  </div>
-                ))}
-                {errorVideos.length === 0 && <div style={{ padding: '0.5rem 0.7rem', color: 'var(--text2)', fontSize: '0.82rem' }}>{t('state.noErrorVideos')}</div>}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+      <StatisticsPanel
+        stats={stats}
+        coverage={coverage}
+        channels={channels}
+        monthlyData={monthlyData}
+      />
 
       <section className="admin-section">
         <div className="admin-section-header">
@@ -775,181 +677,29 @@ export default function AdminDashboard({
         <JobQueuePanel jobs={jobs} busy={busy} onAction={runJobAction} />
       </section>
 
-      <section className="admin-section">
-        <div className="admin-section-header">
-          <h3>{t('header.schedule')}</h3>
-          <span>{scheduleCron} · {scheduleTimezone}</span>
-        </div>
-        <form className="schedule-form" onSubmit={saveSchedule}>
-          <label>
-            {t('label.dailyRefresh')}
-            <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} />
-          </label>
-          <label>
-            {t('label.timezone')}
-            <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
-              <option value="Europe/Budapest">Europe/Budapest</option>
-              <option value="UTC">UTC</option>
-              <option value="Europe/London">Europe/London</option>
-              <option value="Europe/Berlin">Europe/Berlin</option>
-              <option value="America/New_York">America/New_York</option>
-            </select>
-          </label>
-          <button type="submit" disabled={busy}>{t('btn.save')}</button>
-        </form>
-      </section>
+      <ScheduleForm
+        scheduleCron={scheduleCron}
+        scheduleTime={scheduleTime}
+        scheduleTimezone={scheduleTimezone}
+        busy={busy}
+        onTimeChange={setScheduleTime}
+        onTimezoneChange={setScheduleTimezone}
+        onSubmit={saveSchedule}
+      />
 
-      <section className="admin-section">
-        <div className="admin-section-header">
-          <div>
-            <h3>{t('header.setup')}</h3>
-            <span>
-              {appSettings.ai_notes_auto ? t('label.aiAutoOn') : t('label.aiManualOnly')}
-              {' · '}
-              {appSettings.ollama_chat_model}
-            </span>
-          </div>
-        </div>
-        <form className="settings-form" onSubmit={saveAppSettings}>
-          <label>
-            {t('label.ollamaBaseUrl')}
-            <input
-              value={settingsDraft.ollama_base_url}
-              onChange={e => updateSettingsDraft('ollama_base_url', e.target.value)}
-              placeholder="http://host.docker.internal:11434"
-            />
-          </label>
-          <label>
-            {t('label.ollamaModel')}
-            <input
-              value={settingsDraft.ollama_chat_model}
-              onChange={e => updateSettingsDraft('ollama_chat_model', e.target.value)}
-              placeholder="gemma4:31b-mlx-bf16"
-            />
-          </label>
-          <label>
-            {t('label.ollamaTimeout')}
-            <input
-              type="number"
-              min="30"
-              value={settingsDraft.ollama_timeout}
-              onChange={e => updateSettingsDraft('ollama_timeout', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiMaxChars')}
-            <input
-              type="number"
-              min="1000"
-              step="1000"
-              value={settingsDraft.ai_notes_max_chars}
-              onChange={e => updateSettingsDraft('ai_notes_max_chars', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiBatchLimit')}
-            <input
-              type="number"
-              min="1"
-              value={settingsDraft.ai_notes_batch_limit}
-              onChange={e => updateSettingsDraft('ai_notes_batch_limit', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiMaxBatchLimit')}
-            <input
-              type="number"
-              min="1"
-              value={settingsDraft.ai_notes_max_batch_limit}
-              onChange={e => updateSettingsDraft('ai_notes_max_batch_limit', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiBackfillYear')}
-            <input
-              type="number"
-              min="2005"
-              value={settingsDraft.ai_notes_year_backfill_year}
-              onChange={e => updateSettingsDraft('ai_notes_year_backfill_year', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiBackfillBatch')}
-            <input
-              type="number"
-              min="1"
-              value={settingsDraft.ai_notes_year_backfill_batch_limit}
-              onChange={e => updateSettingsDraft('ai_notes_year_backfill_batch_limit', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiBackfillTarget')}
-            <input
-              type="number"
-              min="1"
-              value={settingsDraft.ai_notes_year_backfill_target_active}
-              onChange={e => updateSettingsDraft('ai_notes_year_backfill_target_active', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiBackfillInterval')}
-            <input
-              type="number"
-              min="30"
-              value={settingsDraft.ai_notes_year_backfill_interval_seconds}
-              onChange={e => updateSettingsDraft('ai_notes_year_backfill_interval_seconds', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            {t('label.aiJobCooldown')}
-            <input
-              type="number"
-              min="0"
-              max="3600"
-              value={settingsDraft.ai_notes_job_cooldown_seconds}
-              onChange={e => updateSettingsDraft('ai_notes_job_cooldown_seconds', Number(e.target.value))}
-            />
-          </label>
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={settingsDraft.ai_notes_worker_enabled}
-              onChange={e => updateSettingsDraft('ai_notes_worker_enabled', e.target.checked)}
-            />
-            {t('label.aiWorkerEnabled')}
-          </label>
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={settingsDraft.ai_notes_auto}
-              onChange={e => updateSettingsDraft('ai_notes_auto', e.target.checked)}
-            />
-            {t('label.aiAutoAfterTranscript')}
-          </label>
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={settingsDraft.ai_notes_year_backfill_enabled}
-              onChange={e => updateSettingsDraft('ai_notes_year_backfill_enabled', e.target.checked)}
-            />
-            {t('label.aiYearBackfill')}
-          </label>
-          <div className="settings-actions">
-            <button type="submit" disabled={busy || !settingsDirty}>{t('btn.save')}</button>
-            <button
-              type="button"
-              disabled={busy || !settingsDirty}
-              onClick={() => {
-                settingsDirtyRef.current = false;
-                setSettingsDirty(false);
-                setSettingsDraft(appSettings);
-              }}
-            >
-              {t('btn.cancel')}
-            </button>
-          </div>
-        </form>
-      </section>
+      <SettingsForm
+        appSettings={appSettings}
+        settingsDraft={settingsDraft}
+        settingsDirty={settingsDirty}
+        busy={busy}
+        onChange={updateSettingsDraft}
+        onSubmit={saveAppSettings}
+        onCancel={() => {
+          settingsDirtyRef.current = false;
+          setSettingsDirty(false);
+          setSettingsDraft(appSettings);
+        }}
+      />
 
       <section className="admin-section">
         <div className="admin-section-header">
