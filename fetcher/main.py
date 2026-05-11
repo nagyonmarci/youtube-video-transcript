@@ -745,6 +745,10 @@ async def ensure_database_indexes():
 
 # ---- Worker ----
 
+FETCH_HANDLERS: dict = {}  # populated after handler functions are defined
+AI_HANDLERS: dict = {}
+
+
 async def worker_loop(worker_name: str = "fetch-worker"):
     """Main background worker that processes queued tasks."""
     global stop_flag, current_task_info, current_job_id
@@ -777,18 +781,10 @@ async def worker_loop(worker_name: str = "fetch-worker"):
         task_info_token = current_task_info_var.set(current_task_info)
         heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
-            if task_type == "channel":
-                await process_channel_task(task)
-            elif task_type == "video":
-                await process_single_video_task(task)
-            elif task_type == "refresh":
-                await process_refresh_task(task)
-            elif task_type == "refresh_dates":
-                await process_refresh_dates_task()
-            elif task_type == "refresh_thumbnails":
-                await process_refresh_thumbnails_task()
-            else:
+            handler = FETCH_HANDLERS.get(task_type)
+            if not handler:
                 raise ValueError(f"Unknown fetch job type: {task_type}")
+            await handler(task)
             latest = await directus.get_job(job["id"])
             if latest and latest.get("status") != "cancelled":
                 finished = datetime.now(timezone.utc)
@@ -856,12 +852,10 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
         task_info_token = current_task_info_var.set(current_ai_task_info)
         heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
-            if task_type == "ai_notes":
-                await process_ai_notes_task(task)
-            elif task_type == "ai_note_video":
-                await process_single_ai_note_task(task)
-            else:
+            handler = AI_HANDLERS.get(task_type)
+            if not handler:
                 raise ValueError(f"Unknown AI job type: {task_type}")
+            await handler(task)
             latest = await directus.get_job(job["id"])
             if latest and latest.get("status") != "cancelled":
                 finished = datetime.now(timezone.utc)
@@ -893,6 +887,113 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
                 await asyncio.sleep(AI_NOTES_JOB_COOLDOWN_SECONDS)
 
 
+async def _backfill_metadata(existing: dict, videos: list):
+    """Backfill lightweight metadata for already-stored videos from a fresh channel listing."""
+    by_video_id = {v["video_id"]: v for v in videos}
+    backfilled = 0
+    for yt_id, stored_video in existing.items():
+        channel_video = by_video_id.get(yt_id) or {}
+        update_data = {}
+        if not stored_video.get("uploaded_at") and channel_video.get("uploaded_at"):
+            update_data["uploaded_at"] = channel_video["uploaded_at"]
+        if not stored_video.get("thumbnail_url") and channel_video.get("thumbnail_url"):
+            update_data["thumbnail_url"] = channel_video["thumbnail_url"]
+        if channel_video and stored_video.get("is_members_only") != channel_video.get("is_members_only"):
+            update_data["is_members_only"] = bool(channel_video.get("is_members_only"))
+        if not update_data:
+            continue
+        try:
+            await directus.update_video(stored_video["id"], update_data)
+            backfilled += 1
+        except Exception as e:
+            logger.warning(f"Metadata backfill failed for {yt_id}: {e}")
+    if backfilled:
+        logger.info(f"Backfilled metadata for {backfilled} existing videos")
+
+
+async def _process_channel_transcripts(
+    transcript_videos: list,
+    existing: dict,
+    channel_url: str,
+    channel_id: Optional[str],
+    loop,
+):
+    """Fetch and store transcripts for new/incomplete channel videos. Errors per video are swallowed."""
+    global current_task_info
+    total = len(transcript_videos)
+    for i, video in enumerate(transcript_videos):
+        if stop_flag:
+            break
+
+        current_task_info = {
+            "type": "channel",
+            "url": channel_url,
+            "phase": f"transcript {i+1}/{total}",
+            "video": video.get("title", video["video_id"]),
+        }
+        await update_job_progress("fetch", i + 1, total, video.get("title") or video["video_id"])
+
+        try:
+            stored_video = existing.get(video["video_id"])
+            directus_video_id = stored_video.get("id") if stored_video else None
+
+            if not video.get("uploaded_at"):
+                info = await loop.run_in_executor(None, fetch_video_info, video["video_id"])
+                uploaded_at = parse_uploaded_at(info) if info else None
+                if info:
+                    video["is_members_only"] = is_members_only_video(info)
+                if uploaded_at:
+                    video["uploaded_at"] = uploaded_at
+                    if not video.get("duration_seconds") and info.get("duration"):
+                        video["duration_seconds"] = info.get("duration")
+                    if not video.get("thumbnail_url"):
+                        video["thumbnail_url"] = best_thumbnail_url(info)
+                    logger.info(f"Filled upload date for {video['video_id']}: {uploaded_at}")
+
+            if directus_video_id:
+                metadata_update = {
+                    field: video[field]
+                    for field in ("title", "url", "duration_seconds", "uploaded_at", "thumbnail_url", "is_members_only")
+                    if video.get(field) is not None
+                }
+                if metadata_update:
+                    await directus.update_video(directus_video_id, metadata_update)
+            else:
+                created = await directus.create_video({**video, "channel_id": channel_id, "status": "pending"})
+                directus_video_id = created.get("id")
+
+            if i > 0:
+                await rate_limited_sleep_transcript()
+
+            transcript, transcript_timed = await loop.run_in_executor(
+                None, fetch_transcript_variants, video["video_id"]
+            )
+            if directus_video_id:
+                await directus.update_video(directus_video_id, {
+                    "processed_at": now_iso(),
+                    "status": "done" if transcript else "no_transcript",
+                    "transcript": transcript or "",
+                    "transcript_timed": transcript_timed or "",
+                })
+                if transcript and AI_NOTES_AUTO:
+                    try:
+                        await enqueue_ai_note(directus_video_id)
+                    except Exception as e:
+                        logger.warning(f"AI note enqueue failed for {video['video_id']}: {e}")
+
+            logger.info(f"Video {video['video_id']}: {'done' if transcript else 'no_transcript'}")
+        except Exception as e:
+            logger.error(f"Transcript processing failed for {video['video_id']}: {e}", exc_info=True)
+            if existing.get(video["video_id"]):
+                try:
+                    await directus.update_video(existing[video["video_id"]]["id"], {
+                        "status": "error",
+                        "processed_at": now_iso(),
+                    })
+                except Exception:
+                    pass
+
+
 async def process_channel_task(task: dict):
     """Process a channel: fetch video list + transcripts."""
     global current_task_info
@@ -900,13 +1001,10 @@ async def process_channel_task(task: dict):
     channel_id = task.get("channel_id")
 
     current_task_info = {"type": "channel", "url": channel_url, "phase": "fetching video list"}
-
-    # Update status
     if channel_id:
         await directus.update_channel(channel_id, {"status": "processing", "error_message": None})
 
     try:
-        # Fetch video list (blocking, run in thread)
         loop = asyncio.get_event_loop()
         videos = await loop.run_in_executor(None, fetch_channel_videos, channel_url)
 
@@ -918,7 +1016,6 @@ async def process_channel_task(task: dict):
                 })
             return
 
-        # Get existing video IDs to avoid duplicates
         existing = {}
         if channel_id:
             existing_videos = await directus.get_videos_by_channel(channel_id)
@@ -926,123 +1023,23 @@ async def process_channel_task(task: dict):
 
         new_videos = [v for v in videos if v["video_id"] not in existing]
         transcript_videos = [
-            video for video in videos
-            if video["video_id"] not in existing
-            or (existing.get(video["video_id"], {}).get("status") or "pending") != "done"
+            v for v in videos
+            if v["video_id"] not in existing
+            or (existing.get(v["video_id"], {}).get("status") or "pending") != "done"
         ]
-        retry_videos = len(transcript_videos) - len(new_videos)
         logger.info(
             f"Channel {channel_url}: {len(videos)} total, {len(new_videos)} new, "
-            f"{retry_videos} transcript retries"
+            f"{len(transcript_videos) - len(new_videos)} transcript retries"
         )
 
-        # Update video count
         if channel_id:
             await directus.update_channel(channel_id, {"video_count": len(videos)})
 
-        # Backfill lightweight metadata for already stored videos whenever the channel list has it.
-        # This keeps regular channel refreshes from leaving old rows permanently incomplete.
         if existing:
-            by_video_id = {video["video_id"]: video for video in videos}
-            backfilled = 0
-            for yt_id, stored_video in existing.items():
-                channel_video = by_video_id.get(yt_id) or {}
-                update_data = {}
-                if not stored_video.get("uploaded_at") and channel_video.get("uploaded_at"):
-                    update_data["uploaded_at"] = channel_video["uploaded_at"]
-                if not stored_video.get("thumbnail_url") and channel_video.get("thumbnail_url"):
-                    update_data["thumbnail_url"] = channel_video["thumbnail_url"]
-                if channel_video and stored_video.get("is_members_only") != channel_video.get("is_members_only"):
-                    update_data["is_members_only"] = bool(channel_video.get("is_members_only"))
-                if not update_data:
-                    continue
-                try:
-                    await directus.update_video(stored_video["id"], update_data)
-                    backfilled += 1
-                except Exception as e:
-                    logger.warning(f"Metadata backfill failed for {yt_id}: {e}")
-            if backfilled:
-                logger.info(f"Backfilled metadata for {backfilled} existing videos")
+            await _backfill_metadata(existing, videos)
 
-        # Process every new or previously incomplete transcript.
-        # Metadata, AI enqueue, or one broken video must not stop the rest of the channel.
-        for i, video in enumerate(transcript_videos):
-            if stop_flag:
-                break
+        await _process_channel_transcripts(transcript_videos, existing, channel_url, channel_id, loop)
 
-            current_task_info = {
-                "type": "channel",
-                "url": channel_url,
-                "phase": f"transcript {i+1}/{len(transcript_videos)}",
-                "video": video.get("title", video["video_id"]),
-            }
-            await update_job_progress("fetch", i + 1, len(transcript_videos), video.get("title") or video["video_id"])
-
-            try:
-                stored_video = existing.get(video["video_id"])
-                directus_video_id = stored_video.get("id") if stored_video else None
-
-                if not video.get("uploaded_at"):
-                    info = await loop.run_in_executor(None, fetch_video_info, video["video_id"])
-                    uploaded_at = parse_uploaded_at(info) if info else None
-                    if info:
-                        video["is_members_only"] = is_members_only_video(info)
-                    if uploaded_at:
-                        video["uploaded_at"] = uploaded_at
-                        if not video.get("duration_seconds") and info.get("duration"):
-                            video["duration_seconds"] = info.get("duration")
-                        if not video.get("thumbnail_url"):
-                            video["thumbnail_url"] = best_thumbnail_url(info)
-                        logger.info(f"Filled upload date for {video['video_id']}: {uploaded_at}")
-
-                if directus_video_id:
-                    metadata_update = {}
-                    for field in ("title", "url", "duration_seconds", "uploaded_at", "thumbnail_url", "is_members_only"):
-                        if video.get(field) is not None:
-                            metadata_update[field] = video[field]
-                    if metadata_update:
-                        await directus.update_video(directus_video_id, metadata_update)
-                else:
-                    video_record = {**video, "channel_id": channel_id, "status": "pending"}
-                    created = await directus.create_video(video_record)
-                    directus_video_id = created.get("id")
-
-                # Rate limit before fetching transcript (skip delay for first video)
-                if i > 0:
-                    await rate_limited_sleep_transcript()
-
-                transcript, transcript_timed = await loop.run_in_executor(
-                    None, fetch_transcript_variants, video["video_id"]
-                )
-
-                update_data = {
-                    "processed_at": now_iso(),
-                    "status": "done" if transcript else "no_transcript",
-                    "transcript": transcript or "",
-                    "transcript_timed": transcript_timed or "",
-                }
-                if directus_video_id:
-                    await directus.update_video(directus_video_id, update_data)
-                    if transcript and AI_NOTES_AUTO:
-                        try:
-                            await enqueue_ai_note(directus_video_id)
-                        except Exception as e:
-                            logger.warning(f"AI note enqueue failed for {video['video_id']}: {e}")
-
-                logger.info(f"Video {video['video_id']}: {'done' if transcript else 'no_transcript'}")
-            except Exception as e:
-                logger.error(f"Transcript processing failed for {video['video_id']}: {e}", exc_info=True)
-                if existing.get(video["video_id"]):
-                    try:
-                        await directus.update_video(existing[video["video_id"]]["id"], {
-                            "status": "error",
-                            "processed_at": now_iso(),
-                        })
-                    except Exception:
-                        pass
-                continue
-
-        # Mark channel done
         if channel_id:
             await directus.update_channel(channel_id, {
                 "status": "done",
@@ -1376,6 +1373,22 @@ async def enqueue_ai_note(video_id: str):
     await update_video_ai_status(video_id, "pending")
     task = {"type": "ai_note_video", "video_id": video_id}
     return await directus.create_job("ai", task, dedupe_key=job_dedupe_key("ai", task))
+
+
+def _init_handlers():
+    FETCH_HANDLERS.update({
+        "channel": process_channel_task,
+        "video": process_single_video_task,
+        "refresh": process_refresh_task,
+        "refresh_dates": lambda task: process_refresh_dates_task(),
+        "refresh_thumbnails": lambda task: process_refresh_thumbnails_task(),
+    })
+    AI_HANDLERS.update({
+        "ai_notes": process_ai_notes_task,
+        "ai_note_video": process_single_ai_note_task,
+    })
+
+_init_handlers()
 
 
 async def enqueue_fetch_job(task: dict, label: Optional[str] = None):
