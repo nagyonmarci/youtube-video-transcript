@@ -1,5 +1,6 @@
 """AI note generation for YouTube transcripts via Ollama."""
 
+import asyncio
 import json
 import logging
 import os
@@ -111,6 +112,11 @@ Transcript:
 """.strip()
 
 
+def _fmt_elapsed(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s}s" if m else f"{s}s"
+
+
 def ns_to_seconds(value: Any) -> Optional[float]:
     try:
         number = float(value or 0)
@@ -145,13 +151,11 @@ async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCal
         "format": "json",
     }
 
-    # Stream the response. read=None disables the per-chunk read timeout so
-    # large models that take >10 min to load or generate don't timeout.
-    # connect=30 still guards against an unreachable server.
-    chunks = []
-    final_chunk = {}
+    chunks: list[str] = []
+    _final: list[dict] = [{}]
+    _first_token_at: list[Optional[float]] = [None]
     stream_started = time.monotonic()
-    first_token_seconds = None
+
     if progress_callback:
         await progress_callback({
             "phase": "waiting_first_token",
@@ -159,33 +163,72 @@ async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCal
             "prompt_chars": len(prompt),
             "transcript_chars": len(transcript),
         })
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(None, connect=30)
-    ) as client:
-        async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                delta = chunk.get("message", {}).get("content", "")
-                if delta:
-                    if first_token_seconds is None:
-                        first_token_seconds = round(time.monotonic() - stream_started, 3)
-                        if progress_callback:
-                            await progress_callback({
-                                "phase": "generating",
-                                "progress_label": f"Ollama is generating JSON (first token after {first_token_seconds}s)",
-                                "first_token_seconds": first_token_seconds,
-                                "prompt_chars": len(prompt),
-                                "transcript_chars": len(transcript),
-                            })
-                    chunks.append(delta)
-                if chunk.get("done"):
-                    final_chunk = chunk
+
+    async def _stream() -> None:
+        # read=None: no per-chunk timeout so slow/large models don't get cut off mid-stream.
+        # connect=30: still guards against an unreachable server.
+        # The outer asyncio.wait_for provides the overall deadline via OLLAMA_TIMEOUT.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
+            async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = chunk.get("message", {}).get("content", "")
+                    if delta:
+                        if _first_token_at[0] is None:
+                            _first_token_at[0] = round(time.monotonic() - stream_started, 3)
+                        chunks.append(delta)
+                    if chunk.get("done"):
+                        _final[0] = chunk
+
+    async def _progress_ticker() -> None:
+        while True:
+            await asyncio.sleep(10)
+            if not progress_callback:
+                continue
+            elapsed = time.monotonic() - stream_started
+            label = _fmt_elapsed(elapsed)
+            if _first_token_at[0] is None:
+                await progress_callback({
+                    "phase": "waiting_first_token",
+                    "progress_label": f"Waiting for Ollama first token ({label} elapsed)",
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+            else:
+                output_chars = sum(len(c) for c in chunks)
+                await progress_callback({
+                    "phase": "generating",
+                    "progress_label": f"Generating... ({label} elapsed, {output_chars} chars)",
+                    "first_token_seconds": _first_token_at[0],
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+
+    progress_task = asyncio.create_task(_progress_ticker())
+    try:
+        await asyncio.wait_for(_stream(), timeout=OLLAMA_TIMEOUT)
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - stream_started, 1)
+        raise TimeoutError(
+            f"Ollama did not finish within {OLLAMA_TIMEOUT}s "
+            f"(elapsed: {elapsed}s, model: {OLLAMA_CHAT_MODEL}, "
+            f"first_token: {_first_token_at[0]})"
+        )
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
+    first_token_seconds = _first_token_at[0]
+    final_chunk = _final[0]
 
     content = "".join(chunks)
     if progress_callback:
