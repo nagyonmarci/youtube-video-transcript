@@ -157,6 +157,8 @@
     "attempts": "Próba {current}/{max}",
     "runningFor": "Futási idő: {duration}",
     "duration": "Időtartam: {duration}",
+    "aiBottleneck": "AI szűk keresztmetszet: {phase} ({duration})",
+    "aiMetrics": "Első token: {first} · prompt: {prompt} · generálás: {generate} · {rate}",
     "activeJobs": "{count} aktív job",
     "activeOnly": "Csak aktív",
     "plusCompleted": "+ {count} befejezett",
@@ -249,6 +251,13 @@
     "cooldown": "Pihenő két AI job között: {seconds} mp",
     "refreshedAt": "Frissítve: {time}",
     "realtimeHint": "Élő streamen frissül; az Ollama API GPU/VRAM elhelyezést mutat, nem natív compute terhelést."
+  },
+  "aiMetric": {
+    "load": "modell betöltés",
+    "firstToken": "első tokenig várakozás",
+    "prompt": "prompt eval",
+    "generate": "token generálás",
+    "parse": "JSON parse"
   },
   "sort": {
     "nameAZ": "Név A–Z",

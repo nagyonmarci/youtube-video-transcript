@@ -514,6 +514,25 @@ def job_duration_seconds(job: dict, end: Optional[datetime] = None) -> Optional[
     return max(0, int((finished - started).total_seconds()))
 
 
+def summarize_ai_metrics(metrics: Optional[dict]) -> str:
+    if not metrics:
+        return "AI metrics unavailable"
+    parts = []
+    if metrics.get("total_seconds") is not None:
+        parts.append(f"total {metrics['total_seconds']}s")
+    if metrics.get("first_token_seconds") is not None:
+        parts.append(f"first token {metrics['first_token_seconds']}s")
+    if metrics.get("prompt_eval_seconds") is not None:
+        parts.append(f"prompt {metrics['prompt_eval_seconds']}s")
+    if metrics.get("eval_seconds") is not None:
+        token_rate = metrics.get("eval_tokens_per_second")
+        suffix = f" ({token_rate} tok/s)" if token_rate else ""
+        parts.append(f"generate {metrics['eval_seconds']}s{suffix}")
+    if metrics.get("ollama_load_seconds") is not None:
+        parts.append(f"load {metrics['ollama_load_seconds']}s")
+    return " · ".join(parts) if parts else "AI metrics unavailable"
+
+
 async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
     pool = await get_pg_pool()
     async with pool.acquire() as conn:
@@ -538,6 +557,7 @@ async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
                 progress_total = NULL,
                 progress_label = NULL,
                 duration_seconds = NULL,
+                metrics = NULL,
                 locked_at = NOW(),
                 locked_by = $2
             WHERE id = (SELECT id FROM next_job)
@@ -545,7 +565,7 @@ async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
                 id, queue, type, label, status, sort_order, payload, dedupe_key,
                 attempts, max_attempts, progress_current, progress_total, progress_label,
                 locked_at, locked_by, created_at, started_at, finished_at,
-                error_message, last_error, duration_seconds
+                error_message, last_error, duration_seconds, metrics
             """,
             queue,
             worker_name,
@@ -563,6 +583,7 @@ async def reset_stale_running_jobs(max_age_minutes: int = STALE_JOB_MINUTES) -> 
                 status = 'queued',
                 error_message = 'Re-queued stale running job after worker heartbeat timeout',
                 duration_seconds = NULL,
+                metrics = NULL,
                 locked_at = NULL,
                 locked_by = NULL
             WHERE status = 'running'
@@ -1160,8 +1181,16 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
             })
             return False
 
+        metrics = notes.pop("_metrics", None)
         if requested_fields:
             notes = {field: notes.get(field) for field in requested_fields if field in notes}
+        if current_ai_job_id and metrics:
+            await directus.update_job(current_ai_job_id, {
+                "metrics": metrics,
+                "progress_label": summarize_ai_metrics(metrics),
+            })
+            current_ai_task_info["metrics"] = metrics
+            current_ai_task_info["progress_label"] = summarize_ai_metrics(metrics)
         await directus.update_video(directus_video_id, {
             **notes,
             "ai_notes_status": "done",
@@ -1468,6 +1497,7 @@ async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Op
         "progress_label": running.get("progress_label"),
         "started_at": running.get("started_at"),
         "duration_seconds": running.get("duration_seconds") or job_duration_seconds(running),
+        "metrics": running.get("metrics"),
     }
 
 

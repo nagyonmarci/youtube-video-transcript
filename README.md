@@ -146,7 +146,7 @@ The `jobs` Directus collection is the shared work queue. Two separate workers po
 - `fetch-worker` — `fetch` queue: channel refresh, video fetch, metadata backfill, date backfill
 - `ai-worker` — `ai` queue: per-video AI note generation
 
-Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), progress tracking, and runtime measurement. Running jobs show elapsed time in the Admin dashboard, and completed jobs persist `duration_seconds` for later comparison. A channel refresh error on one video does not stop the rest.
+Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), progress tracking, and runtime measurement. Running jobs show elapsed time in the Admin dashboard, and completed jobs persist `duration_seconds` for later comparison. AI note jobs also persist Ollama timing metrics in `jobs.metrics`: model load time, time to first token, prompt eval time/count, generation time/count, token throughput, prompt size, output size, and JSON parse time. The Admin job table highlights the largest AI phase as the likely bottleneck. A channel refresh error on one video does not stop the rest.
 
 `FETCH_WORKER_CONCURRENCY` and `AI_WORKER_CONCURRENCY` increase parallelism — raise them only where the bottleneck (YouTube rate limits or LLM throughput) allows.
 

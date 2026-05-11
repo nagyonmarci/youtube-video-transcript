@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Optional
 
 import httpx
@@ -110,17 +111,29 @@ Transcript:
 """.strip()
 
 
+def ns_to_seconds(value: Any) -> Optional[float]:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return round(number / 1_000_000_000, 3) if number > 0 else None
+
+
 async def generate_ai_notes(video: dict) -> Optional[dict]:
     transcript = video.get("transcript") or video.get("transcript_timed")
     if not transcript:
         return None
+    compacted = compact_transcript(video)
+    prompt_start = time.monotonic()
+    prompt = build_prompt({**video, "transcript": compacted, "transcript_timed": None})
+    prompt_build_seconds = round(time.monotonic() - prompt_start, 3)
 
     messages = [
         {
             "role": "system",
             "content": "You are a source-grounded English note-taking assistant. Always return valid JSON only.",
         },
-        {"role": "user", "content": build_prompt(video)},
+        {"role": "user", "content": prompt},
     ]
     payload = {
         "model": OLLAMA_CHAT_MODEL,
@@ -133,6 +146,9 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
     # large models that take >10 min to load or generate don't timeout.
     # connect=30 still guards against an unreachable server.
     chunks = []
+    final_chunk = {}
+    stream_started = time.monotonic()
+    first_token_seconds = None
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(None, connect=30)
     ) as client:
@@ -147,10 +163,37 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
                     continue
                 delta = chunk.get("message", {}).get("content", "")
                 if delta:
+                    if first_token_seconds is None:
+                        first_token_seconds = round(time.monotonic() - stream_started, 3)
                     chunks.append(delta)
+                if chunk.get("done"):
+                    final_chunk = chunk
 
     content = "".join(chunks)
+    parse_start = time.monotonic()
     parsed = extract_json(content)
+    parse_seconds = round(time.monotonic() - parse_start, 3)
+    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
+    eval_count = int(final_chunk.get("eval_count") or 0)
+    eval_seconds = ns_to_seconds(final_chunk.get("eval_duration"))
+    metrics = {
+        "model": OLLAMA_CHAT_MODEL,
+        "transcript_chars": len(transcript),
+        "prompt_chars": len(prompt),
+        "output_chars": len(content),
+        "chunks": len(chunks),
+        "prompt_build_seconds": prompt_build_seconds,
+        "first_token_seconds": first_token_seconds,
+        "json_parse_seconds": parse_seconds,
+        "total_seconds": total_seconds,
+        "ollama_total_seconds": ns_to_seconds(final_chunk.get("total_duration")),
+        "ollama_load_seconds": ns_to_seconds(final_chunk.get("load_duration")),
+        "prompt_eval_count": final_chunk.get("prompt_eval_count"),
+        "prompt_eval_seconds": ns_to_seconds(final_chunk.get("prompt_eval_duration")),
+        "eval_count": eval_count or None,
+        "eval_seconds": eval_seconds,
+        "eval_tokens_per_second": round(eval_count / eval_seconds, 2) if eval_count and eval_seconds else None,
+    }
     return {
         "summary": str(parsed.get("summary", "")).strip(),
         "topics": normalize_list(parsed.get("topics")),
@@ -159,4 +202,5 @@ async def generate_ai_notes(video: dict) -> Optional[dict]:
         "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
         "study_guide": str(parsed.get("study_guide", "")).strip(),
         "critique": str(parsed.get("critique", "")).strip(),
+        "_metrics": metrics,
     }

@@ -227,6 +227,27 @@ function jobRuntimeSeconds(job) {
   return Math.max(0, Math.round((end.getTime() - new Date(job.started_at).getTime()) / 1000));
 }
 
+function formatMetricSeconds(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  return `${number.toFixed(number >= 10 ? 1 : 2)}s`;
+}
+
+function aiBottleneck(metrics) {
+  if (!metrics) return '';
+  const phases = [
+    ['load', Number(metrics.ollama_load_seconds || 0)],
+    ['firstToken', Number(metrics.first_token_seconds || 0)],
+    ['prompt', Number(metrics.prompt_eval_seconds || 0)],
+    ['generate', Number(metrics.eval_seconds || 0)],
+    ['parse', Number(metrics.json_parse_seconds || 0)],
+  ].filter(([, value]) => value > 0);
+  if (!phases.length) return '';
+  const [phase, seconds] = phases.sort((a, b) => b[1] - a[1])[0];
+  return { phase, seconds };
+}
+
 function JobQueuePanel({ jobs, onAction, busy }) {
   const { t } = useT();
   const [showCompleted, setShowCompleted] = useState(false);
@@ -271,6 +292,7 @@ function JobQueuePanel({ jobs, onAction, busy }) {
               const reorderable = ['queued', 'paused'].includes(job.status);
               const progressText = formatProgress(job.progress_current, job.progress_total);
               const runtimeText = formatDuration(jobRuntimeSeconds(job));
+              const bottleneck = job.queue === 'ai' ? aiBottleneck(job.metrics) : null;
               return (
                 <tr key={job.id}>
                   <td>
@@ -283,6 +305,24 @@ function JobQueuePanel({ jobs, onAction, busy }) {
                     {runtimeText && (
                       <div className="job-progress-text">
                         {running ? t('label.runningFor', { duration: runtimeText }) : t('label.duration', { duration: runtimeText })}
+                      </div>
+                    )}
+                    {bottleneck && (
+                      <div className="job-progress-text">
+                        {t('label.aiBottleneck', {
+                          phase: t(`aiMetric.${bottleneck.phase}`),
+                          duration: formatMetricSeconds(bottleneck.seconds),
+                        })}
+                      </div>
+                    )}
+                    {job.queue === 'ai' && job.metrics && (
+                      <div className="job-progress-text">
+                        {t('label.aiMetrics', {
+                          first: formatMetricSeconds(job.metrics.first_token_seconds),
+                          prompt: formatMetricSeconds(job.metrics.prompt_eval_seconds),
+                          generate: formatMetricSeconds(job.metrics.eval_seconds),
+                          rate: job.metrics.eval_tokens_per_second ? `${job.metrics.eval_tokens_per_second} tok/s` : '-',
+                        })}
                       </div>
                     )}
                     {progressText && <div className="job-progress-text">{progressText}</div>}

@@ -157,6 +157,8 @@
     "attempts": "Attempt {current}/{max}",
     "runningFor": "Runtime: {duration}",
     "duration": "Duration: {duration}",
+    "aiBottleneck": "AI bottleneck: {phase} ({duration})",
+    "aiMetrics": "First token: {first} · prompt: {prompt} · generation: {generate} · {rate}",
     "activeJobs": "{count} active jobs",
     "activeOnly": "Active only",
     "plusCompleted": "+ {count} completed",
@@ -248,6 +250,13 @@
     "cooldown": "Cooldown between AI jobs: {seconds}s",
     "refreshedAt": "Refreshed: {time}",
     "realtimeHint": "Updates over a live stream; Ollama reports GPU/VRAM placement, not native compute load."
+  },
+  "aiMetric": {
+    "load": "model load",
+    "firstToken": "time to first token",
+    "prompt": "prompt eval",
+    "generate": "token generation",
+    "parse": "JSON parse"
   },
   "sort": {
     "nameAZ": "Name A–Z",

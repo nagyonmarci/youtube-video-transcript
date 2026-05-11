@@ -34,12 +34,13 @@ JOB_PROGRESS_FIELDS = [
     {"field": "locked_by", "type": "string", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"max_length": 255, "is_nullable": True}},
     {"field": "last_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "duration_seconds", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
+    {"field": "metrics", "type": "json", "meta": {"interface": "input-code", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
 ]
 
 JOB_LIST_FIELDS = (
     "id,queue,type,label,status,sort_order,payload,dedupe_key,attempts,max_attempts,"
     "progress_current,progress_total,progress_label,locked_at,locked_by,created_at,started_at,finished_at,"
-    "error_message,last_error,duration_seconds"
+    "error_message,last_error,duration_seconds,metrics"
 )
 
 class DirectusClient:
