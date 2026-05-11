@@ -27,6 +27,12 @@ import asyncpg
 import httpx
 
 from ai_notes import configure_ai_notes, generate_ai_notes
+from constants import (
+    HEARTBEAT_INTERVAL, WORKER_IDLE_SLEEP, WORKER_POLL_BACKOFF,
+    STREAM_UPDATE_INTERVAL, BOOTSTRAP_CHECK_INTERVAL, IDLE_SLEEP,
+    STOPPED_BY_USER,
+    QUEUE_FETCH, QUEUE_AI,
+)
 from directus_client import DirectusClient
 from youtube_fetcher import (
     fetch_channel_videos,
@@ -478,7 +484,7 @@ async def reset_stale_running_jobs_if_due(force: bool = False) -> int:
 async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
     attempts = int(job.get("attempts") or 0) + 1
     max_attempts = max(1, int(job.get("max_attempts") or 3))
-    error_message = "Stopped by user" if stopped else (str(error) or repr(error))[:1000]
+    error_message = STOPPED_BY_USER if stopped else (str(error) or repr(error))[:1000]
     now = datetime.now(timezone.utc).isoformat()
     duration_seconds = job_duration_seconds(job)
     if stopped or attempts >= max_attempts:
@@ -508,7 +514,7 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
 
 async def heartbeat_job(job_id: str):
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(HEARTBEAT_INTERVAL)
         try:
             await directus.update_job(job_id, {"locked_at": datetime.now(timezone.utc).isoformat()})
         except Exception as e:
@@ -742,7 +748,7 @@ async def worker_loop(worker_name: str = "fetch-worker"):
     global stop_flag, current_task_info, current_job_id
     while True:
         if stop_flag:
-            await asyncio.sleep(1)
+            await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         try:
             await reset_stale_running_jobs_if_due()
@@ -752,11 +758,11 @@ async def worker_loop(worker_name: str = "fetch-worker"):
             job = await claim_next_job("fetch", worker_name)
         except Exception as e:
             logger.warning(f"Could not poll fetch jobs: {e}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
 
         if not job:
-            await asyncio.sleep(1)
+            await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
 
         await refresh_app_settings_if_due(force=True)
@@ -792,7 +798,7 @@ async def worker_loop(worker_name: str = "fetch-worker"):
                     "locked_by": None,
                 })
         except asyncio.CancelledError:
-            await retry_or_fail_job(job, RuntimeError("Stopped by user"), stopped=True)
+            await retry_or_fail_job(job, RuntimeError(STOPPED_BY_USER), stopped=True)
             raise
         except Exception as e:
             logger.error(f"Worker error on task {task}: {e}", exc_info=True)
@@ -815,11 +821,11 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
     global stop_flag, current_ai_task_info, current_ai_job_id
     while True:
         if stop_flag:
-            await asyncio.sleep(1)
+            await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         await refresh_app_settings_if_due()
         if not AI_NOTES_WORKER_ENABLED:
-            await asyncio.sleep(2)
+            await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
         try:
             await reset_stale_running_jobs_if_due()
@@ -829,13 +835,13 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             job = await claim_next_job("ai", worker_name)
         except Exception as e:
             logger.warning(f"Could not poll AI jobs: {e}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
 
         if not job:
             await refresh_app_settings_if_due()
             await maybe_enqueue_ai_year_backfill(source=worker_name)
-            await asyncio.sleep(1)
+            await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
 
         await refresh_app_settings_if_due(force=True)
@@ -865,7 +871,7 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
                     "locked_by": None,
                 })
         except asyncio.CancelledError:
-            await retry_or_fail_job(job, RuntimeError("Stopped by user"), stopped=True)
+            await retry_or_fail_job(job, RuntimeError(STOPPED_BY_USER), stopped=True)
             raise
         except Exception as e:
             logger.error(f"AI worker error on task {task}: {e}", exc_info=True)
@@ -1294,7 +1300,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
         try:
             await asyncio.shield(directus.update_video(directus_video_id, {
                 "ai_notes_status": "error",
-                "ai_notes_error": "Stopped by user",
+                "ai_notes_error": STOPPED_BY_USER,
             }))
         except Exception as update_error:
             logger.warning(f"Could not persist stopped AI note status: {update_error}")
@@ -1628,7 +1634,7 @@ async def bootstrap_runtime(cleanup_pending: bool = True):
     for _ in range(40):
         if await directus.health_check():
             break
-        await asyncio.sleep(3)
+        await asyncio.sleep(BOOTSTRAP_CHECK_INTERVAL)
     else:
         logger.warning("Directus not responding, continuing anyway")
 
@@ -1668,7 +1674,7 @@ async def run_worker_service():
     if not tasks:
         logger.warning("Worker service started with no queues enabled")
         while True:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(IDLE_SLEEP)
     logger.info(f"Worker service started with {len(tasks)} worker task(s): {sorted(WORKER_QUEUES)}")
     try:
         await asyncio.gather(*tasks)
@@ -2138,7 +2144,7 @@ async def resource_stream():
                     },
                 }
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            await asyncio.sleep(1)
+            await asyncio.sleep(STREAM_UPDATE_INTERVAL)
 
     return StreamingResponse(
         events(),

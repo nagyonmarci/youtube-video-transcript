@@ -4,14 +4,7 @@ import AdminDashboard from './components/AdminDashboard.jsx';
 import AppHeader from './components/AppHeader.jsx';
 import { useAppStatus } from './lib/useAppStatus.js';
 import { I18nProvider, useT } from './lib/i18n.jsx';
-
-function sameData(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function keepIfSame(prev, next) {
-  return sameData(prev, next) ? prev : next;
-}
+import { sameData, keepIfSame } from './lib/dataUtils.js';
 
 function AdminAppInner() {
   const { t, lang, setLanguage } = useT();

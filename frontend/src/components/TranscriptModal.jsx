@@ -2,20 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
 import { updateVideoFields } from '../lib/directus.js';
 import { useT } from '../lib/i18n.jsx';
-
-function formatDuration(seconds) {
-  if (!seconds) return '';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function formatDate(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('hu-HU');
-}
+import { formatDuration, formatDate } from '../lib/formatUtils.js';
 
 function renderList(items) {
   if (!Array.isArray(items) || items.length === 0) return null;

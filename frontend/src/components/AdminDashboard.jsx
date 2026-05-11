@@ -22,33 +22,14 @@ import {
 import ChannelAdminPanel from './ChannelAdminPanel.jsx';
 import TopActions from './TopActions.jsx';
 import { useT } from '../lib/i18n.jsx';
-
-function sameData(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function keepIfSame(prev, next) {
-  return sameData(prev, next) ? prev : next;
-}
+import { keepIfSame } from '../lib/dataUtils.js';
+import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
 
 function formatProgress(current, total) {
   const cur = Number(current || 0);
   const max = Number(total || 0);
   if (!cur || !max) return '';
   return `${cur}/${max} (${Math.round((cur / max) * 100)}%)`;
-}
-
-function cronToDailyTime(cron) {
-  const parts = (cron || '').trim().split(/\s+/);
-  if (parts.length !== 5 || parts[2] !== '*' || parts[3] !== '*' || parts[4] !== '*') return '07:00';
-  const [minute, hour] = parts;
-  if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return '07:00';
-  return `${String(Math.min(23, Number(hour))).padStart(2, '0')}:${String(Math.min(59, Number(minute))).padStart(2, '0')}`;
-}
-
-function dailyTimeToCron(time) {
-  const [hour = '7', minute = '0'] = (time || '07:00').split(':');
-  return `${Number(minute)} ${Number(hour)} * * *`;
 }
 
 function normalizeSettings(settings = {}) {

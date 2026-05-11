@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
+import { formatDuration, formatDate } from '../lib/formatUtils.js';
 
 async function bulkGenerateAiNotes(videos) {
   const errors = [];
@@ -19,20 +20,6 @@ async function bulkDeleteAiNotes(videos) {
     catch { errors.push(v.title || v.video_id); }
   }
   return errors;
-}
-
-function formatDuration(seconds) {
-  if (!seconds) return '—';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('hu-HU');
 }
 
 export default function VideoTable({

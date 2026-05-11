@@ -6,32 +6,8 @@ import {
   downloadFile, sanitizeFilename,
 } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
-
-function parseChannelFile(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-  return lines.map(line => {
-    if (line.includes(',')) {
-      const parts = line.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
-      return parts.find(p => p.includes('youtube') || p.startsWith('@') || p.startsWith('UC')) || parts[0];
-    }
-    return line;
-  }).filter(Boolean);
-}
-
-function cronToDailyTime(cron) {
-  const parts = (cron || '').trim().split(/\s+/);
-  if (parts.length !== 5 || parts[2] !== '*' || parts[3] !== '*' || parts[4] !== '*') {
-    return '07:00';
-  }
-  const [minute, hour] = parts;
-  if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return '07:00';
-  return `${String(Math.min(23, Number(hour))).padStart(2, '0')}:${String(Math.min(59, Number(minute))).padStart(2, '0')}`;
-}
-
-function dailyTimeToCron(time) {
-  const [hour = '7', minute = '0'] = (time || '07:00').split(':');
-  return `${Number(minute)} ${Number(hour)} * * *`;
-}
+import { parseChannelFile } from '../lib/channelUtils.js';
+import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
 
 export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }) {
   const { t } = useT();
