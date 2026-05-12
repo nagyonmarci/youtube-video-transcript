@@ -2575,6 +2575,25 @@ async def ai_notes(request: AiNotesRequest):
     return {"queued": True, "limit": limit, "job_id": job.get("id")}
 
 
+@app.post("/quick-notes/{video_id}")
+async def quick_note_video(video_id: str):
+    """Queue a priority quick summary job for one video (sort_order=0 → front of queue)."""
+    video = await directus.get_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if not (video.get("transcript") or video.get("transcript_timed")):
+        raise HTTPException(status_code=400, detail="Video has no transcript")
+
+    await update_video_ai_status(video_id, "pending")
+    task = {"type": JOB_QUICK_NOTE_VIDEO, "video_id": video_id}
+    job = await directus.create_job(
+        QUEUE_QUICK, task,
+        dedupe_key=job_dedupe_key(QUEUE_QUICK, task),
+        sort_order=0,
+    )
+    return {"queued": not job.get("existing"), "existing": bool(job.get("existing")), "video_id": video_id, "job_id": job.get("id")}
+
+
 @app.post("/ai-notes/{video_id}")
 async def ai_note_video(video_id: str):
     """Queue AI note generation for one selected Directus video."""

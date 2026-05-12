@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { deleteAiNoteForVideo, generateAiNoteForVideo } from '../lib/fetcher.js';
+import { deleteAiNoteForVideo, generateAiNoteForVideo, generateQuickNoteForVideo } from '../lib/fetcher.js';
 import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.js';
 import { useT } from '../lib/i18n.jsx';
 import { formatDuration, formatDate } from '../lib/formatUtils.js';
@@ -186,6 +186,20 @@ export default function VideoTable({
   function renderSortIcon(field) {
     if (field !== sortField) return null;
     return sortDesc ? ' ↓' : ' ↑';
+  }
+
+  async function handleGenerateQuickNote(e, video) {
+    e.stopPropagation();
+    setAiBusyId(video.id);
+    try {
+      await generateQuickNoteForVideo(video.id);
+      showActionMsg(t('msg.aiQueued', { count: 1 }));
+      await onVideosChanged?.();
+    } catch (err) {
+      showActionMsg(t('msg.errAi', { error: err.message }), true);
+    } finally {
+      setAiBusyId(null);
+    }
   }
 
   async function handleGenerateAiNote(e, video) {
@@ -378,6 +392,16 @@ export default function VideoTable({
                               onClick={e => { e.stopPropagation(); onSelectVideo(video); }}
                             >
                               {t('btn.transcript')}
+                            </button>
+                          )}
+                          {video.transcript && (
+                            <button
+                              className="btn-sm"
+                              disabled={aiBusyId === video.id || video.ai_notes_status === 'pending'}
+                              title={t('tooltip.generateQuick')}
+                              onClick={e => handleGenerateQuickNote(e, video)}
+                            >
+                              {t('btn.quickNote')}
                             </button>
                           )}
                           {video.transcript && (

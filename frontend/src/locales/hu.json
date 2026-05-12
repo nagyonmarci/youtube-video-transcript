@@ -51,6 +51,7 @@
     "whisperStart": "🎙 Whisper indítás",
     "settings": "Beállítás",
     "transcript": "Transzkript",
+    "quickNote": "Gyors",
     "aiNote": "AI jegyzet",
     "aiRegen": "AI újra",
     "aiGenerate": "AI generálás",
@@ -201,6 +202,7 @@
     "timedTranscript": "Időbélyeges transzkript",
     "noTimedTranscript": "Ehhez a transzkripthez még nincs időbélyeges változat",
     "mindmap": "Markmap gondolattérkép letöltése (Obsidian markmap plugin szükséges)",
+    "generateQuick": "Gyors összefoglaló generálása (elsőbbséggel a sorban)",
     "generateAi": "AI összefoglaló, témák, tanulságok, kérdések és Obsidian jegyzet generálása",
     "deleteAi": "A generált AI jegyzet mezők törlése"
   },
