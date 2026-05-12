@@ -1,0 +1,20 @@
+services:
+  fetcher:
+    image: ghcr.io/nagyonmarci/youtube-video-transcript/fetcher:${RELEASE_VERSION:?RELEASE_VERSION must be set}
+    build: !reset null
+
+  fetch-worker:
+    image: ghcr.io/nagyonmarci/youtube-video-transcript/fetcher:${RELEASE_VERSION:?RELEASE_VERSION must be set}
+    build: !reset null
+
+  ai-worker:
+    image: ghcr.io/nagyonmarci/youtube-video-transcript/fetcher:${RELEASE_VERSION:?RELEASE_VERSION must be set}
+    build: !reset null
+
+  whisper:
+    image: ghcr.io/nagyonmarci/youtube-video-transcript/whisper:${RELEASE_VERSION:?RELEASE_VERSION must be set}
+    build: !reset null
+
+  frontend:
+    image: ghcr.io/nagyonmarci/youtube-video-transcript/frontend:${RELEASE_VERSION:?RELEASE_VERSION must be set}
+    build: !reset null
