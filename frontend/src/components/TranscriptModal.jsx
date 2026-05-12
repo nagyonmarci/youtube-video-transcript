@@ -18,6 +18,10 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
   const [showTimed, setShowTimed] = useState(false);
   const [activeTab, setActiveTab] = useState('transcript');
   const [localVideo, setLocalVideo] = useState(video);
+  const [editingQuick, setEditingQuick] = useState(false);
+  const [quickEdit, setQuickEdit] = useState('');
+  const [quickSaving, setQuickSaving] = useState(false);
+  const [quickSaveMsg, setQuickSaveMsg] = useState(null);
   const [editingAi, setEditingAi] = useState(false);
   const [aiEdit, setAiEdit] = useState({});
   const [aiSaving, setAiSaving] = useState(false);
@@ -74,6 +78,30 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
     })();
     return () => { cancelled = true; };
   }, [activeTab, video]);
+
+  function startEditQuick() {
+    setQuickEdit(localVideo.quick_summary || '');
+    setEditingQuick(true);
+    setQuickSaveMsg(null);
+  }
+
+  async function handleSaveQuick() {
+    setQuickSaving(true);
+    setQuickSaveMsg(null);
+    try {
+      const trimmed = quickEdit.trim();
+      await updateVideoFields(localVideo.id, { quick_summary: trimmed });
+      setLocalVideo(prev => ({ ...prev, quick_summary: trimmed }));
+      setEditingQuick(false);
+      setQuickSaveMsg(t('msg.saved'));
+      setTimeout(() => setQuickSaveMsg(null), 2500);
+      onVideoUpdated?.();
+    } catch (err) {
+      setQuickSaveMsg(t('msg.errGeneric', { error: err.message }));
+    } finally {
+      setQuickSaving(false);
+    }
+  }
 
   function startEditAi() {
     setAiEdit({
@@ -276,15 +304,48 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
             <>
               {localVideo.quick_summary && (
                 <div style={{ marginBottom: '1rem', paddingBottom: '0.85rem', borderBottom: '1px solid var(--border)' }}>
-                  <h3 style={{ fontSize: '0.9rem', color: '#fff', marginBottom: '0.35rem' }}>{t('label.quickSummary')}</h3>
-                  <p style={{ fontSize: '0.85rem', color: '#ccc', lineHeight: '1.55', margin: 0 }}>
-                    {localVideo.quick_summary}
-                  </p>
-                  {localVideo.quick_summary_model && (
-                    <span style={{ fontSize: '0.72rem', color: '#666', marginTop: '0.3rem', display: 'block' }}>
-                      {localVideo.quick_summary_model}
-                      {localVideo.quick_summary_generated_at ? ` · ${new Date(localVideo.quick_summary_generated_at).toLocaleString()}` : ''}
-                    </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <h3 style={{ fontSize: '0.9rem', color: '#fff' }}>{t('label.quickSummary')}</h3>
+                    {!editingQuick && (
+                      <button onClick={startEditQuick} style={{ fontSize: '0.75rem', padding: '0.15rem 0.45rem' }}>
+                        {t('btn.edit')}
+                      </button>
+                    )}
+                  </div>
+                  {quickSaveMsg && (
+                    <div style={{ fontSize: '0.8rem', color: quickSaveMsg.startsWith('Hiba') || quickSaveMsg.startsWith('Error') ? '#f88' : '#6fcf73', marginBottom: '0.5rem' }}>
+                      {quickSaveMsg}
+                    </div>
+                  )}
+                  {editingQuick ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <textarea
+                        value={quickEdit}
+                        onChange={e => setQuickEdit(e.target.value)}
+                        rows={5}
+                        style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.85rem', resize: 'vertical' }}
+                      />
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <button onClick={handleSaveQuick} disabled={quickSaving} className="primary" style={{ fontSize: '0.8rem' }}>
+                          {quickSaving ? t('btn.saving') : t('btn.save')}
+                        </button>
+                        <button onClick={() => setEditingQuick(false)} disabled={quickSaving} style={{ fontSize: '0.8rem' }}>
+                          {t('btn.cancel')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: '0.85rem', color: '#ccc', lineHeight: '1.55', margin: 0 }}>
+                        {localVideo.quick_summary}
+                      </p>
+                      {localVideo.quick_summary_model && (
+                        <span style={{ fontSize: '0.72rem', color: '#666', marginTop: '0.3rem', display: 'block' }}>
+                          {localVideo.quick_summary_model}
+                          {localVideo.quick_summary_generated_at ? ` · ${new Date(localVideo.quick_summary_generated_at).toLocaleString()}` : ''}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               )}

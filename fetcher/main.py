@@ -1948,6 +1948,7 @@ UI_VIDEO_FIELDS = ",".join([
 ])
 UI_CHANNEL_UPDATE_FIELDS = {"name", "channel_url", "channel_handle", "status", "video_count", "error_message", "last_refreshed"}
 UI_VIDEO_UPDATE_FIELDS = {
+    "quick_summary",
     "summary",
     "topics",
     "takeaways",
