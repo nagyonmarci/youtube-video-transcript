@@ -16,8 +16,8 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal
 OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
 AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
-OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "qwen3:4b")
-OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "120"))
+OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "llama3.2")
+OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "300"))
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")  # "ollama" | "anthropic" | "openai"
 AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -158,6 +158,9 @@ def ns_to_seconds(value: Any) -> Optional[float]:
 ProgressCallback = Callable[[dict], Awaitable[None]]
 
 
+QUICK_MAX_CHARS = 3000  # keep prompt short so small models respond quickly
+
+
 async def generate_quick_summary(
     video: dict, progress_callback: Optional[ProgressCallback] = None
 ) -> Optional[str]:
@@ -165,20 +168,24 @@ async def generate_quick_summary(
     transcript = video.get("transcript") or video.get("transcript_timed")
     if not transcript:
         return None
-    compacted = compact_transcript(video)
+    # Hard-cap input so small models stay fast regardless of AI_NOTES_MAX_CHARS
+    raw = re.sub(r"\n{3,}", "\n\n", transcript.strip())
+    snippet = raw[:QUICK_MAX_CHARS]
     title = video.get("title") or "Unknown title"
     prompt = (
-        f"Summarize this YouTube video in 3-5 sentences. "
-        f'Return ONLY valid JSON: {{"summary": "..."}}\n\nTitle: {title}\n\nTranscript:\n{compacted}'
+        f'Summarize this YouTube video in 3-5 sentences. '
+        f'Return ONLY valid JSON: {{"summary": "..."}}\n\n'
+        f"Title: {title}\n\nTranscript:\n{snippet}"
     )
     payload = {
         "model": OLLAMA_QUICK_MODEL,
         "messages": [
-            {"role": "system", "content": "You are a concise summarizer. Return only valid JSON."},
+            {"role": "system", "content": "You are a concise summarizer. Return only valid JSON, no other text."},
             {"role": "user", "content": prompt},
         ],
         "stream": True,
-        "format": "json",
+        # No format:"json" — avoid Ollama constrained-decoding overhead
+        "options": {"num_predict": 512},
     }
     chunks: list[str] = []
     stream_started = time.monotonic()
@@ -203,6 +210,8 @@ async def generate_quick_summary(
                     delta = chunk.get("message", {}).get("content", "")
                     if delta:
                         chunks.append(delta)
+                    if chunk.get("done"):
+                        break
 
     try:
         await asyncio.wait_for(_stream(), timeout=OLLAMA_QUICK_TIMEOUT)

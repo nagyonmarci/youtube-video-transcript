@@ -12,7 +12,7 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - Export transcripts per-video, per-channel, or in bulk — TXT, MD, or Obsidian-compatible MD
 - Obsidian export with YAML frontmatter, clickable timestamped transcript links back to YouTube
 - AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note
-- Two-phase AI pipeline: a small fast model generates a quick summary first (Phase 1); the full structured notes are produced by the full model (Phase 2, separate queue)
+- Two-phase AI pipeline: Phase 1 generates a quick summary (default model: `llama3.2`, configurable in Admin → Setup); Phase 2 produces full structured notes via the configured provider
 - AI provider is user-selectable: local Ollama (default), Anthropic Claude, or any OpenAI-compatible API — configured in **Admin → Setup**, no container restart needed
 - AI fields are regenerable individually; AI processing runs on a separate queue and never blocks transcript fetching
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
