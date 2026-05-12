@@ -145,6 +145,41 @@ To reduce AI load from the UI:
 - Increase **AI cooldown between jobs** to insert a pause after each AI job. This reduces sustained load, but the running job can still use the model heavily while it is generating.
 - Keep **Start AI automatically after a new transcript** off when you want fully manual AI generation.
 
+## Release Workflow
+
+Changes merged to `master` first pass the existing **CI / DevSecOps** workflow. After a successful CI run on `master`, the `Release` workflow automatically:
+
+1. creates the next calendar tag, for example `v2026.05.12.1`
+2. builds and publishes Docker images to GitHub Container Registry
+3. creates a GitHub Release with the exact image tags
+
+Published images:
+
+```text
+ghcr.io/nagyonmarci/youtube-video-transcript/fetcher:<tag>
+ghcr.io/nagyonmarci/youtube-video-transcript/frontend:<tag>
+ghcr.io/nagyonmarci/youtube-video-transcript/whisper:<tag>
+```
+
+For production-like deployments, use the normal compose file plus `docker-compose.prod.yml`. This keeps infrastructure, volumes, and environment variables from `docker-compose.yml`, but replaces local `build:` instructions with pinned release images.
+
+```bash
+RELEASE_VERSION=v2026.05.12.1 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+RELEASE_VERSION=v2026.05.12.1 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Rollback is the same command with the previous release tag:
+
+```bash
+RELEASE_VERSION=v2026.05.11.1 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+If a release contains Directus schema changes, deploy during a quiet window and restart the dependent app services together:
+
+```bash
+RELEASE_VERSION=<tag> docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d fetcher fetch-worker ai-worker frontend
+```
+
 ## Job Queue
 
 The `jobs` Directus collection is the shared work queue. Three separate queues are processed by two workers:
