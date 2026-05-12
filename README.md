@@ -14,7 +14,7 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note
 - Two-phase AI pipeline: Phase 1 generates a quick summary (default model: `llama3.2`, configurable in Admin → Setup); Phase 2 produces full structured notes via the configured provider
 - AI provider is user-selectable: local Ollama (default), Anthropic Claude, or any OpenAI-compatible API — configured in **Admin → Setup**, no container restart needed
-- AI fields are regenerable individually; AI processing runs on a separate queue and never blocks transcript fetching
+- AI fields are regenerable and editable inline: quick summary and full AI notes (summary, topics, takeaways, questions) can be edited directly in the transcript modal
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
 - Admin dashboard shows all three job queues (Fetch / Quick Summary / AI Notes) with independent Stop/Start controls per queue, running/stuck jobs, per-job runtime/duration, and allows pause/resume/delete
 - Admin resource monitor streams Ollama status live and shows loaded model, GPU/VRAM placement, AI worker state, and AI cooldown
