@@ -148,6 +148,7 @@
     "mindmap": "Gondolattérkép",
     "fetcher": "Fetcher",
     "aiWorker": "AI jegyzetek",
+    "quickWorker": "Gyors összefoglaló",
     "whisper": "Whisper",
     "queueSize": "Sor: {count}",
     "queueBreakdown": "Sor: {queued} · fut: {running} · szünetel: {paused}",
@@ -183,7 +184,18 @@
     "aiJobCooldown": "AI pihenő két job között (mp)",
     "aiWorkerEnabled": "AI worker dolgozhat",
     "aiAutoAfterTranscript": "AI automatikus indítása új transzkript után",
-    "aiYearBackfill": "Folyamatos éves AI backfill engedélyezése"
+    "aiYearBackfill": "Folyamatos éves AI backfill engedélyezése",
+    "aiProvider": "AI Provider (teljes notes)",
+    "aiProviderOllama": "Ollama (helyi)",
+    "aiProviderAnthropic": "Anthropic (cloud)",
+    "aiProviderOpenai": "OpenAI (cloud)",
+    "aiCloudModel": "Cloud modell",
+    "aiQuickEnabled": "Quick összefoglaló engedélyezve",
+    "aiQuickModel": "Quick modell (Ollama)",
+    "aiQuickTimeout": "Quick timeout (mp)",
+    "anthropicApiKey": "Anthropic API kulcs",
+    "openaiApiKey": "OpenAI API kulcs",
+    "openaiBaseUrl": "OpenAI Base URL"
   },
   "tooltip": {
     "timedTranscript": "Időbélyeges transzkript",

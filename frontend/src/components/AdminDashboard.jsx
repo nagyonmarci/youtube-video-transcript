@@ -14,6 +14,7 @@ import {
   refreshThumbnails,
   resumeJob,
   startJob,
+  resumeProcessing,
   stopProcessing,
   stopWhisper,
   updateAppSettings,
@@ -54,6 +55,14 @@ function normalizeSettings(settings = {}) {
     ai_notes_year_backfill_idle_seconds: Number(settings.ai_notes_year_backfill_idle_seconds ?? 60),
     ai_notes_worker_enabled: settings.ai_notes_worker_enabled ?? true,
     ai_notes_job_cooldown_seconds: Number(settings.ai_notes_job_cooldown_seconds ?? 0),
+    ai_notes_quick_enabled: settings.ai_notes_quick_enabled ?? true,
+    ollama_quick_model: settings.ollama_quick_model || 'qwen3:4b',
+    ollama_quick_timeout: Number(settings.ollama_quick_timeout ?? 120),
+    ai_provider: settings.ai_provider || 'ollama',
+    ai_cloud_model: settings.ai_cloud_model || 'claude-opus-4-7',
+    anthropic_api_key: settings.anthropic_api_key || '',
+    openai_api_key: settings.openai_api_key || '',
+    openai_base_url: settings.openai_base_url || 'https://api.openai.com/v1',
   };
 }
 
@@ -149,7 +158,7 @@ function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
   };
 }
 
-function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop }) {
+function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop, onStart }) {
   const { t } = useT();
   const queued = Number(queueStats?.queued ?? queueSize ?? 0);
   const running = Number(queueStats?.running ?? (current?.type ? 1 : 0));
@@ -189,6 +198,7 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop
           {active ? t('status.running') : t('status.empty')}
         </span>
         {active && onStop && <button className="danger" onClick={onStop}>{t('btn.stop')}</button>}
+        {onStart && <button onClick={onStart}>{t('btn.start')}</button>}
       </div>
     </div>
   );
@@ -528,8 +538,10 @@ export default function AdminDashboard({
   const processorPercent = primaryOllamaModel?.processor_percent;
   const sampledAt = ollamaStatus.sampled_at ? new Date(ollamaStatus.sampled_at).toLocaleTimeString('hu-HU') : '-';
   const fetchQueue = fetcherStatus?.queues?.fetch || {};
+  const quickQueue = fetcherStatus?.queues?.quick || {};
   const aiQueue = fetcherStatus?.queues?.ai || resourceStatus.ai_queue || {};
   const fetchWorkers = fetcherStatus?.workers?.fetch_concurrency;
+  const quickWorkers = fetcherStatus?.workers?.quick_concurrency;
   const aiWorkers = fetcherStatus?.workers?.ai_concurrency ?? resourceStatus.ai_worker_concurrency;
 
   return (
@@ -596,7 +608,9 @@ export default function AdminDashboard({
             </button>
           </div>
         </div>
-        <div className="process-panel">
+
+        {/* Fetch queue */}
+        <div className="queue-section">
           <StatusLine
             title={t('label.fetcher')}
             queueSize={fetcherStatus?.queue_size ?? 0}
@@ -604,7 +618,27 @@ export default function AdminDashboard({
             workerCount={fetchWorkers}
             current={fetcherStatus?.current_task}
             onStop={() => runAction(() => stopProcessing('fetch'), t('msg.queueRefreshed'))}
+            onStart={() => runAction(() => resumeProcessing('fetch'), t('msg.queueRefreshed'))}
           />
+          <JobQueuePanel jobs={jobs.filter(j => j.queue === 'fetch')} busy={busy} onAction={runJobAction} />
+        </div>
+
+        {/* Quick Notes queue */}
+        <div className="queue-section">
+          <StatusLine
+            title={t('label.quickWorker')}
+            queueSize={fetcherStatus?.quick_queue_size ?? 0}
+            queueStats={quickQueue}
+            workerCount={quickWorkers}
+            current={fetcherStatus?.current_quick_task}
+            onStop={() => runAction(() => stopProcessing('quick'), t('msg.queueRefreshed'))}
+            onStart={() => runAction(() => resumeProcessing('quick'), t('msg.queueRefreshed'))}
+          />
+          <JobQueuePanel jobs={jobs.filter(j => j.queue === 'quick')} busy={busy} onAction={runJobAction} />
+        </div>
+
+        {/* AI Notes queue */}
+        <div className="queue-section">
           <StatusLine
             title={t('label.aiWorker')}
             queueSize={fetcherStatus?.ai_queue_size ?? 0}
@@ -612,40 +646,46 @@ export default function AdminDashboard({
             workerCount={aiWorkers}
             current={fetcherStatus?.current_ai_task}
             onStop={() => runAction(() => stopProcessing('ai'), t('msg.queueRefreshed'))}
+            onStart={() => runAction(() => resumeProcessing('ai'), t('msg.queueRefreshed'))}
           />
+          <div className={`ai-status-panel ai-status-${aiStatus.tone}`}>
+            <div className="ai-status-main">
+              <div className="ai-status-kicker">{t('header.aiStatus')}</div>
+              <strong>{aiStatus.title}</strong>
+              <p>{aiStatus.detail}</p>
+            </div>
+            <div className="ai-status-side">
+              <span className="ai-status-pill">{t('metric.missingAi')}: {missingAiNotes}</span>
+              <span className="ai-status-pill">{t('label.queueBreakdown', {
+                queued: Number(aiQueue.queued ?? 0),
+                running: Number(aiQueue.running ?? 0),
+                paused: Number(aiQueue.paused ?? 0),
+              })}</span>
+              <span className="ai-status-pill">{t('label.aiBatchLimit')}: {aiBatchLimit}</span>
+              <button
+                disabled={busy || !aiCanStart}
+                onClick={() => runAction(
+                  () => generateAiNotes(),
+                  result => result?.existing
+                    ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
+                    : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
+                )}
+              >
+                {t('btn.generateMissing')}
+              </button>
+            </div>
+          </div>
+          <JobQueuePanel jobs={jobs.filter(j => j.queue === 'ai')} busy={busy} onAction={runJobAction} />
+        </div>
+
+        {/* Whisper + Resource cards */}
+        <div className="queue-section">
           <StatusLine
             title={t('label.whisper')}
             queueSize={whisperStatus?.queue_size ?? 0}
             current={whisperStatus?.current_task}
             onStop={() => runAction(stopWhisper, t('msg.queueRefreshed'))}
           />
-        </div>
-        <div className={`ai-status-panel ai-status-${aiStatus.tone}`}>
-          <div className="ai-status-main">
-            <div className="ai-status-kicker">{t('header.aiStatus')}</div>
-            <strong>{aiStatus.title}</strong>
-            <p>{aiStatus.detail}</p>
-          </div>
-          <div className="ai-status-side">
-            <span className="ai-status-pill">{t('metric.missingAi')}: {missingAiNotes}</span>
-            <span className="ai-status-pill">{t('label.queueBreakdown', {
-              queued: Number(aiQueue.queued ?? 0),
-              running: Number(aiQueue.running ?? 0),
-              paused: Number(aiQueue.paused ?? 0),
-            })}</span>
-            <span className="ai-status-pill">{t('label.aiBatchLimit')}: {aiBatchLimit}</span>
-            <button
-              disabled={busy || !aiCanStart}
-              onClick={() => runAction(
-                () => generateAiNotes(),
-                result => result?.existing
-                  ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                  : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
-              )}
-            >
-              {t('btn.generateMissing')}
-            </button>
-          </div>
         </div>
         <div className="resource-panel">
           <div className="resource-card">
@@ -674,7 +714,6 @@ export default function AdminDashboard({
             <small>{t('resource.cooldown', { seconds: resourceStatus.ai_job_cooldown_seconds ?? appSettings.ai_notes_job_cooldown_seconds })}</small>
           </div>
         </div>
-        <JobQueuePanel jobs={jobs} busy={busy} onAction={runJobAction} />
       </section>
 
       <ScheduleForm

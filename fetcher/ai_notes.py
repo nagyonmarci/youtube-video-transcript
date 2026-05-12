@@ -1,4 +1,4 @@
-"""AI note generation for YouTube transcripts via Ollama."""
+"""AI note generation for YouTube transcripts via Ollama or cloud providers."""
 
 import asyncio
 import json
@@ -16,6 +16,13 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal
 OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
 AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
+OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "qwen3:4b")
+OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "120"))
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")  # "ollama" | "anthropic" | "openai"
+AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 
 
 def configure_ai_notes(
@@ -23,8 +30,17 @@ def configure_ai_notes(
     model: Optional[str] = None,
     max_chars: Optional[int] = None,
     timeout: Optional[int] = None,
+    quick_model: Optional[str] = None,
+    quick_timeout: Optional[int] = None,
+    provider: Optional[str] = None,
+    cloud_model: Optional[str] = None,
+    anthropic_api_key: Optional[str] = None,
+    openai_api_key: Optional[str] = None,
+    openai_base_url: Optional[str] = None,
 ) -> None:
     global OLLAMA_BASE_URL, OLLAMA_CHAT_MODEL, AI_NOTES_MAX_CHARS, OLLAMA_TIMEOUT
+    global OLLAMA_QUICK_MODEL, OLLAMA_QUICK_TIMEOUT
+    global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
     if base_url:
         OLLAMA_BASE_URL = base_url.rstrip("/")
     if model:
@@ -33,6 +49,20 @@ def configure_ai_notes(
         AI_NOTES_MAX_CHARS = max(1000, int(max_chars))
     if timeout is not None:
         OLLAMA_TIMEOUT = max(30, int(timeout))
+    if quick_model:
+        OLLAMA_QUICK_MODEL = quick_model
+    if quick_timeout is not None:
+        OLLAMA_QUICK_TIMEOUT = max(10, int(quick_timeout))
+    if provider:
+        AI_PROVIDER = provider.lower().strip()
+    if cloud_model:
+        AI_CLOUD_MODEL = cloud_model
+    if anthropic_api_key is not None:
+        ANTHROPIC_API_KEY = anthropic_api_key
+    if openai_api_key is not None:
+        OPENAI_API_KEY = openai_api_key
+    if openai_base_url:
+        OPENAI_BASE_URL = openai_base_url.rstrip("/")
 
 
 def compact_transcript(video: dict) -> str:
@@ -128,7 +158,74 @@ def ns_to_seconds(value: Any) -> Optional[float]:
 ProgressCallback = Callable[[dict], Awaitable[None]]
 
 
-async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCallback] = None) -> Optional[dict]:
+async def generate_quick_summary(
+    video: dict, progress_callback: Optional[ProgressCallback] = None
+) -> Optional[str]:
+    """Generate a quick summary using a small fast Ollama model."""
+    transcript = video.get("transcript") or video.get("transcript_timed")
+    if not transcript:
+        return None
+    compacted = compact_transcript(video)
+    title = video.get("title") or "Unknown title"
+    prompt = (
+        f"Summarize this YouTube video in 3-5 sentences. "
+        f'Return ONLY valid JSON: {{"summary": "..."}}\n\nTitle: {title}\n\nTranscript:\n{compacted}'
+    )
+    payload = {
+        "model": OLLAMA_QUICK_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a concise summarizer. Return only valid JSON."},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": True,
+        "format": "json",
+    }
+    chunks: list[str] = []
+    stream_started = time.monotonic()
+
+    if progress_callback:
+        await progress_callback({
+            "phase": "quick_summary",
+            "progress_label": f"Quick summary ({OLLAMA_QUICK_MODEL})...",
+        })
+
+    async def _stream() -> None:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
+            async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = chunk.get("message", {}).get("content", "")
+                    if delta:
+                        chunks.append(delta)
+
+    try:
+        await asyncio.wait_for(_stream(), timeout=OLLAMA_QUICK_TIMEOUT)
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - stream_started, 1)
+        raise TimeoutError(
+            f"Quick summary timed out after {OLLAMA_QUICK_TIMEOUT}s (elapsed: {elapsed}s, model: {OLLAMA_QUICK_MODEL})"
+        )
+
+    content = "".join(chunks)
+    try:
+        parsed = extract_json(content)
+        result = str(parsed.get("summary", "")).strip()
+        return result or None
+    except Exception as e:
+        logger.warning(f"Quick summary JSON parse failed: {e}; raw: {content[:200]}")
+        return None
+
+
+async def _generate_ai_notes_ollama(
+    video: dict, progress_callback: Optional[ProgressCallback] = None
+) -> Optional[dict]:
+    """Generate full AI notes via Ollama (local)."""
     transcript = video.get("transcript") or video.get("transcript_timed")
     if not transcript:
         return None
@@ -159,7 +256,7 @@ async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCal
     if progress_callback:
         await progress_callback({
             "phase": "waiting_first_token",
-            "progress_label": "Waiting for Ollama first token",
+            "progress_label": f"Waiting for Ollama first token ({OLLAMA_CHAT_MODEL})",
             "prompt_chars": len(prompt),
             "transcript_chars": len(transcript),
         })
@@ -246,6 +343,7 @@ async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCal
     eval_seconds = ns_to_seconds(final_chunk.get("eval_duration"))
     metrics = {
         "model": OLLAMA_CHAT_MODEL,
+        "provider": "ollama",
         "transcript_chars": len(transcript),
         "prompt_chars": len(prompt),
         "output_chars": len(content),
@@ -272,3 +370,322 @@ async def generate_ai_notes(video: dict, progress_callback: Optional[ProgressCal
         "critique": str(parsed.get("critique", "")).strip(),
         "_metrics": metrics,
     }
+
+
+async def _generate_ai_notes_anthropic(
+    video: dict, progress_callback: Optional[ProgressCallback] = None
+) -> Optional[dict]:
+    """Generate full AI notes via Anthropic cloud API (SSE streaming via httpx)."""
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY is not set")
+    transcript = video.get("transcript") or video.get("transcript_timed")
+    if not transcript:
+        return None
+    compacted = compact_transcript(video)
+    prompt_start = time.monotonic()
+    prompt = build_prompt({**video, "transcript": compacted, "transcript_timed": None})
+    prompt_build_seconds = round(time.monotonic() - prompt_start, 3)
+
+    payload = {
+        "model": AI_CLOUD_MODEL,
+        "max_tokens": 8192,
+        "system": "You are a source-grounded English note-taking assistant. Always return valid JSON only.",
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    chunks: list[str] = []
+    _first_token_at: list[Optional[float]] = [None]
+    _input_tokens: list[int] = [0]
+    _output_tokens: list[int] = [0]
+    stream_started = time.monotonic()
+
+    if progress_callback:
+        await progress_callback({
+            "phase": "waiting_first_token",
+            "progress_label": f"Waiting for Anthropic first token ({AI_CLOUD_MODEL})",
+            "prompt_chars": len(prompt),
+            "transcript_chars": len(transcript),
+        })
+
+    async def _stream() -> None:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
+            async with client.stream(
+                "POST",
+                "https://api.anthropic.com/v1/messages",
+                json=payload,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    event_type = event.get("type")
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta", {}).get("text", "")
+                        if delta:
+                            if _first_token_at[0] is None:
+                                _first_token_at[0] = round(time.monotonic() - stream_started, 3)
+                            chunks.append(delta)
+                    elif event_type == "message_start":
+                        usage = event.get("message", {}).get("usage", {})
+                        _input_tokens[0] = usage.get("input_tokens", 0)
+                    elif event_type == "message_delta":
+                        usage = event.get("usage", {})
+                        _output_tokens[0] = usage.get("output_tokens", 0)
+
+    async def _progress_ticker() -> None:
+        while True:
+            await asyncio.sleep(10)
+            if not progress_callback:
+                continue
+            elapsed = time.monotonic() - stream_started
+            label = _fmt_elapsed(elapsed)
+            if _first_token_at[0] is None:
+                await progress_callback({
+                    "phase": "waiting_first_token",
+                    "progress_label": f"Waiting for Anthropic first token ({label} elapsed)",
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+            else:
+                output_chars = sum(len(c) for c in chunks)
+                await progress_callback({
+                    "phase": "generating",
+                    "progress_label": f"Generating [{AI_CLOUD_MODEL}]... ({label} elapsed, {output_chars} chars)",
+                    "first_token_seconds": _first_token_at[0],
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+
+    progress_task = asyncio.create_task(_progress_ticker())
+    try:
+        await asyncio.wait_for(_stream(), timeout=OLLAMA_TIMEOUT)
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - stream_started, 1)
+        raise TimeoutError(
+            f"Anthropic did not finish within {OLLAMA_TIMEOUT}s "
+            f"(elapsed: {elapsed}s, model: {AI_CLOUD_MODEL}, "
+            f"first_token: {_first_token_at[0]})"
+        )
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
+    content = "".join(chunks)
+    if progress_callback:
+        await progress_callback({
+            "phase": "parsing_json",
+            "progress_label": f"Parsing Anthropic JSON response ({AI_CLOUD_MODEL})",
+            "first_token_seconds": _first_token_at[0],
+            "output_chars": len(content),
+        })
+    parse_start = time.monotonic()
+    parsed = extract_json(content)
+    parse_seconds = round(time.monotonic() - parse_start, 3)
+    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
+    metrics = {
+        "model": AI_CLOUD_MODEL,
+        "provider": "anthropic",
+        "transcript_chars": len(transcript),
+        "prompt_chars": len(prompt),
+        "output_chars": len(content),
+        "chunks": len(chunks),
+        "prompt_build_seconds": prompt_build_seconds,
+        "first_token_seconds": _first_token_at[0],
+        "json_parse_seconds": parse_seconds,
+        "total_seconds": total_seconds,
+        "prompt_eval_count": _input_tokens[0] or None,
+        "eval_count": _output_tokens[0] or None,
+    }
+    return {
+        "summary": str(parsed.get("summary", "")).strip(),
+        "topics": normalize_list(parsed.get("topics")),
+        "takeaways": normalize_list(parsed.get("takeaways")),
+        "questions": normalize_list(parsed.get("questions")),
+        "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
+        "study_guide": str(parsed.get("study_guide", "")).strip(),
+        "critique": str(parsed.get("critique", "")).strip(),
+        "_metrics": metrics,
+    }
+
+
+async def _generate_ai_notes_openai(
+    video: dict, progress_callback: Optional[ProgressCallback] = None
+) -> Optional[dict]:
+    """Generate full AI notes via OpenAI-compatible API (SSE streaming via httpx)."""
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY is not set")
+    transcript = video.get("transcript") or video.get("transcript_timed")
+    if not transcript:
+        return None
+    compacted = compact_transcript(video)
+    prompt_start = time.monotonic()
+    prompt = build_prompt({**video, "transcript": compacted, "transcript_timed": None})
+    prompt_build_seconds = round(time.monotonic() - prompt_start, 3)
+
+    payload = {
+        "model": AI_CLOUD_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a source-grounded English note-taking assistant. Always return valid JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "stream": True,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "content-type": "application/json",
+    }
+
+    chunks: list[str] = []
+    _first_token_at: list[Optional[float]] = [None]
+    _prompt_tokens: list[int] = [0]
+    _completion_tokens: list[int] = [0]
+    stream_started = time.monotonic()
+
+    if progress_callback:
+        await progress_callback({
+            "phase": "waiting_first_token",
+            "progress_label": f"Waiting for OpenAI first token ({AI_CLOUD_MODEL})",
+            "prompt_chars": len(prompt),
+            "transcript_chars": len(transcript),
+        })
+
+    async def _stream() -> None:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
+            async with client.stream(
+                "POST",
+                f"{OPENAI_BASE_URL}/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    for choice in event.get("choices", []):
+                        delta = choice.get("delta", {}).get("content", "")
+                        if delta:
+                            if _first_token_at[0] is None:
+                                _first_token_at[0] = round(time.monotonic() - stream_started, 3)
+                            chunks.append(delta)
+                    usage = event.get("usage") or {}
+                    if usage.get("prompt_tokens"):
+                        _prompt_tokens[0] = usage["prompt_tokens"]
+                    if usage.get("completion_tokens"):
+                        _completion_tokens[0] = usage["completion_tokens"]
+
+    async def _progress_ticker() -> None:
+        while True:
+            await asyncio.sleep(10)
+            if not progress_callback:
+                continue
+            elapsed = time.monotonic() - stream_started
+            label = _fmt_elapsed(elapsed)
+            if _first_token_at[0] is None:
+                await progress_callback({
+                    "phase": "waiting_first_token",
+                    "progress_label": f"Waiting for OpenAI first token ({label} elapsed)",
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+            else:
+                output_chars = sum(len(c) for c in chunks)
+                await progress_callback({
+                    "phase": "generating",
+                    "progress_label": f"Generating [{AI_CLOUD_MODEL}]... ({label} elapsed, {output_chars} chars)",
+                    "first_token_seconds": _first_token_at[0],
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+
+    progress_task = asyncio.create_task(_progress_ticker())
+    try:
+        await asyncio.wait_for(_stream(), timeout=OLLAMA_TIMEOUT)
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - stream_started, 1)
+        raise TimeoutError(
+            f"OpenAI did not finish within {OLLAMA_TIMEOUT}s "
+            f"(elapsed: {elapsed}s, model: {AI_CLOUD_MODEL}, "
+            f"first_token: {_first_token_at[0]})"
+        )
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
+    content = "".join(chunks)
+    if progress_callback:
+        await progress_callback({
+            "phase": "parsing_json",
+            "progress_label": f"Parsing OpenAI JSON response ({AI_CLOUD_MODEL})",
+            "first_token_seconds": _first_token_at[0],
+            "output_chars": len(content),
+        })
+    parse_start = time.monotonic()
+    parsed = extract_json(content)
+    parse_seconds = round(time.monotonic() - parse_start, 3)
+    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
+    metrics = {
+        "model": AI_CLOUD_MODEL,
+        "provider": "openai",
+        "transcript_chars": len(transcript),
+        "prompt_chars": len(prompt),
+        "output_chars": len(content),
+        "chunks": len(chunks),
+        "prompt_build_seconds": prompt_build_seconds,
+        "first_token_seconds": _first_token_at[0],
+        "json_parse_seconds": parse_seconds,
+        "total_seconds": total_seconds,
+        "prompt_eval_count": _prompt_tokens[0] or None,
+        "eval_count": _completion_tokens[0] or None,
+    }
+    return {
+        "summary": str(parsed.get("summary", "")).strip(),
+        "topics": normalize_list(parsed.get("topics")),
+        "takeaways": normalize_list(parsed.get("takeaways")),
+        "questions": normalize_list(parsed.get("questions")),
+        "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
+        "study_guide": str(parsed.get("study_guide", "")).strip(),
+        "critique": str(parsed.get("critique", "")).strip(),
+        "_metrics": metrics,
+    }
+
+
+async def generate_ai_notes(
+    video: dict, progress_callback: Optional[ProgressCallback] = None
+) -> Optional[dict]:
+    """Generate full AI notes — dispatches to the configured provider."""
+    if AI_PROVIDER == "anthropic":
+        return await _generate_ai_notes_anthropic(video, progress_callback)
+    if AI_PROVIDER == "openai":
+        return await _generate_ai_notes_openai(video, progress_callback)
+    return await _generate_ai_notes_ollama(video, progress_callback)

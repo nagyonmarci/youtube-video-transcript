@@ -26,12 +26,13 @@ from pydantic import BaseModel
 import asyncpg
 import httpx
 
-from ai_notes import configure_ai_notes, generate_ai_notes
+from ai_notes import configure_ai_notes, generate_ai_notes, generate_quick_summary
 from constants import (
     HEARTBEAT_INTERVAL, WORKER_IDLE_SLEEP, WORKER_POLL_BACKOFF,
     STREAM_UPDATE_INTERVAL, BOOTSTRAP_CHECK_INTERVAL, IDLE_SLEEP,
     STOPPED_BY_USER,
-    QUEUE_FETCH, QUEUE_AI,
+    QUEUE_FETCH, QUEUE_QUICK, QUEUE_AI,
+    JOB_QUICK_NOTE_VIDEO, JOB_AI_NOTE_VIDEO,
 )
 from directus_client import DirectusClient, now_iso
 from youtube_fetcher import (
@@ -92,9 +93,18 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal
 OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
 AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
+AI_NOTES_QUICK_ENABLED = os.environ.get("AI_NOTES_QUICK_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "qwen3:4b")
+OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "120"))
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")
+AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 FETCHER_ROLE = os.environ.get("FETCHER_ROLE", "all").lower()
 WORKER_QUEUES = {item.strip() for item in os.environ.get("WORKER_QUEUES", "fetch,ai").split(",") if item.strip()}
 FETCH_WORKER_CONCURRENCY = max(0, int(os.environ.get("FETCH_WORKER_CONCURRENCY", "1")))
+QUICK_WORKER_CONCURRENCY = max(0, int(os.environ.get("QUICK_WORKER_CONCURRENCY", "1")))
 AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
 STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
 JOB_CLEANUP_DAYS = int(os.environ.get("JOB_CLEANUP_DAYS", "7"))
@@ -105,11 +115,14 @@ pg_pool: Optional[asyncpg.Pool] = None
 
 # Worker state
 worker_task: Optional[asyncio.Task] = None
+quick_worker_task: Optional[asyncio.Task] = None
 ai_worker_task: Optional[asyncio.Task] = None
 stop_flag = False
 current_task_info: dict = {}
+current_quick_task_info: dict = {}
 current_ai_task_info: dict = {}
 current_job_id: Optional[str] = None
+current_quick_job_id: Optional[str] = None
 current_ai_job_id: Optional[str] = None
 scheduler: Optional[AsyncIOScheduler] = None
 current_job_id_var: ContextVar[Optional[str]] = ContextVar("current_job_id", default=None)
@@ -180,6 +193,14 @@ def current_app_settings() -> dict:
         "ai_notes_year_backfill_idle_seconds": AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS,
         "ai_notes_worker_enabled": AI_NOTES_WORKER_ENABLED,
         "ai_notes_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+        "ai_notes_quick_enabled": AI_NOTES_QUICK_ENABLED,
+        "ollama_quick_model": OLLAMA_QUICK_MODEL,
+        "ollama_quick_timeout": OLLAMA_QUICK_TIMEOUT,
+        "ai_provider": AI_PROVIDER,
+        "ai_cloud_model": AI_CLOUD_MODEL,
+        "anthropic_api_key": ANTHROPIC_API_KEY,
+        "openai_api_key": OPENAI_API_KEY,
+        "openai_base_url": OPENAI_BASE_URL,
     }
 
 
@@ -190,6 +211,8 @@ def apply_app_settings(settings: dict) -> None:
     global AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE
     global AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS
     global AI_NOTES_WORKER_ENABLED, AI_NOTES_JOB_COOLDOWN_SECONDS
+    global AI_NOTES_QUICK_ENABLED, OLLAMA_QUICK_MODEL, OLLAMA_QUICK_TIMEOUT
+    global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
 
     OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
     OLLAMA_CHAT_MODEL = str(settings.get("ollama_chat_model") or OLLAMA_CHAT_MODEL).strip()
@@ -206,11 +229,32 @@ def apply_app_settings(settings: dict) -> None:
     AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = int_setting(settings.get("ai_notes_year_backfill_idle_seconds"), AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS, 10)
     AI_NOTES_WORKER_ENABLED = bool_setting(settings.get("ai_notes_worker_enabled", AI_NOTES_WORKER_ENABLED))
     AI_NOTES_JOB_COOLDOWN_SECONDS = int_setting(settings.get("ai_notes_job_cooldown_seconds"), AI_NOTES_JOB_COOLDOWN_SECONDS, 0, 3600)
+    AI_NOTES_QUICK_ENABLED = bool_setting(settings.get("ai_notes_quick_enabled", AI_NOTES_QUICK_ENABLED))
+    if settings.get("ollama_quick_model"):
+        OLLAMA_QUICK_MODEL = str(settings["ollama_quick_model"]).strip()
+    OLLAMA_QUICK_TIMEOUT = int_setting(settings.get("ollama_quick_timeout"), OLLAMA_QUICK_TIMEOUT, 10)
+    if settings.get("ai_provider"):
+        AI_PROVIDER = str(settings["ai_provider"]).lower().strip()
+    if settings.get("ai_cloud_model"):
+        AI_CLOUD_MODEL = str(settings["ai_cloud_model"]).strip()
+    if settings.get("anthropic_api_key") is not None:
+        ANTHROPIC_API_KEY = str(settings["anthropic_api_key"])
+    if settings.get("openai_api_key") is not None:
+        OPENAI_API_KEY = str(settings["openai_api_key"])
+    if settings.get("openai_base_url"):
+        OPENAI_BASE_URL = str(settings["openai_base_url"]).rstrip("/")
     configure_ai_notes(
         base_url=OLLAMA_BASE_URL,
         model=OLLAMA_CHAT_MODEL,
         max_chars=AI_NOTES_MAX_CHARS,
         timeout=OLLAMA_TIMEOUT,
+        quick_model=OLLAMA_QUICK_MODEL,
+        quick_timeout=OLLAMA_QUICK_TIMEOUT,
+        provider=AI_PROVIDER,
+        cloud_model=AI_CLOUD_MODEL,
+        anthropic_api_key=ANTHROPIC_API_KEY,
+        openai_api_key=OPENAI_API_KEY,
+        openai_base_url=OPENAI_BASE_URL,
     )
 
 
@@ -746,6 +790,7 @@ async def ensure_database_indexes():
 # ---- Worker ----
 
 FETCH_HANDLERS: dict = {}  # populated after handler functions are defined
+QUICK_HANDLERS: dict = {}
 AI_HANDLERS: dict = {}
 
 
@@ -885,6 +930,72 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             current_ai_job_id = None
             if AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag:
                 await asyncio.sleep(AI_NOTES_JOB_COOLDOWN_SECONDS)
+
+
+async def quick_worker_loop(worker_name: str = "quick-worker"):
+    """Background worker for quick summaries — runs before the full AI notes worker."""
+    global stop_flag, current_quick_task_info, current_quick_job_id
+    while True:
+        if stop_flag:
+            await asyncio.sleep(WORKER_IDLE_SLEEP)
+            continue
+        await refresh_app_settings_if_due()
+        try:
+            await reset_stale_running_jobs_if_due()
+        except Exception as e:
+            logger.warning(f"Could not reset stale quick jobs: {e}")
+        try:
+            job = await claim_next_job(QUEUE_QUICK, worker_name)
+        except Exception as e:
+            logger.warning(f"Could not poll quick jobs: {e}")
+            await asyncio.sleep(WORKER_POLL_BACKOFF)
+            continue
+
+        if not job:
+            await asyncio.sleep(WORKER_IDLE_SLEEP)
+            continue
+
+        await refresh_app_settings_if_due(force=True)
+        task = job.get("payload") or {}
+        task_type = task.get("type")
+        current_quick_job_id = job["id"]
+        current_quick_task_info = {}
+        job_id_token = current_job_id_var.set(job["id"])
+        job_queue_token = current_job_queue_var.set(QUEUE_QUICK)
+        task_info_token = current_task_info_var.set(current_quick_task_info)
+        heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
+        try:
+            handler = QUICK_HANDLERS.get(task_type)
+            if not handler:
+                raise ValueError(f"Unknown quick job type: {task_type}")
+            await handler(task)
+            latest = await directus.get_job(job["id"])
+            if latest and latest.get("status") != "cancelled":
+                finished = datetime.now(timezone.utc)
+                await directus.update_job(job["id"], {
+                    "status": "done",
+                    "finished_at": finished.isoformat(),
+                    "duration_seconds": job_duration_seconds(job, finished),
+                    "locked_at": None,
+                    "locked_by": None,
+                })
+        except asyncio.CancelledError:
+            await retry_or_fail_job(job, RuntimeError(STOPPED_BY_USER), stopped=True)
+            raise
+        except Exception as e:
+            logger.error(f"Quick worker error on task {task}: {e}", exc_info=True)
+            await retry_or_fail_job(job, e)
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            current_job_id_var.reset(job_id_token)
+            current_job_queue_var.reset(job_queue_token)
+            current_task_info_var.reset(task_info_token)
+            current_quick_task_info = {}
+            current_quick_job_id = None
 
 
 async def _backfill_metadata(existing: dict, videos: list):
@@ -1368,11 +1479,64 @@ async def process_single_ai_note_task(task: dict):
         })
 
 
+async def process_quick_note_task(task: dict):
+    """Generate a quick summary for a video then enqueue it for full AI notes."""
+    global current_quick_task_info
+    video_id = task["video_id"]
+    video = await directus.get_video(video_id)
+    if not video:
+        logger.warning(f"Quick note video not found: {video_id}")
+        return
+    if not (video.get("transcript") or video.get("transcript_timed")):
+        await update_video_ai_status(video_id, "error", "No transcript available for quick summary")
+        return
+
+    current_quick_task_info = {
+        "type": JOB_QUICK_NOTE_VIDEO,
+        "phase": "quick_summary",
+        "video_id": video_id,
+        "video": video.get("title") or video.get("video_id"),
+        "started_at": now_iso(),
+    }
+
+    async def quick_progress(progress: dict) -> None:
+        label = progress.get("progress_label")
+        try:
+            await update_current_job_phase(QUEUE_QUICK, progress.get("phase", "quick_summary"), label, {})
+        except Exception as e:
+            logger.warning(f"Could not update quick progress: {e}")
+
+    try:
+        quick = await generate_quick_summary(video, progress_callback=quick_progress)
+        if quick:
+            await directus.update_video(video["id"], {
+                "quick_summary": quick,
+                "quick_summary_model": OLLAMA_QUICK_MODEL,
+                "quick_summary_generated_at": now_iso(),
+            })
+            logger.info(f"Quick summary stored for {video.get('video_id') or video_id}")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning(f"Quick summary failed for {video_id} (continuing to full notes): {e}")
+
+    # Always enqueue full notes, even if quick summary failed
+    await enqueue_ai_job({"type": JOB_AI_NOTE_VIDEO, "video_id": video_id})
+
+
+async def enqueue_quick_job(task: dict, label: Optional[str] = None):
+    """Create a persistent quick-summary job."""
+    return await directus.create_job(QUEUE_QUICK, task, label=label, dedupe_key=job_dedupe_key(QUEUE_QUICK, task))
+
+
 async def enqueue_ai_note(video_id: str):
-    """Mark a video as queued for AI notes and enqueue it on the AI worker."""
+    """Mark a video as queued for AI notes and route it to the first pipeline step."""
     await update_video_ai_status(video_id, "pending")
-    task = {"type": "ai_note_video", "video_id": video_id}
-    return await directus.create_job("ai", task, dedupe_key=job_dedupe_key("ai", task))
+    if AI_NOTES_QUICK_ENABLED:
+        task = {"type": JOB_QUICK_NOTE_VIDEO, "video_id": video_id}
+        return await directus.create_job(QUEUE_QUICK, task, dedupe_key=job_dedupe_key(QUEUE_QUICK, task))
+    task = {"type": JOB_AI_NOTE_VIDEO, "video_id": video_id}
+    return await directus.create_job(QUEUE_AI, task, dedupe_key=job_dedupe_key(QUEUE_AI, task))
 
 
 def _init_handlers():
@@ -1383,9 +1547,12 @@ def _init_handlers():
         "refresh_dates": lambda task: process_refresh_dates_task(),
         "refresh_thumbnails": lambda task: process_refresh_thumbnails_task(),
     })
+    QUICK_HANDLERS.update({
+        JOB_QUICK_NOTE_VIDEO: process_quick_note_task,
+    })
     AI_HANDLERS.update({
         "ai_notes": process_ai_notes_task,
-        "ai_note_video": process_single_ai_note_task,
+        JOB_AI_NOTE_VIDEO: process_single_ai_note_task,
     })
 
 _init_handlers()
@@ -1629,6 +1796,10 @@ def create_worker_tasks() -> list[asyncio.Task]:
         for index in range(FETCH_WORKER_CONCURRENCY):
             name = f"{WORKER_ID}:fetch:{index + 1}"
             tasks.append(asyncio.create_task(worker_loop(name), name=name))
+    if QUEUE_QUICK in WORKER_QUEUES:
+        for index in range(QUICK_WORKER_CONCURRENCY):
+            name = f"{WORKER_ID}:quick:{index + 1}"
+            tasks.append(asyncio.create_task(quick_worker_loop(name), name=name))
     if "ai" in WORKER_QUEUES:
         for index in range(AI_WORKER_CONCURRENCY):
             name = f"{WORKER_ID}:ai:{index + 1}"
@@ -1739,6 +1910,14 @@ class AppSettingsRequest(BaseModel):
     ai_notes_year_backfill_idle_seconds: Optional[int] = None
     ai_notes_worker_enabled: Optional[bool] = None
     ai_notes_job_cooldown_seconds: Optional[int] = None
+    ai_notes_quick_enabled: Optional[bool] = None
+    ollama_quick_model: Optional[str] = None
+    ollama_quick_timeout: Optional[int] = None
+    ai_provider: Optional[str] = None
+    ai_cloud_model: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_base_url: Optional[str] = None
 
 
 class AiNotesRequest(BaseModel):
@@ -2023,28 +2202,35 @@ async def health():
 @app.get("/status")
 async def status():
     fetch_current = await current_job_snapshot("fetch", current_task_info, current_job_id)
+    quick_current = await current_job_snapshot(QUEUE_QUICK, current_quick_task_info, current_quick_job_id)
     ai_current = await current_job_snapshot("ai", current_ai_task_info, current_ai_job_id)
     ollama_resources = await get_ollama_resource_status()
     fetch_counts = await job_status_counts("fetch")
+    quick_counts = await job_status_counts(QUEUE_QUICK)
     ai_counts = await job_status_counts("ai")
     ai_year_missing = None
     if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
         ai_year_missing = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
     return {
         "queue_size": fetch_counts["queued"],
+        "quick_queue_size": quick_counts["queued"],
         "ai_queue_size": ai_counts["queued"],
         "fetch_active_size": fetch_counts["active"],
+        "quick_active_size": quick_counts["active"],
         "ai_active_size": ai_counts["active"],
         "queues": {
             "fetch": fetch_counts,
+            QUEUE_QUICK: quick_counts,
             "ai": ai_counts,
         },
         "workers": {
             "fetch_concurrency": FETCH_WORKER_CONCURRENCY,
+            "quick_concurrency": QUICK_WORKER_CONCURRENCY,
             "ai_concurrency": AI_WORKER_CONCURRENCY,
         },
         "stop_flag": stop_flag,
         "current_task": fetch_current,
+        "current_quick_task": quick_current,
         "current_ai_task": ai_current,
         "resources": {
             "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
@@ -2482,29 +2668,33 @@ async def delete_ai_note_video(video_id: str):
 
 @app.post("/stop")
 async def stop_processing(queue: Optional[str] = None):
-    """Cancel jobs for a specific queue (fetch|ai) or both if queue is omitted."""
-    global stop_flag, worker_task, ai_worker_task
+    """Cancel jobs for a specific queue (fetch|quick|ai) or all if queue is omitted."""
     stop_fetch = queue in (None, "fetch")
+    stop_quick = queue in (None, QUEUE_QUICK)
     stop_ai = queue in (None, "ai")
 
     drained = await cancel_jobs("fetch", include_running=True) if stop_fetch else 0
+    quick_drained = await cancel_jobs(QUEUE_QUICK, include_running=True) if stop_quick else 0
     ai_drained = await cancel_jobs("ai", include_running=True) if stop_ai else 0
 
     return {
         "stopped": True,
         "queue": queue or "all",
         "drained": drained,
+        "quick_drained": quick_drained,
         "ai_drained": ai_drained,
     }
 
 
 @app.post("/resume")
-async def resume_processing():
-    """Resume processing after stop."""
-    global stop_flag, worker_task, ai_worker_task
+async def resume_processing(queue: Optional[str] = None):
+    """Resume processing after stop (fetch|quick|ai or all if omitted)."""
+    global stop_flag, worker_task, quick_worker_task, ai_worker_task
     stop_flag = False
-    if not worker_task or worker_task.done():
+    if queue in (None, "fetch") and (not worker_task or worker_task.done()):
         worker_task = asyncio.create_task(worker_loop())
-    if not ai_worker_task or ai_worker_task.done():
+    if queue in (None, QUEUE_QUICK) and (not quick_worker_task or quick_worker_task.done()):
+        quick_worker_task = asyncio.create_task(quick_worker_loop())
+    if queue in (None, "ai") and (not ai_worker_task or ai_worker_task.done()):
         ai_worker_task = asyncio.create_task(ai_worker_loop())
-    return {"resumed": True}
+    return {"resumed": True, "queue": queue or "all"}

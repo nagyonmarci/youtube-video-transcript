@@ -11,10 +11,12 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - Infinite-scroll video list with full-text search, sort, and filters (transcript status, AI notes status, members-only)
 - Export transcripts per-video, per-channel, or in bulk — TXT, MD, or Obsidian-compatible MD
 - Obsidian export with YAML frontmatter, clickable timestamped transcript links back to YouTube
-- AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note — generated via Ollama
+- AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note
+- Two-phase AI pipeline: a small fast model generates a quick summary first (Phase 1); the full structured notes are produced by the full model (Phase 2, separate queue)
+- AI provider is user-selectable: local Ollama (default), Anthropic Claude, or any OpenAI-compatible API — configured in **Admin → Setup**, no container restart needed
 - AI fields are regenerable individually; AI processing runs on a separate queue and never blocks transcript fetching
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
-- Admin dashboard shows both job queues (fetch + AI), running/stuck jobs, per-job runtime/duration, and allows pause/resume/delete
+- Admin dashboard shows all three job queues (Fetch / Quick Summary / AI Notes) with independent Stop/Start controls per queue, running/stuck jobs, per-job runtime/duration, and allows pause/resume/delete
 - Admin resource monitor streams Ollama status live and shows loaded model, GPU/VRAM placement, AI worker state, and AI cooldown
 - Daily automatic channel refresh (default: 07:00 `Europe/Budapest`)
 - UI language toggle: English / Hungarian (persisted in `localStorage`)
@@ -95,6 +97,7 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `REFRESH_CRON` | Automatic channel refresh schedule | `0 7 * * *` |
 | `SCHEDULER_TIMEZONE` | Cron timezone | `Europe/Budapest` |
 | `FETCH_WORKER_CONCURRENCY` | Parallel fetch-worker threads | `1` |
+| `QUICK_WORKER_CONCURRENCY` | Parallel quick-summary worker threads | `1` |
 | `AI_WORKER_CONCURRENCY` | Parallel AI-worker threads | `1` |
 | `STALE_JOB_MINUTES` | Re-queue jobs stuck in `running` after N minutes | `30` |
 | `JOB_CLEANUP_DAYS` | Auto-delete completed/cancelled jobs after N days | `7` |
@@ -103,7 +106,7 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
 | `WHISPER_BATCH_LIMIT` | Max videos per Whisper batch | `50` |
 
-AI/Ollama settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
+AI settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, AI provider (Ollama / Anthropic / OpenAI), cloud model name, API keys, quick-summary model/timeout, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
 
 ## Development Workflow
 
@@ -144,14 +147,15 @@ To reduce AI load from the UI:
 
 ## Job Queue
 
-The `jobs` Directus collection is the shared work queue. Two separate workers poll it:
+The `jobs` Directus collection is the shared work queue. Three separate queues are processed by two workers:
 
 - `fetch-worker` — `fetch` queue: channel refresh, video fetch, metadata backfill, date backfill
-- `ai-worker` — `ai` queue: per-video AI note generation
+- `ai-worker` — `quick` queue: fast one-paragraph summary (small model, Phase 1); then enqueues to `ai` queue
+- `ai-worker` — `ai` queue: full structured notes (summary, topics, takeaways, questions, study guide, critique, Obsidian note) via the configured provider (Ollama / Anthropic / OpenAI)
 
 Jobs have deduplication keys, retry counters, SQL-lock-based claiming (a job can only be claimed by one worker at a time), progress tracking, and runtime measurement. Worker startup re-queues jobs left behind by the same previous worker instance, and stale running jobs are re-queued periodically after `STALE_JOB_MINUTES`. Running jobs show elapsed time in the Admin dashboard, and completed jobs persist `duration_seconds` for later comparison. AI note jobs update their phase while they run (`waiting for first token`, `generating`, `parsing JSON`) and persist Ollama timing metrics in `jobs.metrics`: model load time, time to first token, prompt eval time/count, generation time/count, token throughput, prompt size, output size, and JSON parse time. The Admin job table highlights the largest AI phase as the likely bottleneck. A channel refresh error on one video does not stop the rest.
 
-`FETCH_WORKER_CONCURRENCY` and `AI_WORKER_CONCURRENCY` increase parallelism — raise them only where the bottleneck (YouTube rate limits or LLM throughput) allows.
+`FETCH_WORKER_CONCURRENCY`, `QUICK_WORKER_CONCURRENCY`, and `AI_WORKER_CONCURRENCY` increase parallelism — raise them only where the bottleneck (YouTube rate limits or LLM throughput) allows.
 
 ## Rate Limiting
 
