@@ -374,7 +374,7 @@ export default function VideoTable({
                         <span className={`badge badge-${video.status}`}>
                           {st.icon} {st.label}
                         </span>
-                        {video.quick_summary && !video.summary && video.ai_notes_status !== 'pending' && (
+                        {video.quick_summary && !video.summary && (
                           <span
                             className="badge badge-pending"
                             title={video.quick_summary}

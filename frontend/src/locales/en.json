@@ -96,7 +96,7 @@
     "noTranscript": "No transcript",
     "none": "None",
     "aiDone": "AI done",
-    "aiRunning": "AI running",
+    "aiRunning": "AI queued",
     "aiError": "AI error"
   },
   "filter": {
