@@ -120,6 +120,8 @@
     "channel": "Channel",
     "topic": "Topic",
     "noTopic": "No topic",
+    "clickToRename": "Click to rename",
+    "dropHere": "Drop here…",
     "videos": "Videos",
     "transcript": "Transcript",
     "name": "Name",

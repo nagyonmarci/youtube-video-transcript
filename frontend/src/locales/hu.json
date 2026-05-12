@@ -120,6 +120,8 @@
     "channel": "Csatorna",
     "topic": "Téma",
     "noTopic": "Téma nélkül",
+    "clickToRename": "Kattints az átnevezéshez",
+    "dropHere": "Húzd ide…",
     "videos": "Videók",
     "transcript": "Transzkript",
     "name": "Név",
