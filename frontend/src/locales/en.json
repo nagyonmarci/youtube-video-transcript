@@ -88,6 +88,7 @@
     "error": "Error",
     "cancelled": "Cancelled",
     "empty": "Empty",
+    "stopped": "Stopped",
     "processing": "Processing",
     "pending": "Pending",
     "inProgress": "In Progress",
