@@ -237,6 +237,7 @@ All three are covered by `.gitignore`.
 | Ollama connection refused | Wrong base URL or Ollama not running | Verify the Ollama URL in **Admin → Setup**; `http://host.docker.internal:11434` works on Docker Desktop (Mac/Windows) |
 | Ollama shows `100%` GPU/VRAM but fans vary | Ollama reports model placement, not live compute utilization | Use Admin → Processing for the live loaded-model/VRAM view; macOS Activity Monitor or `ollama ps` can help inspect host-side load |
 | AI still uses GPU after disabling auto mode | Existing AI jobs were already queued | Use **AI worker may run** off, Stop on the AI worker line, or pause/delete queued AI jobs in Admin |
+| Stop button on AI/Quick/Fetch queue has no effect | Requires fetcher rebuild after the per-queue stop-flag fix | Rebuild: `docker compose build fetcher && docker compose up -d fetcher ai-worker` |
 | Whisper model not found | First-start download incomplete | Check `docker compose logs whisper`; the download retries on restart |
 | Job stuck in `running` | Worker crashed mid-job | Jobs are automatically re-queued after `STALE_JOB_MINUTES`; or use the Admin dashboard to cancel manually |
 | `web` network not found | Network not created | `docker network create web` |
