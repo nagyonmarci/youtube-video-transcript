@@ -122,7 +122,7 @@ docker compose logs -f fetcher
 docker compose logs --tail=120 fetch-worker
 
 # Syntax-check Python (no test suite exists)
-python3 -m py_compile fetcher/main.py fetcher/directus_client.py fetcher/youtube_fetcher.py fetcher/ai_notes.py
+python3 -m py_compile fetcher/*.py fetcher/routes/*.py
 
 # Check yt-dlp version inside container
 docker compose exec -T fetcher yt-dlp --version   # expected: 2026.3.17
