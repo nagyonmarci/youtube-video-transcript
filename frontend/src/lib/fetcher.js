@@ -149,6 +149,19 @@ export async function generateAiNotesForChannel(channelId, limit = 500) {
   return res.json();
 }
 
+export async function generateQuickNoteForVideo(videoId) {
+  const res = await fetch(`${FETCHER_URL}/quick-notes/${videoId}`, { method: 'POST' });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.detail ? `: ${data.detail}` : '';
+    } catch {}
+    throw new Error(`quick-notes/${videoId} → ${res.status}${detail}`);
+  }
+  return res.json();
+}
+
 export async function generateAiNoteForVideo(videoId) {
   const res = await fetch(`${FETCHER_URL}/ai-notes/${videoId}`, { method: 'POST' });
   if (!res.ok) {

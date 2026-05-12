@@ -51,6 +51,7 @@
     "whisperStart": "🎙 Start Whisper",
     "settings": "Settings",
     "transcript": "Transcript",
+    "quickNote": "Quick",
     "aiNote": "AI note",
     "aiRegen": "AI redo",
     "aiGenerate": "Generate AI",
@@ -200,6 +201,7 @@
     "timedTranscript": "Timed transcript",
     "noTimedTranscript": "No timed version available for this transcript",
     "mindmap": "Download Markmap mind map (Obsidian markmap plugin required)",
+    "generateQuick": "Generate quick summary (priority job)",
     "generateAi": "Generate AI summary, topics, takeaways, questions and Obsidian note",
     "deleteAi": "Delete the generated AI note fields"
   },
