@@ -118,6 +118,9 @@ worker_task: Optional[asyncio.Task] = None
 quick_worker_task: Optional[asyncio.Task] = None
 ai_worker_task: Optional[asyncio.Task] = None
 stop_flag = False
+stop_fetch_flag = False
+stop_quick_flag = False
+stop_ai_flag = False
 current_task_info: dict = {}
 current_quick_task_info: dict = {}
 current_ai_task_info: dict = {}
@@ -796,9 +799,9 @@ AI_HANDLERS: dict = {}
 
 async def worker_loop(worker_name: str = "fetch-worker"):
     """Main background worker that processes queued tasks."""
-    global stop_flag, current_task_info, current_job_id
+    global stop_flag, stop_fetch_flag, current_task_info, current_job_id
     while True:
-        if stop_flag:
+        if stop_flag or stop_fetch_flag:
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         try:
@@ -861,9 +864,9 @@ async def worker_loop(worker_name: str = "fetch-worker"):
 
 async def ai_worker_loop(worker_name: str = "ai-worker"):
     """Background worker for AI notes so LLM calls do not block fetching."""
-    global stop_flag, current_ai_task_info, current_ai_job_id
+    global stop_flag, stop_ai_flag, current_ai_task_info, current_ai_job_id
     while True:
-        if stop_flag:
+        if stop_flag or stop_ai_flag:
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         await refresh_app_settings_if_due()
@@ -928,15 +931,15 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             current_task_info_var.reset(task_info_token)
             current_ai_task_info = {}
             current_ai_job_id = None
-            if AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag:
+            if AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag and not stop_ai_flag:
                 await asyncio.sleep(AI_NOTES_JOB_COOLDOWN_SECONDS)
 
 
 async def quick_worker_loop(worker_name: str = "quick-worker"):
     """Background worker for quick summaries — runs before the full AI notes worker."""
-    global stop_flag, current_quick_task_info, current_quick_job_id
+    global stop_flag, stop_quick_flag, current_quick_task_info, current_quick_job_id
     while True:
-        if stop_flag:
+        if stop_flag or stop_quick_flag:
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         await refresh_app_settings_if_due()
@@ -1033,7 +1036,7 @@ async def _process_channel_transcripts(
     global current_task_info
     total = len(transcript_videos)
     for i, video in enumerate(transcript_videos):
-        if stop_flag:
+        if stop_flag or stop_fetch_flag:
             break
 
         current_task_info = {
@@ -1291,7 +1294,7 @@ async def process_refresh_dates_task():
     date_missing = 0
 
     for i, video in enumerate(videos):
-        if stop_flag:
+        if stop_flag or stop_fetch_flag:
             break
 
         yt_id = video["video_id"]
@@ -1338,7 +1341,7 @@ async def process_refresh_thumbnails_task():
     missing = 0
 
     for i, video in enumerate(videos):
-        if stop_flag:
+        if stop_flag or stop_fetch_flag:
             break
 
         yt_id = video["video_id"]
@@ -1424,7 +1427,7 @@ async def process_ai_notes_task(task: dict):
     queued = 0
     skipped = 0
     for i, video in enumerate(videos):
-        if stop_flag:
+        if stop_flag or stop_ai_flag:
             break
         video_id = video["id"]
         current_ai_task_info = {
@@ -1571,7 +1574,7 @@ async def enqueue_ai_job(task: dict, label: Optional[str] = None):
 async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool = False) -> dict:
     """Keep the AI queue filled with missing notes for the configured upload year."""
     global last_ai_year_backfill_attempt
-    if not AI_NOTES_AUTO or not AI_NOTES_YEAR_BACKFILL_ENABLED or stop_flag:
+    if not AI_NOTES_AUTO or not AI_NOTES_YEAR_BACKFILL_ENABLED or stop_flag or stop_ai_flag:
         return {"enabled": False, "queued": 0, "skipped": 0}
 
     now = time.monotonic()
@@ -1613,7 +1616,7 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
     queued = 0
     skipped = 0
     for video in videos:
-        if queued >= capacity or stop_flag:
+        if queued >= capacity or stop_flag or stop_ai_flag:
             break
         video_id = video["id"]
         if video_id in active_video_ids:
@@ -2229,6 +2232,11 @@ async def status():
             "ai_concurrency": AI_WORKER_CONCURRENCY,
         },
         "stop_flag": stop_flag,
+        "stopped_queues": {
+            "fetch": stop_flag or stop_fetch_flag,
+            QUEUE_QUICK: stop_flag or stop_quick_flag,
+            "ai": stop_flag or stop_ai_flag,
+        },
         "current_task": fetch_current,
         "current_quick_task": quick_current,
         "current_ai_task": ai_current,
@@ -2687,10 +2695,20 @@ async def delete_ai_note_video(video_id: str):
 
 @app.post("/stop")
 async def stop_processing(queue: Optional[str] = None):
-    """Cancel jobs for a specific queue (fetch|quick|ai) or all if queue is omitted."""
+    """Pause a specific queue (fetch|quick|ai) or all if queue is omitted."""
+    global stop_flag, stop_fetch_flag, stop_quick_flag, stop_ai_flag
     stop_fetch = queue in (None, "fetch")
     stop_quick = queue in (None, QUEUE_QUICK)
     stop_ai = queue in (None, "ai")
+
+    if stop_fetch:
+        stop_fetch_flag = True
+    if stop_quick:
+        stop_quick_flag = True
+    if stop_ai:
+        stop_ai_flag = True
+    if queue is None:
+        stop_flag = True
 
     drained = await cancel_jobs("fetch", include_running=True) if stop_fetch else 0
     quick_drained = await cancel_jobs(QUEUE_QUICK, include_running=True) if stop_quick else 0
@@ -2708,8 +2726,16 @@ async def stop_processing(queue: Optional[str] = None):
 @app.post("/resume")
 async def resume_processing(queue: Optional[str] = None):
     """Resume processing after stop (fetch|quick|ai or all if omitted)."""
-    global stop_flag, worker_task, quick_worker_task, ai_worker_task
-    stop_flag = False
+    global stop_flag, stop_fetch_flag, stop_quick_flag, stop_ai_flag
+    global worker_task, quick_worker_task, ai_worker_task
+    if queue in (None, "fetch"):
+        stop_fetch_flag = False
+    if queue in (None, QUEUE_QUICK):
+        stop_quick_flag = False
+    if queue in (None, "ai"):
+        stop_ai_flag = False
+    if queue is None:
+        stop_flag = False
     if queue in (None, "fetch") and (not worker_task or worker_task.done()):
         worker_task = asyncio.create_task(worker_loop())
     if queue in (None, QUEUE_QUICK) and (not quick_worker_task or quick_worker_task.done()):

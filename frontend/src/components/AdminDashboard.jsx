@@ -158,7 +158,7 @@ function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
   };
 }
 
-function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop, onStart }) {
+function StatusLine({ title, queueSize, queueStats, workerCount, current, stopped, onStop, onStart }) {
   const { t } = useT();
   const queued = Number(queueStats?.queued ?? queueSize ?? 0);
   const running = Number(queueStats?.running ?? (current?.type ? 1 : 0));
@@ -166,6 +166,8 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop
   const active = queued > 0 || running > 0 || Boolean(current?.type);
   const progressText = formatProgress(current?.progress_current, current?.progress_total);
   const runtimeText = formatDuration(current?.duration_seconds);
+  const badgeClass = stopped ? 'badge-paused' : active ? 'badge-processing' : 'badge-done';
+  const badgeLabel = stopped ? t('status.stopped') : active ? t('status.running') : t('status.empty');
   return (
     <div className="process-line">
       <div>
@@ -194,10 +196,8 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, onStop
         )}
       </div>
       <div className="process-actions">
-        <span className={`badge ${active ? 'badge-processing' : 'badge-done'}`}>
-          {active ? t('status.running') : t('status.empty')}
-        </span>
-        {active && onStop && <button className="danger" onClick={onStop}>{t('btn.stop')}</button>}
+        <span className={`badge ${badgeClass}`}>{badgeLabel}</span>
+        {(active || stopped) && onStop && <button className="danger" onClick={onStop}>{t('btn.stop')}</button>}
         {onStart && <button onClick={onStart}>{t('btn.start')}</button>}
       </div>
     </div>
@@ -543,6 +543,7 @@ export default function AdminDashboard({
   const fetchWorkers = fetcherStatus?.workers?.fetch_concurrency;
   const quickWorkers = fetcherStatus?.workers?.quick_concurrency;
   const aiWorkers = fetcherStatus?.workers?.ai_concurrency ?? resourceStatus.ai_worker_concurrency;
+  const stoppedQueues = fetcherStatus?.stopped_queues || {};
 
   return (
     <section className="admin-dashboard">
@@ -617,6 +618,7 @@ export default function AdminDashboard({
             queueStats={fetchQueue}
             workerCount={fetchWorkers}
             current={fetcherStatus?.current_task}
+            stopped={!!stoppedQueues.fetch}
             onStop={() => runAction(() => stopProcessing('fetch'), t('msg.queueRefreshed'))}
             onStart={() => runAction(() => resumeProcessing('fetch'), t('msg.queueRefreshed'))}
           />
@@ -631,6 +633,7 @@ export default function AdminDashboard({
             queueStats={quickQueue}
             workerCount={quickWorkers}
             current={fetcherStatus?.current_quick_task}
+            stopped={!!stoppedQueues.quick}
             onStop={() => runAction(() => stopProcessing('quick'), t('msg.queueRefreshed'))}
             onStart={() => runAction(() => resumeProcessing('quick'), t('msg.queueRefreshed'))}
           />
@@ -645,6 +648,7 @@ export default function AdminDashboard({
             queueStats={aiQueue}
             workerCount={aiWorkers}
             current={fetcherStatus?.current_ai_task}
+            stopped={!!stoppedQueues.ai}
             onStop={() => runAction(() => stopProcessing('ai'), t('msg.queueRefreshed'))}
             onStart={() => runAction(() => resumeProcessing('ai'), t('msg.queueRefreshed'))}
           />
