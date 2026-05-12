@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { deleteChannel, getAllChannelVideos } from '../lib/directus.js';
+import { useState, useMemo, useRef, useCallback } from 'react';
+import { deleteChannel, getAllChannelVideos, updateChannel } from '../lib/directus.js';
 import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
 import {
   channelToTxt, channelToMd, channelToObsidianMd,
@@ -16,6 +16,14 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
   const [sortKey, setSortKey] = useState('name_asc');
   const [topicFilter, setTopicFilter] = useState('all');
 
+  // Drag & drop state
+  const [draggedChannelId, setDraggedChannelId] = useState(null);
+  const [dragOverTopic, setDragOverTopic] = useState(null);
+
+  // Inline topic rename state: { oldName, value }
+  const [editingTopic, setEditingTopic] = useState(null);
+  const topicInputRef = useRef(null);
+
   const SORT_OPTIONS = [
     { value: 'name_asc',   label: t('sort.nameAZ') },
     { value: 'name_desc',  label: t('sort.nameZA') },
@@ -29,6 +37,8 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     done: t('status.done'),
     error: t('status.error'),
   };
+
+  const noTopicLabel = t('label.noTopic');
 
   const topicOptions = useMemo(() => {
     const topics = [...new Set(
@@ -65,16 +75,21 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
   const groupedChannels = useMemo(() => {
     const groups = new Map();
     filtered.forEach(ch => {
-      const topic = (ch.topic || '').trim() || t('label.noTopic');
+      const topic = (ch.topic || '').trim() || noTopicLabel;
       if (!groups.has(topic)) groups.set(topic, []);
       groups.get(topic).push(ch);
     });
     return [...groups.entries()].sort(([a], [b]) => {
-      if (a === t('label.noTopic')) return 1;
-      if (b === t('label.noTopic')) return -1;
+      if (a === noTopicLabel) return 1;
+      if (b === noTopicLabel) return -1;
       return a.localeCompare(b);
     });
-  }, [filtered, t]);
+  }, [filtered, noTopicLabel]);
+
+  // Whether "No topic" group is already in the list
+  const hasNoTopicGroup = groupedChannels.some(([label]) => label === noTopicLabel);
+
+  // ---- Existing action handlers ----
 
   async function handleRefresh(e, ch) {
     e.stopPropagation();
@@ -126,7 +141,166 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     }
   }
 
+  // ---- Drag & drop handlers ----
+
+  const handleDragStart = useCallback((e, ch) => {
+    setDraggedChannelId(ch.id);
+    e.dataTransfer.effectAllowed = 'move';
+    // Minimal ghost label
+    e.dataTransfer.setData('text/plain', ch.id);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedChannelId(null);
+    setDragOverTopic(null);
+  }, []);
+
+  const handleDragOver = useCallback((e, topicLabel) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverTopic(topicLabel);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDragOverTopic(null);
+    }
+  }, []);
+
+  const handleDrop = useCallback(async (e, targetLabel) => {
+    e.preventDefault();
+    const id = draggedChannelId;
+    setDraggedChannelId(null);
+    setDragOverTopic(null);
+    if (!id) return;
+
+    const draggedCh = channels.find(c => c.id === id);
+    if (!draggedCh) return;
+
+    const newTopic = targetLabel === noTopicLabel ? '' : targetLabel;
+    const currentTopic = (draggedCh.topic || '').trim();
+    if (currentTopic === newTopic) return;
+
+    try {
+      await updateChannel(id, { topic: newTopic });
+      onChannelsChanged();
+    } catch (err) {
+      showMsg(t('msg.errGeneric', { error: err.message }), true);
+    }
+  }, [draggedChannelId, channels, noTopicLabel, onChannelsChanged, showMsg, t]);
+
+  // ---- Topic group rename ----
+
+  function startEditTopic(e, topicLabel) {
+    e.stopPropagation();
+    setEditingTopic({ oldName: topicLabel, value: topicLabel === noTopicLabel ? '' : topicLabel });
+    setTimeout(() => topicInputRef.current?.select(), 0);
+  }
+
+  async function commitTopicRename() {
+    if (!editingTopic) return;
+    const { oldName, value } = editingTopic;
+    setEditingTopic(null);
+
+    const newName = value.trim();
+    const oldKey = oldName === noTopicLabel ? '' : oldName;
+    if (newName === oldKey) return;
+
+    const toUpdate = channels.filter(ch => (ch.topic || '').trim() === oldKey);
+    if (!toUpdate.length) return;
+    try {
+      await Promise.all(toUpdate.map(ch => updateChannel(ch.id, { topic: newName })));
+      onChannelsChanged();
+    } catch (err) {
+      showMsg(t('msg.errGeneric', { error: err.message }), true);
+    }
+  }
+
+  function handleTopicKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); commitTopicRename(); }
+    if (e.key === 'Escape') setEditingTopic(null);
+  }
+
   const displayedTotalVideos = totalVideos ?? channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
+
+  function renderTopicSection(topicLabel, topicChannels) {
+    const isEditing = editingTopic?.oldName === topicLabel;
+    const isDropOver = dragOverTopic === topicLabel;
+    const isDragging = draggedChannelId !== null;
+
+    return (
+      <section
+        key={topicLabel}
+        className={`channel-topic-group${isDropOver ? ' channel-drop-over' : ''}`}
+        onDragOver={isDragging ? (e) => handleDragOver(e, topicLabel) : undefined}
+        onDragLeave={isDragging ? handleDragLeave : undefined}
+        onDrop={isDragging ? (e) => handleDrop(e, topicLabel) : undefined}
+      >
+        <div className="channel-topic-header">
+          {isEditing ? (
+            <input
+              ref={topicInputRef}
+              className="channel-topic-edit-input"
+              value={editingTopic.value}
+              onChange={e => setEditingTopic(et => ({ ...et, value: e.target.value }))}
+              onBlur={commitTopicRename}
+              onKeyDown={handleTopicKeyDown}
+              onClick={e => e.stopPropagation()}
+              placeholder={noTopicLabel}
+            />
+          ) : (
+            <h4
+              className="channel-topic-label"
+              onClick={(e) => startEditTopic(e, topicLabel)}
+              title={t('label.clickToRename')}
+            >
+              {topicLabel}
+            </h4>
+          )}
+          <span>{t('label.channelCount', { count: topicChannels.length })}</span>
+        </div>
+        <div className="channel-grid">
+          {topicChannels.map(ch => {
+            const isSelected = selectedChannel?.id === ch.id;
+            const isDraggingThis = draggedChannelId === ch.id;
+            return (
+              <div
+                key={ch.id}
+                className={`channel-card${isSelected ? ' channel-card-selected' : ''}${isDraggingThis ? ' channel-card-dragging' : ''}`}
+                draggable
+                onDragStart={(e) => handleDragStart(e, ch)}
+                onDragEnd={handleDragEnd}
+                onClick={() => !draggedChannelId && onSelect(ch)}
+              >
+                <div className="channel-card-name">
+                  {ch.name || ch.channel_handle || t('state.unknownChannel')}
+                </div>
+                <div className="channel-card-meta">
+                  <span className={`badge badge-${ch.status}`}>{STATUS_LABEL[ch.status] || ch.status}</span>
+                  {ch.video_count > 0 && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text2)' }}>{t('label.videoCount', { count: ch.video_count })}</span>
+                  )}
+                </div>
+                {isSelected && (
+                  <div className="channel-card-actions">
+                    <button onClick={e => handleRefresh(e, ch)} disabled={busy}>{t('btn.refresh')}</button>
+                    <button onClick={e => handleGenerateChannelAi(e, ch)} disabled={busy}>{t('header.aiNotes')}</button>
+                    <button onClick={e => handleExport(e, ch, 'txt')}>{t('export.txt')}</button>
+                    <button onClick={e => handleExport(e, ch, 'md')}>{t('export.md')}</button>
+                    <button onClick={e => handleExport(e, ch, 'obsidian')}>{t('export.obsidian')}</button>
+                    <button className="danger" onClick={e => handleDelete(e, ch)}>{t('btn.delete')}</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {topicChannels.length === 0 && (
+            <div className="channel-drop-hint">{t('label.dropHere')}</div>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="channel-section">
@@ -181,46 +355,14 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
         </div>
       </div>
 
-      {groupedChannels.map(([topic, topicChannels]) => (
-        <section key={topic} className="channel-topic-group">
-          <div className="channel-topic-header">
-            <h4>{topic}</h4>
-            <span>{t('label.channelCount', { count: topicChannels.length })}</span>
-          </div>
-          <div className="channel-grid">
-            {topicChannels.map(ch => {
-              const isSelected = selectedChannel?.id === ch.id;
-              return (
-                <div
-                  key={ch.id}
-                  className={`channel-card ${isSelected ? 'channel-card-selected' : ''}`}
-                  onClick={() => onSelect(ch)}
-                >
-                  <div className="channel-card-name">
-                    {ch.name || ch.channel_handle || t('state.unknownChannel')}
-                  </div>
-                  <div className="channel-card-meta">
-                    <span className={`badge badge-${ch.status}`}>{STATUS_LABEL[ch.status] || ch.status}</span>
-                    {ch.video_count > 0 && (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text2)' }}>{t('label.videoCount', { count: ch.video_count })}</span>
-                    )}
-                  </div>
-                  {isSelected && (
-                    <div className="channel-card-actions">
-                      <button onClick={e => handleRefresh(e, ch)} disabled={busy}>{t('btn.refresh')}</button>
-                      <button onClick={e => handleGenerateChannelAi(e, ch)} disabled={busy}>{t('header.aiNotes')}</button>
-                      <button onClick={e => handleExport(e, ch, 'txt')}>{t('export.txt')}</button>
-                      <button onClick={e => handleExport(e, ch, 'md')}>{t('export.md')}</button>
-                      <button onClick={e => handleExport(e, ch, 'obsidian')}>{t('export.obsidian')}</button>
-                      <button className="danger" onClick={e => handleDelete(e, ch)}>{t('btn.delete')}</button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+      {groupedChannels.map(([topic, topicChannels]) =>
+        renderTopicSection(topic, topicChannels)
+      )}
+
+      {/* Always show "No topic" as a drop target when dragging and no such group exists */}
+      {draggedChannelId && !hasNoTopicGroup && topicFilter === 'all' && !search &&
+        renderTopicSection(noTopicLabel, [])
+      }
 
       {filtered.length === 0 && (search || topicFilter !== 'all') && (
         <div style={{ fontSize: '0.85rem', color: 'var(--text2)', padding: '0.5rem' }}>

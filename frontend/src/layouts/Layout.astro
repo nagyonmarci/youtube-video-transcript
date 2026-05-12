@@ -755,6 +755,59 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     font-size: 0.72rem;
     padding: 0.15rem 0.4rem;
   }
+  .channel-card-dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+  }
+  .channel-card[draggable="true"] {
+    cursor: grab;
+  }
+  .channel-card[draggable="true"]:active {
+    cursor: grabbing;
+  }
+  .channel-drop-over {
+    background: var(--primary-dim);
+    border-radius: 8px;
+    outline: 2px dashed var(--primary);
+    outline-offset: 2px;
+  }
+  .channel-drop-hint {
+    font-size: 0.78rem;
+    color: var(--text2);
+    font-style: italic;
+    padding: 0.4rem 0.5rem;
+    min-width: 120px;
+    min-height: 2.5rem;
+    display: flex;
+    align-items: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+  }
+  .channel-topic-label {
+    font-size: 0.82rem;
+    color: var(--text);
+    margin: 0;
+    cursor: text;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s;
+  }
+  .channel-topic-label:hover {
+    border-bottom-color: var(--border);
+  }
+  .channel-topic-edit-input {
+    font-size: 0.82rem;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--primary);
+    color: var(--text);
+    padding: 0;
+    width: auto;
+    min-width: 60px;
+    max-width: 220px;
+    outline: none;
+    border-radius: 0;
+  }
 
   /* --- Video Section --- */
   .video-section {
