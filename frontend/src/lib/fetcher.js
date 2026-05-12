@@ -35,6 +35,13 @@ export async function stopProcessing(queue) {
   return res.json();
 }
 
+export async function resumeProcessing(queue) {
+  const url = queue ? `${FETCHER_URL}/resume?queue=${queue}` : `${FETCHER_URL}/resume`;
+  const res = await fetch(url, { method: 'POST' });
+  if (!res.ok) throw new Error(`resume → ${res.status}`);
+  return res.json();
+}
+
 export async function getStatus() {
   const res = await fetch(`${FETCHER_URL}/status`);
   if (!res.ok) throw new Error(`status → ${res.status}`);

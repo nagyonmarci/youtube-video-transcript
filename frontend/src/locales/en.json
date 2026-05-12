@@ -148,6 +148,7 @@
     "mindmap": "Mind map",
     "fetcher": "Fetcher",
     "aiWorker": "AI Notes",
+    "quickWorker": "Quick Summary",
     "whisper": "Whisper",
     "queueSize": "Queue: {count}",
     "queueBreakdown": "Queued: {queued} · running: {running} · paused: {paused}",
@@ -182,7 +183,18 @@
     "aiJobCooldown": "AI cooldown between jobs (sec)",
     "aiWorkerEnabled": "AI worker may run",
     "aiAutoAfterTranscript": "Start AI automatically after a new transcript",
-    "aiYearBackfill": "Enable continuous yearly AI backfill"
+    "aiYearBackfill": "Enable continuous yearly AI backfill",
+    "aiProvider": "AI Provider (full notes)",
+    "aiProviderOllama": "Ollama (local)",
+    "aiProviderAnthropic": "Anthropic (cloud)",
+    "aiProviderOpenai": "OpenAI (cloud)",
+    "aiCloudModel": "Cloud model",
+    "aiQuickEnabled": "Quick summary enabled",
+    "aiQuickModel": "Quick model (Ollama)",
+    "aiQuickTimeout": "Quick timeout (sec)",
+    "anthropicApiKey": "Anthropic API key",
+    "openaiApiKey": "OpenAI API key",
+    "openaiBaseUrl": "OpenAI Base URL"
   },
   "tooltip": {
     "timedTranscript": "Timed transcript",

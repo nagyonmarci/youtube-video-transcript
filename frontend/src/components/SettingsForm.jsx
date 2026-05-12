@@ -10,7 +10,10 @@ export default function SettingsForm({ appSettings, settingsDraft, settingsDirty
           <span>
             {appSettings.ai_notes_auto ? t('label.aiAutoOn') : t('label.aiManualOnly')}
             {' · '}
-            {appSettings.ollama_chat_model}
+            {appSettings.ai_provider !== 'ollama'
+              ? appSettings.ai_cloud_model
+              : appSettings.ollama_chat_model}
+            {appSettings.ai_provider !== 'ollama' && ` (${appSettings.ai_provider})`}
           </span>
         </div>
       </div>
@@ -48,6 +51,78 @@ export default function SettingsForm({ appSettings, settingsDraft, settingsDirty
             step="1000"
             value={settingsDraft.ai_notes_max_chars}
             onChange={e => onChange('ai_notes_max_chars', Number(e.target.value))}
+          />
+        </label>
+        <label>
+          {t('label.aiProvider')}
+          <select
+            value={settingsDraft.ai_provider}
+            onChange={e => onChange('ai_provider', e.target.value)}
+          >
+            <option value="ollama">{t('label.aiProviderOllama')}</option>
+            <option value="anthropic">{t('label.aiProviderAnthropic')}</option>
+            <option value="openai">{t('label.aiProviderOpenai')}</option>
+          </select>
+        </label>
+        {settingsDraft.ai_provider !== 'ollama' && (
+          <label>
+            {t('label.aiCloudModel')}
+            <input
+              value={settingsDraft.ai_cloud_model}
+              onChange={e => onChange('ai_cloud_model', e.target.value)}
+              placeholder="claude-opus-4-7"
+            />
+          </label>
+        )}
+        {settingsDraft.ai_provider === 'anthropic' && (
+          <label>
+            {t('label.anthropicApiKey')}
+            <input
+              type="password"
+              value={settingsDraft.anthropic_api_key}
+              onChange={e => onChange('anthropic_api_key', e.target.value)}
+              placeholder="sk-ant-..."
+              autoComplete="off"
+            />
+          </label>
+        )}
+        {settingsDraft.ai_provider === 'openai' && (
+          <>
+            <label>
+              {t('label.openaiApiKey')}
+              <input
+                type="password"
+                value={settingsDraft.openai_api_key}
+                onChange={e => onChange('openai_api_key', e.target.value)}
+                placeholder="sk-..."
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              {t('label.openaiBaseUrl')}
+              <input
+                value={settingsDraft.openai_base_url}
+                onChange={e => onChange('openai_base_url', e.target.value)}
+                placeholder="https://api.openai.com/v1"
+              />
+            </label>
+          </>
+        )}
+        <label>
+          {t('label.aiQuickModel')}
+          <input
+            value={settingsDraft.ollama_quick_model}
+            onChange={e => onChange('ollama_quick_model', e.target.value)}
+            placeholder="qwen3:4b"
+          />
+        </label>
+        <label>
+          {t('label.aiQuickTimeout')}
+          <input
+            type="number"
+            min="10"
+            value={settingsDraft.ollama_quick_timeout}
+            onChange={e => onChange('ollama_quick_timeout', Number(e.target.value))}
           />
         </label>
         <label>
@@ -121,6 +196,14 @@ export default function SettingsForm({ appSettings, settingsDraft, settingsDirty
             onChange={e => onChange('ai_notes_worker_enabled', e.target.checked)}
           />
           {t('label.aiWorkerEnabled')}
+        </label>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={settingsDraft.ai_notes_quick_enabled}
+            onChange={e => onChange('ai_notes_quick_enabled', e.target.checked)}
+          />
+          {t('label.aiQuickEnabled')}
         </label>
         <label className="settings-check">
           <input
