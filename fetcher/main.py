@@ -35,6 +35,8 @@ from constants import (
 )
 from directus_client import DirectusClient, now_iso
 import config
+import worker_state
+from worker_state import directus
 from youtube_fetcher import (
     fetch_channel_videos,
     fetch_channel_name,
@@ -58,29 +60,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 
-directus = DirectusClient(config.DIRECTUS_URL, config.DIRECTUS_TOKEN)
 
-# Worker state
-worker_task: Optional[asyncio.Task] = None
-quick_worker_task: Optional[asyncio.Task] = None
-ai_worker_task: Optional[asyncio.Task] = None
-stop_flag = False
-stop_fetch_flag = False
-stop_quick_flag = False
-stop_ai_flag = False
-current_task_info: dict = {}
-current_quick_task_info: dict = {}
-current_ai_task_info: dict = {}
-current_job_id: Optional[str] = None
-current_quick_job_id: Optional[str] = None
-current_ai_job_id: Optional[str] = None
 scheduler: Optional[AsyncIOScheduler] = None
-current_job_id_var: ContextVar[Optional[str]] = ContextVar("current_job_id", default=None)
-current_job_queue_var: ContextVar[Optional[str]] = ContextVar("current_job_queue", default=None)
-current_task_info_var: ContextVar[dict] = ContextVar("current_task_info", default={})
-last_ai_year_backfill_attempt = 0.0
-last_runtime_settings_load = 0.0
-last_stale_job_reset = 0.0
 
 
 
@@ -90,42 +71,7 @@ last_stale_job_reset = 0.0
 
 
 
-async def load_schedule_settings():
-    try:
-        stored_cron = await directus.get_setting("refresh_cron")
-        stored_timezone = await directus.get_setting("scheduler_timezone")
-        if stored_cron:
-            config.REFRESH_CRON = stored_cron
-        if stored_timezone:
-            config.SCHEDULER_TIMEZONE = stored_timezone
-        config.validate_schedule(config.REFRESH_CRON, config.SCHEDULER_TIMEZONE)
-    except Exception as e:
-        logger.warning(f"Could not load stored schedule settings, using current values: {e}")
 
-
-async def save_schedule_settings(cron: str, timezone_name: str):
-    await directus.set_setting("refresh_cron", cron)
-    await directus.set_setting("scheduler_timezone", timezone_name)
-
-
-async def load_app_settings():
-    global last_runtime_settings_load
-    settings = config.current_app_settings()
-    try:
-        stored = {}
-        for key in settings.keys():
-            value = await directus.get_setting(key)
-            if value is not None:
-                stored[key] = value
-        config.apply_app_settings({**settings, **stored})
-        last_runtime_settings_load = time.monotonic()
-    except Exception as e:
-        logger.warning(f"Could not load app settings, using current values: {e}")
-
-
-async def refresh_app_settings_if_due(max_age_seconds: int = 30, force: bool = False):
-    if force or time.monotonic() - last_runtime_settings_load >= max_age_seconds:
-        await load_app_settings()
 
 
 async def get_ollama_resource_status() -> dict:
@@ -277,10 +223,10 @@ def job_dedupe_key(queue: str, task: dict) -> str:
 
 
 async def update_job_progress(queue: str, current: int, total: int, label: Optional[str] = None):
-    job_id = current_job_id_var.get() or (current_ai_job_id if queue == "ai" else current_job_id)
-    state = current_task_info_var.get()
+    job_id = worker_state.current_job_id_var.get() or (worker_state.current_ai_job_id if queue == "ai" else worker_state.current_job_id)
+    state = worker_state.current_task_info_var.get()
     if not state:
-        state = current_ai_task_info if queue == "ai" else current_task_info
+        state = worker_state.current_ai_task_info if queue == "ai" else worker_state.current_task_info
     state["progress_current"] = current
     state["progress_total"] = total
     if label:
@@ -295,10 +241,10 @@ async def update_job_progress(queue: str, current: int, total: int, label: Optio
 
 
 async def update_current_job_phase(queue: str, phase: str, label: Optional[str] = None, extra: Optional[dict] = None):
-    job_id = current_job_id_var.get() or (current_ai_job_id if queue == "ai" else current_job_id)
-    state = current_task_info_var.get()
+    job_id = worker_state.current_job_id_var.get() or (worker_state.current_ai_job_id if queue == "ai" else worker_state.current_job_id)
+    state = worker_state.current_task_info_var.get()
     if not state:
-        state = current_ai_task_info if queue == "ai" else current_task_info
+        state = worker_state.current_ai_task_info if queue == "ai" else worker_state.current_task_info
     state["phase"] = phase
     if label:
         state["progress_label"] = label
@@ -323,11 +269,10 @@ async def job_status_counts(queue: str) -> dict:
 
 
 async def reset_stale_running_jobs_if_due(force: bool = False) -> int:
-    global last_stale_job_reset
     now = time.monotonic()
-    if not force and now - last_stale_job_reset < 60:
+    if not force and now - worker_state.last_stale_job_reset < 60:
         return 0
-    last_stale_job_reset = now
+    worker_state.last_stale_job_reset = now
     stale = await reset_stale_running_jobs()
     if stale:
         logger.info(f"Re-queued {stale} stale running jobs")
@@ -546,9 +491,8 @@ AI_HANDLERS: dict = {}
 
 async def worker_loop(worker_name: str = "fetch-worker"):
     """Main background worker that processes queued tasks."""
-    global stop_flag, stop_fetch_flag, current_task_info, current_job_id
     while True:
-        if stop_flag or stop_fetch_flag:
+        if worker_state.stop_flag or worker_state.stop_fetch_flag:
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         try:
@@ -566,14 +510,14 @@ async def worker_loop(worker_name: str = "fetch-worker"):
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
 
-        await refresh_app_settings_if_due(force=True)
+        await worker_state.refresh_app_settings_if_due(force=True)
         task = job.get("payload") or {}
         task_type = task.get("type")
-        current_job_id = job["id"]
-        current_task_info = {}
-        job_id_token = current_job_id_var.set(job["id"])
-        job_queue_token = current_job_queue_var.set("fetch")
-        task_info_token = current_task_info_var.set(current_task_info)
+        worker_state.current_job_id = job["id"]
+        worker_state.current_task_info = {}
+        job_id_token = worker_state.current_job_id_var.set(job["id"])
+        job_queue_token = worker_state.current_job_queue_var.set("fetch")
+        task_info_token = worker_state.current_task_info_var.set(worker_state.current_task_info)
         heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
             handler = FETCH_HANDLERS.get(task_type)
@@ -602,21 +546,20 @@ async def worker_loop(worker_name: str = "fetch-worker"):
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-            current_job_id_var.reset(job_id_token)
-            current_job_queue_var.reset(job_queue_token)
-            current_task_info_var.reset(task_info_token)
-            current_task_info = {}
-            current_job_id = None
+            worker_state.current_job_id_var.reset(job_id_token)
+            worker_state.current_job_queue_var.reset(job_queue_token)
+            worker_state.current_task_info_var.reset(task_info_token)
+            worker_state.current_task_info = {}
+            worker_state.current_job_id = None
 
 
 async def ai_worker_loop(worker_name: str = "ai-worker"):
     """Background worker for AI notes so LLM calls do not block fetching."""
-    global stop_flag, stop_ai_flag, current_ai_task_info, current_ai_job_id
     while True:
-        if stop_flag or stop_ai_flag:
+        if worker_state.stop_flag or worker_state.stop_ai_flag:
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
-        await refresh_app_settings_if_due()
+        await worker_state.refresh_app_settings_if_due()
         if not config.AI_NOTES_WORKER_ENABLED:
             await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
@@ -632,19 +575,19 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             continue
 
         if not job:
-            await refresh_app_settings_if_due()
+            await worker_state.refresh_app_settings_if_due()
             await maybe_enqueue_ai_year_backfill(source=worker_name)
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
 
-        await refresh_app_settings_if_due(force=True)
+        await worker_state.refresh_app_settings_if_due(force=True)
         task = job.get("payload") or {}
         task_type = task.get("type")
-        current_ai_job_id = job["id"]
-        current_ai_task_info = {}
-        job_id_token = current_job_id_var.set(job["id"])
-        job_queue_token = current_job_queue_var.set("ai")
-        task_info_token = current_task_info_var.set(current_ai_task_info)
+        worker_state.current_ai_job_id = job["id"]
+        worker_state.current_ai_task_info = {}
+        job_id_token = worker_state.current_job_id_var.set(job["id"])
+        job_queue_token = worker_state.current_job_queue_var.set("ai")
+        task_info_token = worker_state.current_task_info_var.set(worker_state.current_ai_task_info)
         heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
             handler = AI_HANDLERS.get(task_type)
@@ -673,23 +616,22 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-            current_job_id_var.reset(job_id_token)
-            current_job_queue_var.reset(job_queue_token)
-            current_task_info_var.reset(task_info_token)
-            current_ai_task_info = {}
-            current_ai_job_id = None
-            if config.AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag and not stop_ai_flag:
+            worker_state.current_job_id_var.reset(job_id_token)
+            worker_state.current_job_queue_var.reset(job_queue_token)
+            worker_state.current_task_info_var.reset(task_info_token)
+            worker_state.current_ai_task_info = {}
+            worker_state.current_ai_job_id = None
+            if config.AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not worker_state.stop_flag and not worker_state.stop_ai_flag:
                 await asyncio.sleep(config.AI_NOTES_JOB_COOLDOWN_SECONDS)
 
 
 async def quick_worker_loop(worker_name: str = "quick-worker"):
     """Background worker for quick summaries — runs before the full AI notes worker."""
-    global stop_flag, stop_quick_flag, current_quick_task_info, current_quick_job_id
     while True:
-        if stop_flag or stop_quick_flag:
+        if worker_state.stop_flag or worker_state.stop_quick_flag:
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
-        await refresh_app_settings_if_due()
+        await worker_state.refresh_app_settings_if_due()
         try:
             await reset_stale_running_jobs_if_due()
         except Exception as e:
@@ -705,14 +647,14 @@ async def quick_worker_loop(worker_name: str = "quick-worker"):
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
 
-        await refresh_app_settings_if_due(force=True)
+        await worker_state.refresh_app_settings_if_due(force=True)
         task = job.get("payload") or {}
         task_type = task.get("type")
-        current_quick_job_id = job["id"]
-        current_quick_task_info = {}
-        job_id_token = current_job_id_var.set(job["id"])
-        job_queue_token = current_job_queue_var.set(QUEUE_QUICK)
-        task_info_token = current_task_info_var.set(current_quick_task_info)
+        worker_state.current_quick_job_id = job["id"]
+        worker_state.current_quick_task_info = {}
+        job_id_token = worker_state.current_job_id_var.set(job["id"])
+        job_queue_token = worker_state.current_job_queue_var.set(QUEUE_QUICK)
+        task_info_token = worker_state.current_task_info_var.set(worker_state.current_quick_task_info)
         heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
             handler = QUICK_HANDLERS.get(task_type)
@@ -741,11 +683,11 @@ async def quick_worker_loop(worker_name: str = "quick-worker"):
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-            current_job_id_var.reset(job_id_token)
-            current_job_queue_var.reset(job_queue_token)
-            current_task_info_var.reset(task_info_token)
-            current_quick_task_info = {}
-            current_quick_job_id = None
+            worker_state.current_job_id_var.reset(job_id_token)
+            worker_state.current_job_queue_var.reset(job_queue_token)
+            worker_state.current_task_info_var.reset(task_info_token)
+            worker_state.current_quick_task_info = {}
+            worker_state.current_quick_job_id = None
 
 
 async def _backfill_metadata(existing: dict, videos: list):
@@ -780,13 +722,12 @@ async def _process_channel_transcripts(
     loop,
 ):
     """Fetch and store transcripts for new/incomplete channel videos. Errors per video are swallowed."""
-    global current_task_info
     total = len(transcript_videos)
     for i, video in enumerate(transcript_videos):
-        if stop_flag or stop_fetch_flag:
+        if worker_state.stop_flag or worker_state.stop_fetch_flag:
             break
 
-        current_task_info = {
+        worker_state.current_task_info = {
             "type": "channel",
             "url": channel_url,
             "phase": f"transcript {i+1}/{total}",
@@ -857,11 +798,10 @@ async def _process_channel_transcripts(
 
 async def process_channel_task(task: dict):
     """Process a channel: fetch video list + transcripts."""
-    global current_task_info
     channel_url = task["channel_url"]
     channel_id = task.get("channel_id")
 
-    current_task_info = {"type": "channel", "url": channel_url, "phase": "fetching video list"}
+    worker_state.current_task_info = {"type": "channel", "url": channel_url, "phase": "fetching video list"}
     if channel_id:
         await directus.update_channel(channel_id, {"status": "processing", "error_message": None})
 
@@ -918,9 +858,8 @@ async def process_channel_task(task: dict):
 
 async def process_single_video_task(task: dict):
     """Process a single video URL."""
-    global current_task_info
     video_url = task["video_url"]
-    current_task_info = {"type": "video", "url": video_url, "phase": "fetching"}
+    worker_state.current_task_info = {"type": "video", "url": video_url, "phase": "fetching"}
 
     # Extract video ID from URL
     import re
@@ -1026,7 +965,6 @@ async def process_refresh_task(task: dict):
 
 async def process_refresh_dates_task():
     """Fetch upload date for videos that are missing it."""
-    global current_task_info
     videos = await directus.get_videos_missing_date()
     if not videos:
         logger.info("No videos with missing dates")
@@ -1041,11 +979,11 @@ async def process_refresh_dates_task():
     date_missing = 0
 
     for i, video in enumerate(videos):
-        if stop_flag or stop_fetch_flag:
+        if worker_state.stop_flag or worker_state.stop_fetch_flag:
             break
 
         yt_id = video["video_id"]
-        current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{total}", "video": yt_id}
+        worker_state.current_task_info = {"type": "refresh_dates", "phase": f"{i+1}/{total}", "video": yt_id}
         await update_job_progress("fetch", i + 1, total, yt_id)
 
         info = await loop.run_in_executor(None, fetch_video_date_info, yt_id)
@@ -1076,7 +1014,6 @@ async def process_refresh_dates_task():
 
 async def process_refresh_thumbnails_task():
     """Fetch thumbnails for videos that are missing thumbnail_url."""
-    global current_task_info
     videos = await directus.get_videos_missing_thumbnail()
     if not videos:
         logger.info("No videos with missing thumbnails")
@@ -1088,11 +1025,11 @@ async def process_refresh_thumbnails_task():
     missing = 0
 
     for i, video in enumerate(videos):
-        if stop_flag or stop_fetch_flag:
+        if worker_state.stop_flag or worker_state.stop_fetch_flag:
             break
 
         yt_id = video["video_id"]
-        current_task_info = {"type": "refresh_thumbnails", "phase": f"{i+1}/{total}", "video": yt_id}
+        worker_state.current_task_info = {"type": "refresh_thumbnails", "phase": f"{i+1}/{total}", "video": yt_id}
         await update_job_progress("fetch", i + 1, total, yt_id)
         thumbnail_url = youtube_thumbnail_url(yt_id)
         if not thumbnail_url:
@@ -1107,9 +1044,8 @@ async def process_refresh_thumbnails_task():
 
 async def generate_and_store_ai_notes(directus_video_id: str, video: dict, fields: Optional[list[str]] = None) -> bool:
     """Generate and persist AI notebook fields for a single Directus video."""
-    global current_ai_task_info
     requested_fields = [field for field in (fields or []) if field in config.AI_NOTE_GENERATED_FIELDS]
-    current_ai_task_info = {
+    worker_state.current_ai_task_info = {
         "type": "ai_note_video",
         "phase": "AI jegyzet generálása",
         "video_id": directus_video_id,
@@ -1134,13 +1070,13 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
         metrics = notes.pop("_metrics", None)
         if requested_fields:
             notes = {field: notes.get(field) for field in requested_fields if field in notes}
-        if current_ai_job_id and metrics:
-            await directus.update_job(current_ai_job_id, {
+        if worker_state.current_ai_job_id and metrics:
+            await directus.update_job(worker_state.current_ai_job_id, {
                 "metrics": metrics,
                 "progress_label": summarize_ai_metrics(metrics),
             })
-            current_ai_task_info["metrics"] = metrics
-            current_ai_task_info["progress_label"] = summarize_ai_metrics(metrics)
+            worker_state.current_ai_task_info["metrics"] = metrics
+            worker_state.current_ai_task_info["progress_label"] = summarize_ai_metrics(metrics)
         await directus.update_video(directus_video_id, {
             **notes,
             "ai_notes_status": "done",
@@ -1165,7 +1101,6 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
 
 async def process_ai_notes_task(task: dict):
     """Fan out a global AI notes batch into per-video jobs."""
-    global current_ai_task_info
     limit = max(1, min(int(task.get("limit") or config.AI_NOTES_BATCH_LIMIT), config.AI_NOTES_MAX_BATCH_LIMIT))
     videos = await directus.get_videos_missing_ai_notes(limit)
     active_video_ids = await directus.get_ai_note_job_video_ids()
@@ -1174,10 +1109,10 @@ async def process_ai_notes_task(task: dict):
     queued = 0
     skipped = 0
     for i, video in enumerate(videos):
-        if stop_flag or stop_ai_flag:
+        if worker_state.stop_flag or worker_state.stop_ai_flag:
             break
         video_id = video["id"]
-        current_ai_task_info = {
+        worker_state.current_ai_task_info = {
             "type": "ai_notes",
             "phase": f"{i+1}/{len(videos)}",
             "video_id": video_id,
@@ -1200,7 +1135,6 @@ async def process_ai_notes_task(task: dict):
 
 async def process_single_ai_note_task(task: dict):
     """Generate AI notes for a selected video."""
-    global current_ai_task_info
     video_id = task["video_id"]
     video = await directus.get_video(video_id)
     if not video:
@@ -1210,28 +1144,27 @@ async def process_single_ai_note_task(task: dict):
         await update_video_ai_status(video_id, "error", "No transcript available for AI notes")
         return
 
-    current_ai_task_info = {
+    worker_state.current_ai_task_info = {
         "type": "ai_note_video",
         "phase": "generating",
         "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
         "started_at": now_iso(),
     }
-    if current_ai_job_id:
-        await directus.update_job(current_ai_job_id, {"progress_label": "AI generation started"})
+    if worker_state.current_ai_job_id:
+        await directus.update_job(worker_state.current_ai_job_id, {"progress_label": "AI generation started"})
     fields = task.get("fields")
     await generate_and_store_ai_notes(video_id, video, fields if isinstance(fields, list) else None)
-    elapsed = job_duration_seconds({"started_at": current_ai_task_info.get("started_at")})
-    current_ai_task_info["duration_seconds"] = elapsed
-    if current_ai_job_id and elapsed is not None:
-        await directus.update_job(current_ai_job_id, {
+    elapsed = job_duration_seconds({"started_at": worker_state.current_ai_task_info.get("started_at")})
+    worker_state.current_ai_task_info["duration_seconds"] = elapsed
+    if worker_state.current_ai_job_id and elapsed is not None:
+        await directus.update_job(worker_state.current_ai_job_id, {
             "progress_label": f"AI generation finished in {elapsed}s",
         })
 
 
 async def process_quick_note_task(task: dict):
     """Generate a quick summary for a video then enqueue it for full AI notes."""
-    global current_quick_task_info
     video_id = task["video_id"]
     video = await directus.get_video(video_id)
     if not video:
@@ -1241,7 +1174,7 @@ async def process_quick_note_task(task: dict):
         await update_video_ai_status(video_id, "error", "No transcript available for quick summary")
         return
 
-    current_quick_task_info = {
+    worker_state.current_quick_task_info = {
         "type": JOB_QUICK_NOTE_VIDEO,
         "phase": "quick_summary",
         "video_id": video_id,
@@ -1320,14 +1253,13 @@ async def enqueue_ai_job(task: dict, label: Optional[str] = None):
 
 async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool = False) -> dict:
     """Keep the AI queue filled with missing notes for the configured upload year."""
-    global last_ai_year_backfill_attempt
-    if not config.AI_NOTES_AUTO or not config.AI_NOTES_YEAR_BACKFILL_ENABLED or stop_flag or stop_ai_flag:
+    if not config.AI_NOTES_AUTO or not config.AI_NOTES_YEAR_BACKFILL_ENABLED or worker_state.stop_flag or worker_state.stop_ai_flag:
         return {"enabled": False, "queued": 0, "skipped": 0}
 
     now = time.monotonic()
-    if not force and source != "scheduler" and now - last_ai_year_backfill_attempt < config.AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS:
+    if not force and source != "scheduler" and now - worker_state.last_ai_year_backfill_attempt < config.AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS:
         return {"throttled": True, "queued": 0, "skipped": 0}
-    last_ai_year_backfill_attempt = now
+    worker_state.last_ai_year_backfill_attempt = now
 
     active_jobs = await directus.count_jobs("ai", "queued,running,paused")
     if not force and active_jobs >= config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE:
@@ -1363,7 +1295,7 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
     queued = 0
     skipped = 0
     for video in videos:
-        if queued >= capacity or stop_flag or stop_ai_flag:
+        if queued >= capacity or worker_state.stop_flag or worker_state.stop_ai_flag:
             break
         video_id = video["id"]
         if video_id in active_video_ids:
@@ -1488,14 +1420,13 @@ async def current_job_snapshot(queue: str, in_memory: dict, in_memory_job_id: Op
 
 async def restart_ai_worker():
     """Cancel and recreate the AI worker."""
-    global ai_worker_task
-    if ai_worker_task and not ai_worker_task.done():
-        ai_worker_task.cancel()
+    if worker_state.ai_worker_task and not worker_state.ai_worker_task.done():
+        worker_state.ai_worker_task.cancel()
         try:
-            await ai_worker_task
+            await worker_state.ai_worker_task
         except asyncio.CancelledError:
             pass
-    ai_worker_task = asyncio.create_task(ai_worker_loop())
+    worker_state.ai_worker_task = asyncio.create_task(ai_worker_loop())
 
 
 async def daily_refresh():
@@ -1536,8 +1467,8 @@ async def bootstrap_runtime(cleanup_pending: bool = True):
             await cleanup_orphan_ai_pending_videos()
     except Exception as e:
         logger.error(f"Schema bootstrap error: {e}", exc_info=True)
-    await load_schedule_settings()
-    await load_app_settings()
+    await worker_state.load_schedule_settings()
+    await worker_state.load_app_settings()
 
 
 def create_worker_tasks() -> list[asyncio.Task]:
@@ -1581,15 +1512,15 @@ async def run_worker_service():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global worker_task, ai_worker_task, scheduler
+    global scheduler
 
     await bootstrap_runtime(cleanup_pending=config.FETCHER_ROLE in {"api", "all"})
 
     worker_tasks = []
     if config.FETCHER_ROLE in {"all", "worker"}:
         worker_tasks = create_worker_tasks()
-        worker_task = next((task for task in worker_tasks if "fetch" in task.get_name()), None)
-        ai_worker_task = next((task for task in worker_tasks if "ai" in task.get_name()), None)
+        worker_state.worker_task = next((task for task in worker_tasks if "fetch" in task.get_name()), None)
+        worker_state.ai_worker_task = next((task for task in worker_tasks if "ai" in task.get_name()), None)
 
     if config.FETCHER_ROLE in {"api", "all"}:
         start_refresh_scheduler()
@@ -1953,9 +1884,9 @@ async def health():
 
 @app.get("/status")
 async def status():
-    fetch_current = await current_job_snapshot("fetch", current_task_info, current_job_id)
-    quick_current = await current_job_snapshot(QUEUE_QUICK, current_quick_task_info, current_quick_job_id)
-    ai_current = await current_job_snapshot("ai", current_ai_task_info, current_ai_job_id)
+    fetch_current = await current_job_snapshot("fetch", worker_state.current_task_info, worker_state.current_job_id)
+    quick_current = await current_job_snapshot(QUEUE_QUICK, worker_state.current_quick_task_info, worker_state.current_quick_job_id)
+    ai_current = await current_job_snapshot("ai", worker_state.current_ai_task_info, worker_state.current_ai_job_id)
     ollama_resources = await get_ollama_resource_status()
     fetch_counts = await job_status_counts("fetch")
     quick_counts = await job_status_counts(QUEUE_QUICK)
@@ -1980,11 +1911,11 @@ async def status():
             "quick_concurrency": config.QUICK_WORKER_CONCURRENCY,
             "ai_concurrency": config.AI_WORKER_CONCURRENCY,
         },
-        "stop_flag": stop_flag,
+        "worker_state.stop_flag": worker_state.stop_flag,
         "stopped_queues": {
-            "fetch": stop_flag or stop_fetch_flag,
-            QUEUE_QUICK: stop_flag or stop_quick_flag,
-            "ai": stop_flag or stop_ai_flag,
+            "fetch": worker_state.stop_flag or worker_state.stop_fetch_flag,
+            QUEUE_QUICK: worker_state.stop_flag or worker_state.stop_quick_flag,
+            "ai": worker_state.stop_flag or worker_state.stop_ai_flag,
         },
         "current_task": fetch_current,
         "current_quick_task": quick_current,
@@ -2024,8 +1955,8 @@ async def list_jobs():
             "ai": await job_status_counts("ai"),
         },
         "current": {
-            "fetch": current_job_id,
-            "ai": current_ai_job_id,
+            "fetch": worker_state.current_job_id,
+            "ai": worker_state.current_ai_job_id,
         },
     }
 
@@ -2157,7 +2088,6 @@ async def move_job(job_id: str, request: JobMoveRequest):
 
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
-    global worker_task, ai_worker_task
     job = await directus.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2173,15 +2103,15 @@ async def delete_job(job_id: str):
         })
         return {"deleted": False, "cancelled": True, "job_id": job_id, "cancelled_current": False}
 
-    if job_id == current_job_id and worker_task and not worker_task.done():
-        worker_task.cancel()
+    if job_id == worker_state.current_job_id and worker_state.worker_task and not worker_state.worker_task.done():
+        worker_state.worker_task.cancel()
         try:
-            await worker_task
+            await worker_state.worker_task
         except asyncio.CancelledError:
             pass
-        worker_task = asyncio.create_task(worker_loop())
+        worker_state.worker_task = asyncio.create_task(worker_loop())
         cancelled_current = True
-    if job_id == current_ai_job_id and ai_worker_task and not ai_worker_task.done():
+    if job_id == worker_state.current_ai_job_id and worker_state.ai_worker_task and not worker_state.ai_worker_task.done():
         await restart_ai_worker()
         cancelled_current = True
 
@@ -2206,7 +2136,7 @@ async def update_schedule(request: ScheduleRequest):
     config.REFRESH_CRON = cron
     config.SCHEDULER_TIMEZONE = timezone_name
     start_refresh_scheduler()
-    await save_schedule_settings(cron, timezone_name)
+    await worker_state.save_schedule_settings(cron, timezone_name)
     return {"cron": config.REFRESH_CRON, "timezone": config.SCHEDULER_TIMEZONE}
 
 
@@ -2425,7 +2355,6 @@ async def ai_notes_for_channel(channel_id: str, request: ChannelAiNotesRequest):
 @app.delete("/ai-notes/{video_id}")
 async def delete_ai_note_video(video_id: str):
     """Delete generated AI note fields for one Directus video."""
-    global ai_worker_task
     video = await directus.get_video(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -2434,7 +2363,7 @@ async def delete_ai_note_video(video_id: str):
         lambda task: task.get("type") == "ai_note_video" and task.get("video_id") == video_id,
     )
     cancelled_current = False
-    if current_ai_task_info.get("video_id") == video_id and ai_worker_task and not ai_worker_task.done():
+    if worker_state.current_ai_task_info.get("video_id") == video_id and worker_state.ai_worker_task and not worker_state.ai_worker_task.done():
         await restart_ai_worker()
         cancelled_current = True
     await clear_ai_notes(video_id)
@@ -2444,19 +2373,18 @@ async def delete_ai_note_video(video_id: str):
 @app.post("/stop")
 async def stop_processing(queue: Optional[str] = None):
     """Pause a specific queue (fetch|quick|ai) or all if queue is omitted."""
-    global stop_flag, stop_fetch_flag, stop_quick_flag, stop_ai_flag
     stop_fetch = queue in (None, "fetch")
     stop_quick = queue in (None, QUEUE_QUICK)
     stop_ai = queue in (None, "ai")
 
     if stop_fetch:
-        stop_fetch_flag = True
+        worker_state.stop_fetch_flag = True
     if stop_quick:
-        stop_quick_flag = True
+        worker_state.stop_quick_flag = True
     if stop_ai:
-        stop_ai_flag = True
+        worker_state.stop_ai_flag = True
     if queue is None:
-        stop_flag = True
+        worker_state.stop_flag = True
 
     drained = await cancel_jobs("fetch", include_running=True) if stop_fetch else 0
     quick_drained = await cancel_jobs(QUEUE_QUICK, include_running=True) if stop_quick else 0
@@ -2474,20 +2402,18 @@ async def stop_processing(queue: Optional[str] = None):
 @app.post("/resume")
 async def resume_processing(queue: Optional[str] = None):
     """Resume processing after stop (fetch|quick|ai or all if omitted)."""
-    global stop_flag, stop_fetch_flag, stop_quick_flag, stop_ai_flag
-    global worker_task, quick_worker_task, ai_worker_task
     if queue in (None, "fetch"):
-        stop_fetch_flag = False
+        worker_state.stop_fetch_flag = False
     if queue in (None, QUEUE_QUICK):
-        stop_quick_flag = False
+        worker_state.stop_quick_flag = False
     if queue in (None, "ai"):
-        stop_ai_flag = False
+        worker_state.stop_ai_flag = False
     if queue is None:
-        stop_flag = False
-    if queue in (None, "fetch") and (not worker_task or worker_task.done()):
-        worker_task = asyncio.create_task(worker_loop())
-    if queue in (None, QUEUE_QUICK) and (not quick_worker_task or quick_worker_task.done()):
-        quick_worker_task = asyncio.create_task(quick_worker_loop())
-    if queue in (None, "ai") and (not ai_worker_task or ai_worker_task.done()):
-        ai_worker_task = asyncio.create_task(ai_worker_loop())
+        worker_state.stop_flag = False
+    if queue in (None, "fetch") and (not worker_state.worker_task or worker_state.worker_task.done()):
+        worker_state.worker_task = asyncio.create_task(worker_loop())
+    if queue in (None, QUEUE_QUICK) and (not worker_state.quick_worker_task or worker_state.quick_worker_task.done()):
+        worker_state.quick_worker_task = asyncio.create_task(quick_worker_loop())
+    if queue in (None, "ai") and (not worker_state.ai_worker_task or worker_state.ai_worker_task.done()):
+        worker_state.ai_worker_task = asyncio.create_task(ai_worker_loop())
     return {"resumed": True, "queue": queue or "all"}
