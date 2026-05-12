@@ -8,7 +8,6 @@ import asyncio
 import json
 import logging
 import os
-import socket
 import time
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -26,7 +25,7 @@ from pydantic import BaseModel
 import asyncpg
 import httpx
 
-from ai_notes import configure_ai_notes, generate_ai_notes, generate_quick_summary
+from ai_notes import generate_ai_notes, generate_quick_summary
 from constants import (
     HEARTBEAT_INTERVAL, WORKER_IDLE_SLEEP, WORKER_POLL_BACKOFF,
     STREAM_UPDATE_INTERVAL, BOOTSTRAP_CHECK_INTERVAL, IDLE_SLEEP,
@@ -35,6 +34,7 @@ from constants import (
     JOB_QUICK_NOTE_VIDEO, JOB_AI_NOTE_VIDEO,
 )
 from directus_client import DirectusClient, now_iso
+import config
 from youtube_fetcher import (
     fetch_channel_videos,
     fetch_channel_name,
@@ -56,61 +56,9 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def required_env(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    if not value:
-        raise RuntimeError(f"{name} must be set")
-    return value
 
 
-DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
-DIRECTUS_TOKEN = required_env("DIRECTUS_TOKEN")
-APP_API_TOKEN = required_env("APP_API_TOKEN")
-APP_CORS_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get("APP_CORS_ORIGINS", "http://yt.test,http://localhost:4321").split(",")
-    if origin.strip()
-]
-POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres")
-POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
-POSTGRES_DB = os.environ.get("POSTGRES_DB", "directus")
-POSTGRES_USER = os.environ.get("POSTGRES_USER", "directus")
-POSTGRES_PASSWORD = required_env("POSTGRES_PASSWORD")
-REFRESH_CRON = os.environ.get("REFRESH_CRON", "0 7 * * *")
-SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/Budapest")
-AI_NOTES_AUTO = os.environ.get("AI_NOTES_AUTO", "false").lower() in {"1", "true", "yes", "on"}
-AI_NOTES_BATCH_LIMIT = int(os.environ.get("AI_NOTES_BATCH_LIMIT", "10"))
-AI_NOTES_MAX_BATCH_LIMIT = int(os.environ.get("AI_NOTES_MAX_BATCH_LIMIT", "20000"))
-AI_NOTES_YEAR_BACKFILL_ENABLED = os.environ.get("AI_NOTES_YEAR_BACKFILL_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
-AI_NOTES_YEAR_BACKFILL_YEAR = int(os.environ.get("AI_NOTES_YEAR_BACKFILL_YEAR", "2026"))
-AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT", "50")))
-AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = max(1, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE", "100")))
-AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = max(30, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS", "300")))
-AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = max(10, int(os.environ.get("AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS", "60")))
-AI_NOTES_WORKER_ENABLED = os.environ.get("AI_NOTES_WORKER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-AI_NOTES_JOB_COOLDOWN_SECONDS = max(0, int(os.environ.get("AI_NOTES_JOB_COOLDOWN_SECONDS", "0")))
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
-OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
-AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
-OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
-AI_NOTES_QUICK_ENABLED = os.environ.get("AI_NOTES_QUICK_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "qwen3:4b")
-OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "120"))
-AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")
-AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-FETCHER_ROLE = os.environ.get("FETCHER_ROLE", "all").lower()
-WORKER_QUEUES = {item.strip() for item in os.environ.get("WORKER_QUEUES", "fetch,ai").split(",") if item.strip()}
-FETCH_WORKER_CONCURRENCY = max(0, int(os.environ.get("FETCH_WORKER_CONCURRENCY", "1")))
-QUICK_WORKER_CONCURRENCY = max(0, int(os.environ.get("QUICK_WORKER_CONCURRENCY", "1")))
-AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
-STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
-JOB_CLEANUP_DAYS = int(os.environ.get("JOB_CLEANUP_DAYS", "7"))
-WORKER_ID = os.environ.get("WORKER_ID") or f"{socket.gethostname()}:{os.getpid()}"
-
-directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
+directus = DirectusClient(config.DIRECTUS_URL, config.DIRECTUS_TOKEN)
 pg_pool: Optional[asyncpg.Pool] = None
 
 # Worker state
@@ -134,143 +82,24 @@ current_task_info_var: ContextVar[dict] = ContextVar("current_task_info", defaul
 last_ai_year_backfill_attempt = 0.0
 last_runtime_settings_load = 0.0
 last_stale_job_reset = 0.0
-AI_NOTE_GENERATED_FIELDS = {
-    "summary",
-    "topics",
-    "takeaways",
-    "questions",
-    "obsidian_note",
-    "study_guide",
-    "critique",
-}
 
 
-def get_scheduler_timezone():
-    try:
-        return ZoneInfo(SCHEDULER_TIMEZONE)
-    except ZoneInfoNotFoundError:
-        logger.warning(f"Unknown scheduler timezone '{SCHEDULER_TIMEZONE}', falling back to UTC")
-        return timezone.utc
 
 
-def validate_schedule(cron: str, timezone_name: str):
-    cron_parts = cron.split()
-    if len(cron_parts) != 5:
-        raise ValueError("A cron kifejezésnek pontosan 5 mezőből kell állnia")
-    try:
-        ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise ValueError(f"Ismeretlen időzóna: {timezone_name}") from exc
-    return cron_parts
 
 
-def bool_setting(value) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
-
-def int_setting(value, default: int, minimum: int = 0, maximum: Optional[int] = None) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    parsed = max(minimum, parsed)
-    if maximum is not None:
-        parsed = min(maximum, parsed)
-    return parsed
-
-
-def current_app_settings() -> dict:
-    return {
-        "ollama_base_url": OLLAMA_BASE_URL,
-        "ollama_chat_model": OLLAMA_CHAT_MODEL,
-        "ollama_timeout": OLLAMA_TIMEOUT,
-        "ai_notes_max_chars": AI_NOTES_MAX_CHARS,
-        "ai_notes_auto": AI_NOTES_AUTO,
-        "ai_notes_batch_limit": AI_NOTES_BATCH_LIMIT,
-        "ai_notes_max_batch_limit": AI_NOTES_MAX_BATCH_LIMIT,
-        "ai_notes_year_backfill_enabled": AI_NOTES_YEAR_BACKFILL_ENABLED,
-        "ai_notes_year_backfill_year": AI_NOTES_YEAR_BACKFILL_YEAR,
-        "ai_notes_year_backfill_batch_limit": AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
-        "ai_notes_year_backfill_target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
-        "ai_notes_year_backfill_interval_seconds": AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
-        "ai_notes_year_backfill_idle_seconds": AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS,
-        "ai_notes_worker_enabled": AI_NOTES_WORKER_ENABLED,
-        "ai_notes_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
-        "ai_notes_quick_enabled": AI_NOTES_QUICK_ENABLED,
-        "ollama_quick_model": OLLAMA_QUICK_MODEL,
-        "ollama_quick_timeout": OLLAMA_QUICK_TIMEOUT,
-        "ai_provider": AI_PROVIDER,
-        "ai_cloud_model": AI_CLOUD_MODEL,
-        "anthropic_api_key": ANTHROPIC_API_KEY,
-        "openai_api_key": OPENAI_API_KEY,
-        "openai_base_url": OPENAI_BASE_URL,
-    }
-
-
-def apply_app_settings(settings: dict) -> None:
-    global OLLAMA_BASE_URL, OLLAMA_CHAT_MODEL, OLLAMA_TIMEOUT, AI_NOTES_MAX_CHARS
-    global AI_NOTES_AUTO, AI_NOTES_BATCH_LIMIT, AI_NOTES_MAX_BATCH_LIMIT
-    global AI_NOTES_YEAR_BACKFILL_ENABLED, AI_NOTES_YEAR_BACKFILL_YEAR
-    global AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE
-    global AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS
-    global AI_NOTES_WORKER_ENABLED, AI_NOTES_JOB_COOLDOWN_SECONDS
-    global AI_NOTES_QUICK_ENABLED, OLLAMA_QUICK_MODEL, OLLAMA_QUICK_TIMEOUT
-    global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
-
-    OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
-    OLLAMA_CHAT_MODEL = str(settings.get("ollama_chat_model") or OLLAMA_CHAT_MODEL).strip()
-    OLLAMA_TIMEOUT = int_setting(settings.get("ollama_timeout"), OLLAMA_TIMEOUT, 30)
-    AI_NOTES_MAX_CHARS = int_setting(settings.get("ai_notes_max_chars"), AI_NOTES_MAX_CHARS, 1000)
-    AI_NOTES_AUTO = bool_setting(settings.get("ai_notes_auto", AI_NOTES_AUTO))
-    AI_NOTES_BATCH_LIMIT = int_setting(settings.get("ai_notes_batch_limit"), AI_NOTES_BATCH_LIMIT, 1)
-    AI_NOTES_MAX_BATCH_LIMIT = int_setting(settings.get("ai_notes_max_batch_limit"), AI_NOTES_MAX_BATCH_LIMIT, 1)
-    AI_NOTES_YEAR_BACKFILL_ENABLED = bool_setting(settings.get("ai_notes_year_backfill_enabled", AI_NOTES_YEAR_BACKFILL_ENABLED))
-    AI_NOTES_YEAR_BACKFILL_YEAR = int_setting(settings.get("ai_notes_year_backfill_year"), AI_NOTES_YEAR_BACKFILL_YEAR, 2005)
-    AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = int_setting(settings.get("ai_notes_year_backfill_batch_limit"), AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, 1)
-    AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = int_setting(settings.get("ai_notes_year_backfill_target_active"), AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE, 1)
-    AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = int_setting(settings.get("ai_notes_year_backfill_interval_seconds"), AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, 30)
-    AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS = int_setting(settings.get("ai_notes_year_backfill_idle_seconds"), AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS, 10)
-    AI_NOTES_WORKER_ENABLED = bool_setting(settings.get("ai_notes_worker_enabled", AI_NOTES_WORKER_ENABLED))
-    AI_NOTES_JOB_COOLDOWN_SECONDS = int_setting(settings.get("ai_notes_job_cooldown_seconds"), AI_NOTES_JOB_COOLDOWN_SECONDS, 0, 3600)
-    AI_NOTES_QUICK_ENABLED = bool_setting(settings.get("ai_notes_quick_enabled", AI_NOTES_QUICK_ENABLED))
-    if settings.get("ollama_quick_model"):
-        OLLAMA_QUICK_MODEL = str(settings["ollama_quick_model"]).strip()
-    OLLAMA_QUICK_TIMEOUT = int_setting(settings.get("ollama_quick_timeout"), OLLAMA_QUICK_TIMEOUT, 10)
-    if settings.get("ai_provider"):
-        AI_PROVIDER = str(settings["ai_provider"]).lower().strip()
-    if settings.get("ai_cloud_model"):
-        AI_CLOUD_MODEL = str(settings["ai_cloud_model"]).strip()
-    if settings.get("anthropic_api_key") is not None:
-        ANTHROPIC_API_KEY = str(settings["anthropic_api_key"])
-    if settings.get("openai_api_key") is not None:
-        OPENAI_API_KEY = str(settings["openai_api_key"])
-    if settings.get("openai_base_url"):
-        OPENAI_BASE_URL = str(settings["openai_base_url"]).rstrip("/")
-    configure_ai_notes(
-        base_url=OLLAMA_BASE_URL,
-        model=OLLAMA_CHAT_MODEL,
-        max_chars=AI_NOTES_MAX_CHARS,
-        timeout=OLLAMA_TIMEOUT,
-        quick_model=OLLAMA_QUICK_MODEL,
-        quick_timeout=OLLAMA_QUICK_TIMEOUT,
-        provider=AI_PROVIDER,
-        cloud_model=AI_CLOUD_MODEL,
-        anthropic_api_key=ANTHROPIC_API_KEY,
-        openai_api_key=OPENAI_API_KEY,
-        openai_base_url=OPENAI_BASE_URL,
-    )
 
 
 async def load_schedule_settings():
-    global REFRESH_CRON, SCHEDULER_TIMEZONE
     try:
         stored_cron = await directus.get_setting("refresh_cron")
         stored_timezone = await directus.get_setting("scheduler_timezone")
         if stored_cron:
-            REFRESH_CRON = stored_cron
+            config.REFRESH_CRON = stored_cron
         if stored_timezone:
-            SCHEDULER_TIMEZONE = stored_timezone
-        validate_schedule(REFRESH_CRON, SCHEDULER_TIMEZONE)
+            config.SCHEDULER_TIMEZONE = stored_timezone
+        config.validate_schedule(config.REFRESH_CRON, config.SCHEDULER_TIMEZONE)
     except Exception as e:
         logger.warning(f"Could not load stored schedule settings, using current values: {e}")
 
@@ -282,14 +111,14 @@ async def save_schedule_settings(cron: str, timezone_name: str):
 
 async def load_app_settings():
     global last_runtime_settings_load
-    settings = current_app_settings()
+    settings = config.current_app_settings()
     try:
         stored = {}
         for key in settings.keys():
             value = await directus.get_setting(key)
             if value is not None:
                 stored[key] = value
-        apply_app_settings({**settings, **stored})
+        config.apply_app_settings({**settings, **stored})
         last_runtime_settings_load = time.monotonic()
     except Exception as e:
         logger.warning(f"Could not load app settings, using current values: {e}")
@@ -303,15 +132,15 @@ async def refresh_app_settings_if_due(max_age_seconds: int = 30, force: bool = F
 async def get_ollama_resource_status() -> dict:
     result = {
         "online": False,
-        "base_url": OLLAMA_BASE_URL,
-        "configured_model": OLLAMA_CHAT_MODEL,
+        "base_url": config.OLLAMA_BASE_URL,
+        "configured_model": config.OLLAMA_CHAT_MODEL,
         "models": [],
         "sampled_at": now_iso(),
         "error": None,
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=1.0)) as client:
-            response = await client.get(f"{OLLAMA_BASE_URL}/api/ps")
+            response = await client.get(f"{config.OLLAMA_BASE_URL}/api/ps")
             response.raise_for_status()
             data = response.json()
     except Exception as e:
@@ -344,9 +173,9 @@ async def get_ollama_resource_status() -> dict:
 async def current_resource_status() -> dict:
     ai_counts = await job_status_counts("ai")
     return {
-        "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
-        "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
-        "ai_worker_concurrency": AI_WORKER_CONCURRENCY,
+        "ai_worker_enabled": config.AI_NOTES_WORKER_ENABLED,
+        "ai_job_cooldown_seconds": config.AI_NOTES_JOB_COOLDOWN_SECONDS,
+        "ai_worker_concurrency": config.AI_WORKER_CONCURRENCY,
         "ai_queue": ai_counts,
         "ollama": await get_ollama_resource_status(),
     }
@@ -385,13 +214,13 @@ async def get_pg_pool() -> asyncpg.Pool:
     if pg_pool:
         return pg_pool
     pg_pool = await asyncpg.create_pool(
-        host=POSTGRES_HOST,
-        port=POSTGRES_PORT,
-        database=POSTGRES_DB,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
+        host=config.POSTGRES_HOST,
+        port=config.POSTGRES_PORT,
+        database=config.POSTGRES_DB,
+        user=config.POSTGRES_USER,
+        password=config.POSTGRES_PASSWORD,
         min_size=1,
-        max_size=max(4, FETCH_WORKER_CONCURRENCY + AI_WORKER_CONCURRENCY + 2),
+        max_size=max(4, config.FETCH_WORKER_CONCURRENCY + config.AI_WORKER_CONCURRENCY + 2),
     )
     return pg_pool
 
@@ -408,9 +237,9 @@ def start_refresh_scheduler():
     if scheduler:
         scheduler.shutdown(wait=False)
 
-    cron_parts = validate_schedule(REFRESH_CRON, SCHEDULER_TIMEZONE)
+    cron_parts = config.validate_schedule(config.REFRESH_CRON, config.SCHEDULER_TIMEZONE)
     minute, hour, day, month, day_of_week = cron_parts
-    scheduler = AsyncIOScheduler(timezone=get_scheduler_timezone())
+    scheduler = AsyncIOScheduler(timezone=config.get_scheduler_timezone())
     scheduler.add_job(
         daily_refresh,
         "cron",
@@ -429,25 +258,25 @@ def start_refresh_scheduler():
         id="cleanup_old_jobs",
         replace_existing=True,
     )
-    if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
+    if config.AI_NOTES_AUTO and config.AI_NOTES_YEAR_BACKFILL_ENABLED:
         scheduler.add_job(
             maybe_enqueue_ai_year_backfill,
             "interval",
-            seconds=AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
+            seconds=config.AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
             id="ai_year_backfill",
             kwargs={"source": "scheduler"},
-            next_run_time=datetime.now(get_scheduler_timezone()),
+            next_run_time=datetime.now(config.get_scheduler_timezone()),
             replace_existing=True,
         )
     scheduler.start()
-    logger.info(f"Daily refresh scheduled: {REFRESH_CRON} ({SCHEDULER_TIMEZONE})")
-    if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
+    logger.info(f"Daily refresh scheduled: {config.REFRESH_CRON} ({config.SCHEDULER_TIMEZONE})")
+    if config.AI_NOTES_AUTO and config.AI_NOTES_YEAR_BACKFILL_ENABLED:
         logger.info(
             "AI year backfill scheduled: year=%s interval=%ss target_active=%s batch=%s",
-            AI_NOTES_YEAR_BACKFILL_YEAR,
-            AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
-            AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
-            AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+            config.AI_NOTES_YEAR_BACKFILL_YEAR,
+            config.AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
+            config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+            config.AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
         )
 
 
@@ -672,7 +501,7 @@ async def claim_next_job(queue: str, worker_name: str) -> Optional[dict]:
     return normalize_claimed_job(row)
 
 
-async def reset_stale_running_jobs(max_age_minutes: int = STALE_JOB_MINUTES) -> int:
+async def reset_stale_running_jobs(max_age_minutes: int = config.STALE_JOB_MINUTES) -> int:
     pool = await get_pg_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -741,11 +570,11 @@ async def ensure_database_indexes():
     ]
     try:
         conn = await asyncpg.connect(
-            host=POSTGRES_HOST,
-            port=POSTGRES_PORT,
-            database=POSTGRES_DB,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
+            host=config.POSTGRES_HOST,
+            port=config.POSTGRES_PORT,
+            database=config.POSTGRES_DB,
+            user=config.POSTGRES_USER,
+            password=config.POSTGRES_PASSWORD,
         )
     except Exception as e:
         logger.warning(f"Could not connect to Postgres for index bootstrap: {e}")
@@ -870,7 +699,7 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
         await refresh_app_settings_if_due()
-        if not AI_NOTES_WORKER_ENABLED:
+        if not config.AI_NOTES_WORKER_ENABLED:
             await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
         try:
@@ -931,8 +760,8 @@ async def ai_worker_loop(worker_name: str = "ai-worker"):
             current_task_info_var.reset(task_info_token)
             current_ai_task_info = {}
             current_ai_job_id = None
-            if AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag and not stop_ai_flag:
-                await asyncio.sleep(AI_NOTES_JOB_COOLDOWN_SECONDS)
+            if config.AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not stop_flag and not stop_ai_flag:
+                await asyncio.sleep(config.AI_NOTES_JOB_COOLDOWN_SECONDS)
 
 
 async def quick_worker_loop(worker_name: str = "quick-worker"):
@@ -1089,7 +918,7 @@ async def _process_channel_transcripts(
                     "transcript": transcript or "",
                     "transcript_timed": transcript_timed or "",
                 })
-                if transcript and AI_NOTES_AUTO:
+                if transcript and config.AI_NOTES_AUTO:
                     try:
                         await enqueue_ai_note(directus_video_id)
                     except Exception as e:
@@ -1253,7 +1082,7 @@ async def process_single_video_task(task: dict):
     }
     if directus_video_id:
         await directus.update_video(directus_video_id, update_data)
-        if transcript and AI_NOTES_AUTO:
+        if transcript and config.AI_NOTES_AUTO:
             await enqueue_ai_note(directus_video_id)
 
     logger.info(f"Single video {yt_id}: {'done' if transcript else 'no_transcript'}")
@@ -1361,7 +1190,7 @@ async def process_refresh_thumbnails_task():
 async def generate_and_store_ai_notes(directus_video_id: str, video: dict, fields: Optional[list[str]] = None) -> bool:
     """Generate and persist AI notebook fields for a single Directus video."""
     global current_ai_task_info
-    requested_fields = [field for field in (fields or []) if field in AI_NOTE_GENERATED_FIELDS]
+    requested_fields = [field for field in (fields or []) if field in config.AI_NOTE_GENERATED_FIELDS]
     current_ai_task_info = {
         "type": "ai_note_video",
         "phase": "AI jegyzet generálása",
@@ -1419,7 +1248,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
 async def process_ai_notes_task(task: dict):
     """Fan out a global AI notes batch into per-video jobs."""
     global current_ai_task_info
-    limit = max(1, min(int(task.get("limit") or AI_NOTES_BATCH_LIMIT), AI_NOTES_MAX_BATCH_LIMIT))
+    limit = max(1, min(int(task.get("limit") or config.AI_NOTES_BATCH_LIMIT), config.AI_NOTES_MAX_BATCH_LIMIT))
     videos = await directus.get_videos_missing_ai_notes(limit)
     active_video_ids = await directus.get_ai_note_job_video_ids()
     logger.info(f"Queueing AI note jobs for {len(videos)} candidate videos")
@@ -1514,7 +1343,7 @@ async def process_quick_note_task(task: dict):
         if quick:
             await directus.update_video(video["id"], {
                 "quick_summary": quick,
-                "quick_summary_model": OLLAMA_QUICK_MODEL,
+                "quick_summary_model": config.OLLAMA_QUICK_MODEL,
                 "quick_summary_generated_at": now_iso(),
             })
             logger.info(f"Quick summary stored for {video.get('video_id') or video_id}")
@@ -1535,7 +1364,7 @@ async def enqueue_quick_job(task: dict, label: Optional[str] = None):
 async def enqueue_ai_note(video_id: str):
     """Mark a video as queued for AI notes and route it to the first pipeline step."""
     await update_video_ai_status(video_id, "pending")
-    if AI_NOTES_QUICK_ENABLED:
+    if config.AI_NOTES_QUICK_ENABLED:
         task = {"type": JOB_QUICK_NOTE_VIDEO, "video_id": video_id}
         return await directus.create_job(QUEUE_QUICK, task, dedupe_key=job_dedupe_key(QUEUE_QUICK, task))
     task = {"type": JOB_AI_NOTE_VIDEO, "video_id": video_id}
@@ -1574,44 +1403,44 @@ async def enqueue_ai_job(task: dict, label: Optional[str] = None):
 async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool = False) -> dict:
     """Keep the AI queue filled with missing notes for the configured upload year."""
     global last_ai_year_backfill_attempt
-    if not AI_NOTES_AUTO or not AI_NOTES_YEAR_BACKFILL_ENABLED or stop_flag or stop_ai_flag:
+    if not config.AI_NOTES_AUTO or not config.AI_NOTES_YEAR_BACKFILL_ENABLED or stop_flag or stop_ai_flag:
         return {"enabled": False, "queued": 0, "skipped": 0}
 
     now = time.monotonic()
-    if not force and source != "scheduler" and now - last_ai_year_backfill_attempt < AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS:
+    if not force and source != "scheduler" and now - last_ai_year_backfill_attempt < config.AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS:
         return {"throttled": True, "queued": 0, "skipped": 0}
     last_ai_year_backfill_attempt = now
 
     active_jobs = await directus.count_jobs("ai", "queued,running,paused")
-    if not force and active_jobs >= AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE:
+    if not force and active_jobs >= config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE:
         return {
             "queued": 0,
             "skipped": 0,
             "active_jobs": active_jobs,
-            "target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
-            "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+            "target_active": config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+            "year": config.AI_NOTES_YEAR_BACKFILL_YEAR,
         }
 
-    capacity = AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT if force else min(
-        AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
-        max(0, AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE - active_jobs),
+    capacity = config.AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT if force else min(
+        config.AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+        max(0, config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE - active_jobs),
     )
     if capacity <= 0:
         return {"queued": 0, "skipped": 0, "active_jobs": active_jobs}
 
-    missing_total = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
+    missing_total = await directus.count_videos_missing_ai_notes(config.AI_NOTES_YEAR_BACKFILL_YEAR)
     if missing_total <= 0:
-        logger.info(f"AI year backfill complete for {AI_NOTES_YEAR_BACKFILL_YEAR}")
+        logger.info(f"AI year backfill complete for {config.AI_NOTES_YEAR_BACKFILL_YEAR}")
         return {
             "queued": 0,
             "skipped": 0,
             "missing_total": 0,
-            "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+            "year": config.AI_NOTES_YEAR_BACKFILL_YEAR,
         }
 
     active_video_ids = await directus.get_ai_note_job_video_ids()
-    scan_limit = min(AI_NOTES_MAX_BATCH_LIMIT, max(capacity * 5, capacity + len(active_video_ids)))
-    videos = await directus.get_videos_missing_ai_notes(scan_limit, year=AI_NOTES_YEAR_BACKFILL_YEAR)
+    scan_limit = min(config.AI_NOTES_MAX_BATCH_LIMIT, max(capacity * 5, capacity + len(active_video_ids)))
+    videos = await directus.get_videos_missing_ai_notes(scan_limit, year=config.AI_NOTES_YEAR_BACKFILL_YEAR)
 
     queued = 0
     skipped = 0
@@ -1626,7 +1455,7 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
         job = await enqueue_ai_job({
             "type": "ai_note_video",
             "video_id": video_id,
-            "backfill_year": AI_NOTES_YEAR_BACKFILL_YEAR,
+            "backfill_year": config.AI_NOTES_YEAR_BACKFILL_YEAR,
         })
         active_video_ids.add(video_id)
         if job.get("existing"):
@@ -1642,15 +1471,15 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
             skipped,
             missing_total,
             active_jobs,
-            AI_NOTES_YEAR_BACKFILL_YEAR,
+            config.AI_NOTES_YEAR_BACKFILL_YEAR,
         )
     return {
         "queued": queued,
         "skipped": skipped,
         "missing_total": missing_total,
         "active_jobs": active_jobs,
-        "target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
-        "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+        "target_active": config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+        "year": config.AI_NOTES_YEAR_BACKFILL_YEAR,
     }
 
 
@@ -1764,10 +1593,10 @@ async def daily_refresh():
 
 
 async def cleanup_old_jobs():
-    """Delete done/cancelled jobs older than JOB_CLEANUP_DAYS days."""
-    count = await directus.delete_old_jobs(older_than_days=JOB_CLEANUP_DAYS)
+    """Delete done/cancelled jobs older than config.JOB_CLEANUP_DAYS days."""
+    count = await directus.delete_old_jobs(older_than_days=config.JOB_CLEANUP_DAYS)
     if count > 0:
-        logger.info(f"Cleaned up {count} old jobs (>{JOB_CLEANUP_DAYS}d)")
+        logger.info(f"Cleaned up {count} old jobs (>{config.JOB_CLEANUP_DAYS}d)")
 
 
 async def bootstrap_runtime(cleanup_pending: bool = True):
@@ -1795,32 +1624,32 @@ async def bootstrap_runtime(cleanup_pending: bool = True):
 
 def create_worker_tasks() -> list[asyncio.Task]:
     tasks = []
-    if "fetch" in WORKER_QUEUES:
-        for index in range(FETCH_WORKER_CONCURRENCY):
-            name = f"{WORKER_ID}:fetch:{index + 1}"
+    if "fetch" in config.WORKER_QUEUES:
+        for index in range(config.FETCH_WORKER_CONCURRENCY):
+            name = f"{config.WORKER_ID}:fetch:{index + 1}"
             tasks.append(asyncio.create_task(worker_loop(name), name=name))
-    if QUEUE_QUICK in WORKER_QUEUES:
-        for index in range(QUICK_WORKER_CONCURRENCY):
-            name = f"{WORKER_ID}:quick:{index + 1}"
+    if QUEUE_QUICK in config.WORKER_QUEUES:
+        for index in range(config.QUICK_WORKER_CONCURRENCY):
+            name = f"{config.WORKER_ID}:quick:{index + 1}"
             tasks.append(asyncio.create_task(quick_worker_loop(name), name=name))
-    if "ai" in WORKER_QUEUES:
-        for index in range(AI_WORKER_CONCURRENCY):
-            name = f"{WORKER_ID}:ai:{index + 1}"
+    if "ai" in config.WORKER_QUEUES:
+        for index in range(config.AI_WORKER_CONCURRENCY):
+            name = f"{config.WORKER_ID}:ai:{index + 1}"
             tasks.append(asyncio.create_task(ai_worker_loop(name), name=name))
     return tasks
 
 
 async def run_worker_service():
     await bootstrap_runtime(cleanup_pending=True)
-    owned = await reset_owned_running_jobs(WORKER_ID, WORKER_QUEUES)
+    owned = await reset_owned_running_jobs(config.WORKER_ID, config.WORKER_QUEUES)
     if owned:
-        logger.info(f"Re-queued {owned} jobs left by previous {WORKER_ID} instance")
+        logger.info(f"Re-queued {owned} jobs left by previous {config.WORKER_ID} instance")
     tasks = create_worker_tasks()
     if not tasks:
         logger.warning("Worker service started with no queues enabled")
         while True:
             await asyncio.sleep(IDLE_SLEEP)
-    logger.info(f"Worker service started with {len(tasks)} worker task(s): {sorted(WORKER_QUEUES)}")
+    logger.info(f"Worker service started with {len(tasks)} worker task(s): {sorted(config.WORKER_QUEUES)}")
     try:
         await asyncio.gather(*tasks)
     finally:
@@ -1836,18 +1665,18 @@ async def run_worker_service():
 async def lifespan(app: FastAPI):
     global worker_task, ai_worker_task, scheduler
 
-    await bootstrap_runtime(cleanup_pending=FETCHER_ROLE in {"api", "all"})
+    await bootstrap_runtime(cleanup_pending=config.FETCHER_ROLE in {"api", "all"})
 
     worker_tasks = []
-    if FETCHER_ROLE in {"all", "worker"}:
+    if config.FETCHER_ROLE in {"all", "worker"}:
         worker_tasks = create_worker_tasks()
         worker_task = next((task for task in worker_tasks if "fetch" in task.get_name()), None)
         ai_worker_task = next((task for task in worker_tasks if "ai" in task.get_name()), None)
 
-    if FETCHER_ROLE in {"api", "all"}:
+    if config.FETCHER_ROLE in {"api", "all"}:
         start_refresh_scheduler()
     else:
-        logger.info(f"Fetcher API started in role={FETCHER_ROLE}; scheduler disabled")
+        logger.info(f"Fetcher API started in role={config.FETCHER_ROLE}; scheduler disabled")
 
     yield
 
@@ -1867,15 +1696,15 @@ app = FastAPI(title="YouTube Transcript Fetcher", lifespan=lifespan)
 
 @app.middleware("http")
 async def require_app_token(request: Request, call_next):
-    if APP_API_TOKEN and request.url.path not in {"/health"}:
-        if request.headers.get("x-app-token") != APP_API_TOKEN:
+    if config.APP_API_TOKEN and request.url.path not in {"/health"}:
+        if request.headers.get("x-app-token") != config.APP_API_TOKEN:
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
     return await call_next(request)
 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=APP_CORS_ORIGINS,
+    allow_origins=config.APP_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -2079,7 +1908,7 @@ async def ui_video_count():
 
 @app.get("/ui/admin-stats")
 async def ui_admin_stats():
-    local_tz = get_scheduler_timezone()
+    local_tz = config.get_scheduler_timezone()
     local_start = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
     start = local_start.astimezone(timezone.utc)
     end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
@@ -2198,8 +2027,8 @@ async def health():
             "ai": ai_counts,
         },
         "workers": {
-            "fetch_concurrency": FETCH_WORKER_CONCURRENCY,
-            "ai_concurrency": AI_WORKER_CONCURRENCY,
+            "fetch_concurrency": config.FETCH_WORKER_CONCURRENCY,
+            "ai_concurrency": config.AI_WORKER_CONCURRENCY,
         },
     }
 
@@ -2214,8 +2043,8 @@ async def status():
     quick_counts = await job_status_counts(QUEUE_QUICK)
     ai_counts = await job_status_counts("ai")
     ai_year_missing = None
-    if AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED:
-        ai_year_missing = await directus.count_videos_missing_ai_notes(AI_NOTES_YEAR_BACKFILL_YEAR)
+    if config.AI_NOTES_AUTO and config.AI_NOTES_YEAR_BACKFILL_ENABLED:
+        ai_year_missing = await directus.count_videos_missing_ai_notes(config.AI_NOTES_YEAR_BACKFILL_YEAR)
     return {
         "queue_size": fetch_counts["queued"],
         "quick_queue_size": quick_counts["queued"],
@@ -2229,9 +2058,9 @@ async def status():
             "ai": ai_counts,
         },
         "workers": {
-            "fetch_concurrency": FETCH_WORKER_CONCURRENCY,
-            "quick_concurrency": QUICK_WORKER_CONCURRENCY,
-            "ai_concurrency": AI_WORKER_CONCURRENCY,
+            "fetch_concurrency": config.FETCH_WORKER_CONCURRENCY,
+            "quick_concurrency": config.QUICK_WORKER_CONCURRENCY,
+            "ai_concurrency": config.AI_WORKER_CONCURRENCY,
         },
         "stop_flag": stop_flag,
         "stopped_queues": {
@@ -2243,23 +2072,23 @@ async def status():
         "current_quick_task": quick_current,
         "current_ai_task": ai_current,
         "resources": {
-            "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
-            "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
-            "ai_worker_concurrency": AI_WORKER_CONCURRENCY,
+            "ai_worker_enabled": config.AI_NOTES_WORKER_ENABLED,
+            "ai_job_cooldown_seconds": config.AI_NOTES_JOB_COOLDOWN_SECONDS,
+            "ai_worker_concurrency": config.AI_WORKER_CONCURRENCY,
             "ai_queue": ai_counts,
             "ollama": ollama_resources,
         },
         "schedule": {
-            "cron": REFRESH_CRON,
-            "timezone": SCHEDULER_TIMEZONE,
+            "cron": config.REFRESH_CRON,
+            "timezone": config.SCHEDULER_TIMEZONE,
         },
         "ai_year_backfill": {
-            "enabled": AI_NOTES_AUTO and AI_NOTES_YEAR_BACKFILL_ENABLED,
-            "year": AI_NOTES_YEAR_BACKFILL_YEAR,
+            "enabled": config.AI_NOTES_AUTO and config.AI_NOTES_YEAR_BACKFILL_ENABLED,
+            "year": config.AI_NOTES_YEAR_BACKFILL_YEAR,
             "missing": ai_year_missing,
-            "target_active": AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
-            "batch_limit": AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
-            "interval_seconds": AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
+            "target_active": config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
+            "batch_limit": config.AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+            "interval_seconds": config.AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
         },
     }
 
@@ -2299,12 +2128,12 @@ async def resource_stream():
                 raise
             except Exception as e:
                 payload = {
-                    "ai_worker_enabled": AI_NOTES_WORKER_ENABLED,
-                    "ai_job_cooldown_seconds": AI_NOTES_JOB_COOLDOWN_SECONDS,
+                    "ai_worker_enabled": config.AI_NOTES_WORKER_ENABLED,
+                    "ai_job_cooldown_seconds": config.AI_NOTES_JOB_COOLDOWN_SECONDS,
                     "ollama": {
                         "online": False,
-                        "base_url": OLLAMA_BASE_URL,
-                        "configured_model": OLLAMA_CHAT_MODEL,
+                        "base_url": config.OLLAMA_BASE_URL,
+                        "configured_model": config.OLLAMA_CHAT_MODEL,
                         "models": [],
                         "sampled_at": now_iso(),
                         "error": str(e)[:300],
@@ -2444,44 +2273,43 @@ async def delete_job(job_id: str):
 
 @app.get("/schedule")
 async def get_schedule():
-    return {"cron": REFRESH_CRON, "timezone": SCHEDULER_TIMEZONE}
+    return {"cron": config.REFRESH_CRON, "timezone": config.SCHEDULER_TIMEZONE}
 
 
 @app.patch("/schedule")
 async def update_schedule(request: ScheduleRequest):
-    global REFRESH_CRON, SCHEDULER_TIMEZONE
     cron = request.cron.strip()
     timezone_name = request.timezone.strip()
     try:
-        validate_schedule(cron, timezone_name)
+        config.validate_schedule(cron, timezone_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    REFRESH_CRON = cron
-    SCHEDULER_TIMEZONE = timezone_name
+    config.REFRESH_CRON = cron
+    config.SCHEDULER_TIMEZONE = timezone_name
     start_refresh_scheduler()
     await save_schedule_settings(cron, timezone_name)
-    return {"cron": REFRESH_CRON, "timezone": SCHEDULER_TIMEZONE}
+    return {"cron": config.REFRESH_CRON, "timezone": config.SCHEDULER_TIMEZONE}
 
 
 @app.get("/settings")
 async def get_settings():
-    return current_app_settings()
+    return config.current_app_settings()
 
 
 @app.patch("/settings")
 async def update_settings(request: AppSettingsRequest):
     updates = request.model_dump(exclude_unset=True)
-    next_settings = {**current_app_settings(), **updates}
-    apply_app_settings(next_settings)
+    next_settings = {**config.current_app_settings(), **updates}
+    config.apply_app_settings(next_settings)
     gated_jobs = None
     if "ai_notes_worker_enabled" in updates:
-        gated_jobs = await apply_ai_worker_queue_gate(AI_NOTES_WORKER_ENABLED)
-    for key, value in current_app_settings().items():
+        gated_jobs = await apply_ai_worker_queue_gate(config.AI_NOTES_WORKER_ENABLED)
+    for key, value in config.current_app_settings().items():
         await directus.set_setting(key, str(value).lower() if isinstance(value, bool) else str(value))
-    if FETCHER_ROLE in {"api", "all"}:
+    if config.FETCHER_ROLE in {"api", "all"}:
         start_refresh_scheduler()
-    return {**current_app_settings(), "ai_worker_gated_jobs": gated_jobs}
+    return {**config.current_app_settings(), "ai_worker_gated_jobs": gated_jobs}
 
 
 @app.post("/fetch-channels")
@@ -2580,7 +2408,7 @@ async def ai_notes(request: AiNotesRequest):
     existing = await directus.get_active_job_by_type("ai", "ai_notes")
     if existing:
         return {"queued": False, "existing": True, "job_id": existing["id"]}
-    limit = max(1, min(request.limit, AI_NOTES_MAX_BATCH_LIMIT))
+    limit = max(1, min(request.limit, config.AI_NOTES_MAX_BATCH_LIMIT))
     job = await enqueue_ai_job({"type": "ai_notes", "limit": limit})
     return {"queued": True, "limit": limit, "job_id": job.get("id")}
 
@@ -2626,7 +2454,7 @@ async def regenerate_ai_note_fields(video_id: str, request: AiNoteRegenerateRequ
     if not (video.get("transcript") or video.get("transcript_timed")):
         raise HTTPException(status_code=400, detail="Video has no transcript")
 
-    fields = [field for field in request.fields if field in AI_NOTE_GENERATED_FIELDS]
+    fields = [field for field in request.fields if field in config.AI_NOTE_GENERATED_FIELDS]
     if not fields:
         raise HTTPException(status_code=400, detail="No supported AI note fields requested")
 
