@@ -113,10 +113,13 @@
     "membersHidden": "Members elrejtve",
     "membersOnly": "Csak members",
     "transcriptMissing": "Transzkript hiányzik",
-    "all": "Összes"
+    "all": "Összes",
+    "allTopics": "Minden téma"
   },
   "label": {
     "channel": "Csatorna",
+    "topic": "Téma",
+    "noTopic": "Téma nélkül",
     "videos": "Videók",
     "transcript": "Transzkript",
     "name": "Név",
@@ -170,6 +173,7 @@
     "activeOnly": "Csak aktív",
     "plusCompleted": "+ {count} befejezett",
     "videoCount": "{count} videó",
+    "channelCount": "{count} csatorna",
     "hideErrors": "Hibás videók elrejtése",
     "showErrors": "Hibás videók ({count})"
     ,
@@ -211,7 +215,8 @@
   },
   "placeholder": {
     "searchChannel": "Keresés...",
-    "searchChannelAdmin": "Keresés név, handle vagy URL alapján...",
+    "searchChannelAdmin": "Keresés név, téma, handle vagy URL alapján...",
+    "channelTopic": "pl. AI, történelem, fejlesztés",
     "searchVideo": "Cím keresés...",
     "channelUrls": "URL-ek soronként (@handle, youtube.com/...)",
     "videoUrl": "youtube.com/watch?v=...",

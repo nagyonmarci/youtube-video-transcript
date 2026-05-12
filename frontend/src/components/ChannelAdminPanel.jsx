@@ -7,6 +7,7 @@ import { useMessage } from '../lib/useMessage.js';
 function editableChannel(ch) {
   return {
     name: ch.name || '',
+    topic: ch.topic || '',
     channel_url: ch.channel_url || '',
     channel_handle: ch.channel_handle || '',
     status: ch.status || 'pending',
@@ -47,7 +48,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
     const q = search.trim().toLowerCase();
     if (!q) return channels;
     return channels.filter(ch => (
-      `${ch.name || ''} ${ch.channel_handle || ''} ${ch.channel_url || ''}`
+      `${ch.name || ''} ${ch.topic || ''} ${ch.channel_handle || ''} ${ch.channel_url || ''}`
         .toLowerCase()
         .includes(q)
     ));
@@ -72,6 +73,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
       };
       await updateChannel(ch.id, {
         name: draft.name.trim(),
+        topic: draft.topic.trim(),
         channel_url: draft.channel_url.trim(),
         channel_handle: draft.channel_handle.trim(),
         status: draft.status,
@@ -154,6 +156,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
           <thead>
             <tr>
               <th>{t('label.name')}</th>
+              <th>{t('label.topic')}</th>
               <th>{t('label.url')}</th>
               <th>{t('label.handle')}</th>
               <th>{t('label.status')}</th>
@@ -171,6 +174,13 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
                     <input
                       value={draft.name}
                       onChange={e => updateDraft(ch.id, 'name', e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={draft.topic}
+                      onChange={e => updateDraft(ch.id, 'topic', e.target.value)}
+                      placeholder={t('placeholder.channelTopic')}
                     />
                   </td>
                   <td>
@@ -209,7 +219,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="6" className="admin-empty">{t('state.noResults')}</td>
+                <td colSpan="7" className="admin-empty">{t('state.noResults')}</td>
               </tr>
             )}
           </tbody>

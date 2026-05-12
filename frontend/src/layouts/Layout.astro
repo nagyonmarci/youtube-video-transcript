@@ -691,10 +691,31 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   .channel-sort {
     width: 150px;
   }
+  .channel-topic-filter {
+    width: 170px;
+  }
   .channel-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+  .channel-topic-group {
+    margin-top: 0.75rem;
+  }
+  .channel-topic-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .channel-topic-header h4 {
+    font-size: 0.82rem;
+    color: var(--text);
+    margin: 0;
+  }
+  .channel-topic-header span {
+    color: var(--text2);
+    font-size: 0.72rem;
   }
   .channel-card {
     background: var(--bg2);

@@ -432,6 +432,24 @@ fields:
       width: full
 
   - collection: channels
+    field: topic
+    type: string
+    schema:
+      name: topic
+      table: channels
+      data_type: character varying
+      max_length: 255
+      is_nullable: true
+    meta:
+      collection: channels
+      field: topic
+      interface: input
+      display: raw
+      readonly: false
+      hidden: false
+      width: half
+
+  - collection: channels
     field: channel_handle
     type: string
     schema:

@@ -30,6 +30,10 @@ AI_NOTE_FIELDS = [
     {"field": "ai_notes_error", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
 ]
 
+CHANNEL_EXTRA_FIELDS = [
+    {"field": "topic", "type": "string", "meta": {"interface": "input", "width": "half"}, "schema": {"max_length": 255, "is_nullable": True}},
+]
+
 JOB_PROGRESS_FIELDS = [
     {"field": "dedupe_key", "type": "string", "meta": {"interface": "input", "width": "full", "readonly": True}, "schema": {"max_length": 512, "is_nullable": True}},
     {"field": "attempts", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True, "default_value": 0}},
@@ -91,6 +95,8 @@ class DirectusClient:
         if "channels" not in existing:
             await self._create_channels_collection()
             logger.info("Created 'channels' collection")
+        else:
+            await self._ensure_channels_fields()
         if "videos" not in existing:
             await self._create_videos_collection()
             logger.info("Created 'videos' collection")
@@ -122,6 +128,7 @@ class DirectusClient:
             "fields": [
                 {"field": "id", "type": "uuid", "meta": {"special": ["uuid"], "hidden": True, "readonly": True}, "schema": {"is_primary_key": True, "is_nullable": False}},
                 {"field": "name", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 255, "is_nullable": True}},
+                *CHANNEL_EXTRA_FIELDS,
                 {"field": "channel_url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
                 {"field": "channel_handle", "type": "string", "meta": {"interface": "input", "width": "half"}, "schema": {"max_length": 255, "is_nullable": True}},
                 {"field": "added_at", "type": "timestamp", "meta": {"special": ["date-created"], "interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True, "default_value": "now()"}},
@@ -132,6 +139,17 @@ class DirectusClient:
             ],
         }
         await self._request("POST", "/collections", json=payload)
+
+    async def _ensure_channels_fields(self):
+        try:
+            result = await self._request("GET", "/fields/channels")
+            existing = {f["field"] for f in result.get("data", [])}
+            for field in CHANNEL_EXTRA_FIELDS:
+                if field["field"] not in existing:
+                    await self._request("POST", "/fields/channels", json=field)
+                    logger.info(f"Added '{field['field']}' field to channels collection")
+        except Exception as e:
+            logger.warning(f"Could not ensure channels fields: {e}")
 
     async def _create_videos_collection(self):
         payload = {

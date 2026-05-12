@@ -113,10 +113,13 @@
     "membersHidden": "Members hidden",
     "membersOnly": "Members only",
     "transcriptMissing": "Transcript missing",
-    "all": "All"
+    "all": "All",
+    "allTopics": "All topics"
   },
   "label": {
     "channel": "Channel",
+    "topic": "Topic",
+    "noTopic": "No topic",
     "videos": "Videos",
     "transcript": "Transcript",
     "name": "Name",
@@ -170,6 +173,7 @@
     "activeOnly": "Active only",
     "plusCompleted": "+ {count} completed",
     "videoCount": "{count} videos",
+    "channelCount": "{count} channels",
     "hideErrors": "Hide error videos",
     "showErrors": "Error videos ({count})",
     "aiManualOnly": "AI: manual only",
@@ -210,7 +214,8 @@
   },
   "placeholder": {
     "searchChannel": "Search...",
-    "searchChannelAdmin": "Search by name, handle or URL...",
+    "searchChannelAdmin": "Search by name, topic, handle or URL...",
+    "channelTopic": "e.g. AI, history, development",
     "searchVideo": "Search by title...",
     "channelUrls": "URLs one per line (@handle, youtube.com/...)",
     "videoUrl": "youtube.com/watch?v=...",
