@@ -374,6 +374,15 @@ export default function VideoTable({
                         <span className={`badge badge-${video.status}`}>
                           {st.icon} {st.label}
                         </span>
+                        {video.quick_summary && !video.summary && (
+                          <span
+                            className="badge badge-pending"
+                            title={video.quick_summary}
+                            style={{ marginLeft: '0.35rem' }}
+                          >
+                            {t('status.quickDone')}
+                          </span>
+                        )}
                         {video.ai_notes_status && (
                           <span
                             className={`badge badge-${video.ai_notes_status}`}

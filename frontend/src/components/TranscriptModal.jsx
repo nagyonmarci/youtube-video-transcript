@@ -274,6 +274,20 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
         <div style={{ padding: '1rem 1.25rem', overflowY: 'auto', flex: 1 }}>
           {activeTab === 'transcript' && (
             <>
+              {localVideo.quick_summary && (
+                <div style={{ marginBottom: '1rem', paddingBottom: '0.85rem', borderBottom: '1px solid var(--border)' }}>
+                  <h3 style={{ fontSize: '0.9rem', color: '#fff', marginBottom: '0.35rem' }}>{t('label.quickSummary')}</h3>
+                  <p style={{ fontSize: '0.85rem', color: '#ccc', lineHeight: '1.55', margin: 0 }}>
+                    {localVideo.quick_summary}
+                  </p>
+                  {localVideo.quick_summary_model && (
+                    <span style={{ fontSize: '0.72rem', color: '#666', marginTop: '0.3rem', display: 'block' }}>
+                      {localVideo.quick_summary_model}
+                      {localVideo.quick_summary_generated_at ? ` · ${new Date(localVideo.quick_summary_generated_at).toLocaleString()}` : ''}
+                    </span>
+                  )}
+                </div>
+              )}
               {(localVideo.summary || localVideo.topics?.length || localVideo.takeaways?.length || localVideo.questions?.length || localVideo.study_guide || localVideo.critique) && (
                 <div style={{ marginBottom: '1.2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

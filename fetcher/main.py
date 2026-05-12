@@ -1942,6 +1942,7 @@ class JobMoveRequest(BaseModel):
 UI_PAGE_SIZE = 100
 UI_VIDEO_FIELDS = ",".join([
     "id,video_id,title,url,thumbnail_url,uploaded_at,duration_seconds,status,is_members_only,transcript,transcript_timed,whisper_status",
+    "quick_summary,quick_summary_model,quick_summary_generated_at",
     "summary,topics,takeaways,questions,obsidian_note,study_guide,critique,ai_notes_status,ai_notes_generated_at,ai_notes_error",
     "channel_id.id,channel_id.name,channel_id.channel_handle",
 ])
