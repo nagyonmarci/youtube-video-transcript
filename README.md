@@ -106,6 +106,11 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `WHISPER_LANGUAGE` | Recognition language (`auto` detects) | `auto` |
 | `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
 | `WHISPER_BATCH_LIMIT` | Max videos per Whisper batch | `50` |
+| `AI_NIGHT_WINDOW_ENABLED` | Enable automatic full-speed AI window | `true` |
+| `AI_NIGHT_WINDOW_START_HOUR` | Hour to enable full-speed AI (0–23) | `17` |
+| `AI_NIGHT_WINDOW_STOP_HOUR` | Hour to restore day settings (0–23) | `7` |
+
+At `AI_NIGHT_WINDOW_START_HOUR` (default 17:00) the scheduler writes `ai_notes_auto=true`, `cooldown=0`, `ai_notes_year_backfill_enabled=true` to Directus and reloads config. At `AI_NIGHT_WINDOW_STOP_HOUR` (default 07:00) the pre-night snapshot is restored. Day settings come from **Admin → Setup** and are not affected.
 
 AI settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, context window (`ollama_num_ctx`, default 32 768 tokens), quick-summary context window (`ollama_quick_num_ctx`, default 4 096 tokens), temperature (default 0.1), max output tokens (`ollama_num_predict`, default 8 192), AI provider (Ollama / Anthropic / OpenAI), cloud model name, API keys, quick-summary model/timeout, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
 
