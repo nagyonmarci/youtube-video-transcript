@@ -16,8 +16,18 @@ logger = logging.getLogger(__name__)
 
 scheduler: Optional[AsyncIOScheduler] = None
 
-# Saved before night window starts so stop can restore them
-_day_snapshot: dict = {}
+_night_mode_active: bool = False
+# Directus values saved before night window, restored at stop
+_NIGHT_OVERRIDE_KEYS = [
+    "ai_notes_auto",
+    "ai_notes_job_cooldown_seconds",
+    "ai_notes_year_backfill_enabled",
+]
+_NIGHT_SNAPSHOT_KEYS = {
+    "ai_notes_auto": "ai_night_snapshot_auto",
+    "ai_notes_job_cooldown_seconds": "ai_night_snapshot_cooldown",
+    "ai_notes_year_backfill_enabled": "ai_night_snapshot_backfill",
+}
 
 
 async def daily_refresh():
@@ -33,37 +43,65 @@ async def daily_refresh():
 
 
 async def ai_night_window_start():
-    """Enable full-speed AI processing for the night window."""
-    global _day_snapshot
-    keys = ["ai_notes_auto", "ai_notes_job_cooldown_seconds", "ai_notes_year_backfill_enabled"]
-    _day_snapshot = {}
-    for key in keys:
-        val = await directus.get_setting(key)
-        if val is not None:
-            _day_snapshot[key] = val
+    global _night_mode_active
+    # Save current values to Directus snapshot keys (skip if already saved = restart during night)
+    snapshot_exists = await directus.get_setting(_NIGHT_SNAPSHOT_KEYS["ai_notes_auto"])
+    if snapshot_exists is None:
+        for src, snap in _NIGHT_SNAPSHOT_KEYS.items():
+            val = await directus.get_setting(src)
+            # If auto is already true we restarted mid-night; use conservative day defaults
+            if src == "ai_notes_auto" and val and val.lower() in ("true", "1", "yes", "on"):
+                await directus.set_setting(snap, "false")
+            else:
+                await directus.set_setting(snap, val or "false")
     await directus.set_setting("ai_notes_auto", "true")
     await directus.set_setting("ai_notes_job_cooldown_seconds", "0")
     await directus.set_setting("ai_notes_year_backfill_enabled", "true")
     await worker_state.load_app_settings()
+    _night_mode_active = True
     logger.info(
-        "Night window started (hour=%s): auto=on, cooldown=0, backfill=on",
+        "Night window started (%02d:00–%02d:00): auto=on, cooldown=0, backfill=on",
         config.AI_NIGHT_WINDOW_START_HOUR,
+        config.AI_NIGHT_WINDOW_STOP_HOUR,
     )
 
 
 async def ai_night_window_stop():
-    """Restore day settings after the night window."""
-    restore = _day_snapshot or {
-        "ai_notes_auto": "false",
-        "ai_notes_year_backfill_enabled": "false",
-    }
-    for key, value in restore.items():
-        await directus.set_setting(key, value)
+    global _night_mode_active
+    for src, snap in _NIGHT_SNAPSHOT_KEYS.items():
+        val = await directus.get_setting(snap)
+        await directus.set_setting(src, val or "false")
+        await directus.set_setting(snap, "")
     await worker_state.load_app_settings()
+    _night_mode_active = False
     logger.info(
-        "Night window ended (hour=%s): day settings restored",
+        "Night window ended (%02d:00): day settings restored",
         config.AI_NIGHT_WINDOW_STOP_HOUR,
     )
+
+
+async def check_night_window():
+    """Runs every 5 minutes; activates/deactivates the night window based on current config."""
+    if not config.AI_NIGHT_WINDOW_ENABLED:
+        if _night_mode_active:
+            await ai_night_window_stop()
+        return
+
+    tz = config.get_scheduler_timezone()
+    now_hour = datetime.now(tz).hour
+    start_h = config.AI_NIGHT_WINDOW_START_HOUR
+    stop_h = config.AI_NIGHT_WINDOW_STOP_HOUR
+
+    # Overnight window (e.g. 17–07): in window if hour >= start OR hour < stop
+    if start_h > stop_h:
+        in_window = now_hour >= start_h or now_hour < stop_h
+    else:
+        in_window = start_h <= now_hour < stop_h
+
+    if in_window and not _night_mode_active:
+        await ai_night_window_start()
+    elif not in_window and _night_mode_active:
+        await ai_night_window_stop()
 
 
 def start_refresh_scheduler():
@@ -102,31 +140,16 @@ def start_refresh_scheduler():
         next_run_time=datetime.now(config.get_scheduler_timezone()),
         replace_existing=True,
     )
-    if config.AI_NIGHT_WINDOW_ENABLED:
-        scheduler.add_job(
-            ai_night_window_start,
-            "cron",
-            id="ai_night_window_start",
-            replace_existing=True,
-            hour=config.AI_NIGHT_WINDOW_START_HOUR,
-            minute=0,
-        )
-        scheduler.add_job(
-            ai_night_window_stop,
-            "cron",
-            id="ai_night_window_stop",
-            replace_existing=True,
-            hour=config.AI_NIGHT_WINDOW_STOP_HOUR,
-            minute=0,
-        )
+    scheduler.add_job(
+        check_night_window,
+        "interval",
+        minutes=5,
+        id="check_night_window",
+        replace_existing=True,
+        next_run_time=datetime.now(config.get_scheduler_timezone()),
+    )
     scheduler.start()
     logger.info(f"Daily refresh scheduled: {config.REFRESH_CRON} ({config.SCHEDULER_TIMEZONE})")
-    if config.AI_NIGHT_WINDOW_ENABLED:
-        logger.info(
-            "AI night window enabled: %02d:00 → %02d:00 (auto=on, cooldown=0, backfill=on)",
-            config.AI_NIGHT_WINDOW_START_HOUR,
-            config.AI_NIGHT_WINDOW_STOP_HOUR,
-        )
     if config.AI_NOTES_AUTO and config.AI_NOTES_YEAR_BACKFILL_ENABLED:
         logger.info(
             "AI year backfill active: year=%s interval=%ss target_active=%s batch=%s",

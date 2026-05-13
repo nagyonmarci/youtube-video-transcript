@@ -106,9 +106,9 @@ QUICK_WORKER_CONCURRENCY = max(0, int(os.environ.get("QUICK_WORKER_CONCURRENCY",
 AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
 STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
 JOB_CLEANUP_DAYS = int(os.environ.get("JOB_CLEANUP_DAYS", "7"))
-AI_NIGHT_WINDOW_ENABLED = os.environ.get("AI_NIGHT_WINDOW_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-AI_NIGHT_WINDOW_START_HOUR = int(os.environ.get("AI_NIGHT_WINDOW_START_HOUR", "17"))
-AI_NIGHT_WINDOW_STOP_HOUR = int(os.environ.get("AI_NIGHT_WINDOW_STOP_HOUR", "7"))
+AI_NIGHT_WINDOW_ENABLED = False
+AI_NIGHT_WINDOW_START_HOUR = 17
+AI_NIGHT_WINDOW_STOP_HOUR = 7
 WORKER_ID = os.environ.get("WORKER_ID") or f"{socket.gethostname()}:{os.getpid()}"
 
 AI_NOTE_GENERATED_FIELDS = {
@@ -153,6 +153,9 @@ def current_app_settings() -> dict:
         "anthropic_api_key": ANTHROPIC_API_KEY,
         "openai_api_key": OPENAI_API_KEY,
         "openai_base_url": OPENAI_BASE_URL,
+        "ai_night_window_enabled": AI_NIGHT_WINDOW_ENABLED,
+        "ai_night_window_start_hour": AI_NIGHT_WINDOW_START_HOUR,
+        "ai_night_window_stop_hour": AI_NIGHT_WINDOW_STOP_HOUR,
     }
 
 
@@ -166,6 +169,7 @@ def apply_app_settings(settings: dict) -> None:
     global AI_NOTES_QUICK_ENABLED, OLLAMA_QUICK_MODEL, OLLAMA_QUICK_TIMEOUT
     global OLLAMA_NUM_CTX, OLLAMA_QUICK_NUM_CTX, OLLAMA_TEMPERATURE, OLLAMA_NUM_PREDICT
     global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
+    global AI_NIGHT_WINDOW_ENABLED, AI_NIGHT_WINDOW_START_HOUR, AI_NIGHT_WINDOW_STOP_HOUR
 
     OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
     OLLAMA_CHAT_MODEL = str(settings.get("ollama_chat_model") or OLLAMA_CHAT_MODEL).strip()
@@ -201,6 +205,9 @@ def apply_app_settings(settings: dict) -> None:
         OPENAI_API_KEY = str(settings["openai_api_key"])
     if settings.get("openai_base_url"):
         OPENAI_BASE_URL = str(settings["openai_base_url"]).rstrip("/")
+    AI_NIGHT_WINDOW_ENABLED = bool_setting(settings.get("ai_night_window_enabled", AI_NIGHT_WINDOW_ENABLED))
+    AI_NIGHT_WINDOW_START_HOUR = max(0, min(23, int_setting(settings.get("ai_night_window_start_hour"), AI_NIGHT_WINDOW_START_HOUR, 0)))
+    AI_NIGHT_WINDOW_STOP_HOUR = max(0, min(23, int_setting(settings.get("ai_night_window_stop_hour"), AI_NIGHT_WINDOW_STOP_HOUR, 0)))
     configure_ai_notes(
         base_url=OLLAMA_BASE_URL,
         model=OLLAMA_CHAT_MODEL,
