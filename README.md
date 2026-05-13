@@ -98,7 +98,7 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `REFRESH_CRON` | Automatic channel refresh schedule | `0 7 * * *` |
 | `SCHEDULER_TIMEZONE` | Cron timezone | `Europe/Budapest` |
 | `FETCH_WORKER_CONCURRENCY` | Parallel fetch-worker threads | `1` |
-| `QUICK_WORKER_CONCURRENCY` | Parallel quick-summary worker threads | `1` |
+| `QUICK_WORKER_CONCURRENCY` | Parallel quick-summary worker threads | `3` |
 | `AI_WORKER_CONCURRENCY` | Parallel AI-worker threads | `1` |
 | `STALE_JOB_MINUTES` | Re-queue jobs stuck in `running` after N minutes | `30` |
 | `JOB_CLEANUP_DAYS` | Auto-delete completed/cancelled jobs after N days | `7` |
@@ -107,7 +107,7 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
 | `WHISPER_BATCH_LIMIT` | Max videos per Whisper batch | `50` |
 
-AI settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, AI provider (Ollama / Anthropic / OpenAI), cloud model name, API keys, quick-summary model/timeout, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
+AI settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, context window (`ollama_num_ctx`, default 32 768 tokens), quick-summary context window (`ollama_quick_num_ctx`, default 4 096 tokens), temperature (default 0.1), max output tokens (`ollama_num_predict`, default 8 192), AI provider (Ollama / Anthropic / OpenAI), cloud model name, API keys, quick-summary model/timeout, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
 
 ## Development Workflow
 

@@ -43,6 +43,51 @@ export default function SettingsForm({ appSettings, settingsDraft, settingsDirty
             onChange={e => onChange('ollama_timeout', Number(e.target.value))}
           />
         </label>
+        {settingsDraft.ai_provider === 'ollama' && (
+          <>
+            <label>
+              {t('label.ollamaNumCtx')}
+              <input
+                type="number"
+                min="2048"
+                step="1024"
+                value={settingsDraft.ollama_num_ctx}
+                onChange={e => onChange('ollama_num_ctx', Number(e.target.value))}
+              />
+            </label>
+            <label>
+              {t('label.ollamaQuickNumCtx')}
+              <input
+                type="number"
+                min="512"
+                step="512"
+                value={settingsDraft.ollama_quick_num_ctx}
+                onChange={e => onChange('ollama_quick_num_ctx', Number(e.target.value))}
+              />
+            </label>
+            <label>
+              {t('label.ollamaTemperature')}
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step="0.05"
+                value={settingsDraft.ollama_temperature}
+                onChange={e => onChange('ollama_temperature', Number(e.target.value))}
+              />
+            </label>
+            <label>
+              {t('label.ollamaNumPredict')}
+              <input
+                type="number"
+                min="256"
+                step="256"
+                value={settingsDraft.ollama_num_predict}
+                onChange={e => onChange('ollama_num_predict', Number(e.target.value))}
+              />
+            </label>
+          </>
+        )}
         <label>
           {t('label.aiMaxChars')}
           <input
