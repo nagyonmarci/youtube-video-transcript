@@ -106,6 +106,9 @@ QUICK_WORKER_CONCURRENCY = max(0, int(os.environ.get("QUICK_WORKER_CONCURRENCY",
 AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
 STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
 JOB_CLEANUP_DAYS = int(os.environ.get("JOB_CLEANUP_DAYS", "7"))
+AI_NIGHT_WINDOW_ENABLED = os.environ.get("AI_NIGHT_WINDOW_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+AI_NIGHT_WINDOW_START_HOUR = int(os.environ.get("AI_NIGHT_WINDOW_START_HOUR", "17"))
+AI_NIGHT_WINDOW_STOP_HOUR = int(os.environ.get("AI_NIGHT_WINDOW_STOP_HOUR", "7"))
 WORKER_ID = os.environ.get("WORKER_ID") or f"{socket.gethostname()}:{os.getpid()}"
 
 AI_NOTE_GENERATED_FIELDS = {
