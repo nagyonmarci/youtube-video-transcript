@@ -18,6 +18,10 @@ AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
 OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "llama3.2")
 OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "300"))
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "32768"))
+OLLAMA_QUICK_NUM_CTX = int(os.environ.get("OLLAMA_QUICK_NUM_CTX", "4096"))
+OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.1"))
+OLLAMA_NUM_PREDICT = int(os.environ.get("OLLAMA_NUM_PREDICT", "8192"))
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")  # "ollama" | "anthropic" | "openai"
 AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -32,6 +36,10 @@ def configure_ai_notes(
     timeout: Optional[int] = None,
     quick_model: Optional[str] = None,
     quick_timeout: Optional[int] = None,
+    num_ctx: Optional[int] = None,
+    quick_num_ctx: Optional[int] = None,
+    temperature: Optional[float] = None,
+    num_predict: Optional[int] = None,
     provider: Optional[str] = None,
     cloud_model: Optional[str] = None,
     anthropic_api_key: Optional[str] = None,
@@ -40,6 +48,7 @@ def configure_ai_notes(
 ) -> None:
     global OLLAMA_BASE_URL, OLLAMA_CHAT_MODEL, AI_NOTES_MAX_CHARS, OLLAMA_TIMEOUT
     global OLLAMA_QUICK_MODEL, OLLAMA_QUICK_TIMEOUT
+    global OLLAMA_NUM_CTX, OLLAMA_QUICK_NUM_CTX, OLLAMA_TEMPERATURE, OLLAMA_NUM_PREDICT
     global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
     if base_url:
         OLLAMA_BASE_URL = base_url.rstrip("/")
@@ -53,6 +62,14 @@ def configure_ai_notes(
         OLLAMA_QUICK_MODEL = quick_model
     if quick_timeout is not None:
         OLLAMA_QUICK_TIMEOUT = max(10, int(quick_timeout))
+    if num_ctx is not None:
+        OLLAMA_NUM_CTX = max(2048, int(num_ctx))
+    if quick_num_ctx is not None:
+        OLLAMA_QUICK_NUM_CTX = max(512, int(quick_num_ctx))
+    if temperature is not None:
+        OLLAMA_TEMPERATURE = float(temperature)
+    if num_predict is not None:
+        OLLAMA_NUM_PREDICT = max(256, int(num_predict))
     if provider:
         AI_PROVIDER = provider.lower().strip()
     if cloud_model:
@@ -185,7 +202,11 @@ async def generate_quick_summary(
         ],
         "stream": True,
         # No format:"json" — avoid Ollama constrained-decoding overhead
-        "options": {"num_predict": 512},
+        "options": {
+            "num_predict": 512,
+            "num_ctx": OLLAMA_QUICK_NUM_CTX,
+            "temperature": OLLAMA_TEMPERATURE,
+        },
     }
     chunks: list[str] = []
     stream_started = time.monotonic()
@@ -255,6 +276,11 @@ async def _generate_ai_notes_ollama(
         "messages": messages,
         "stream": True,
         "format": "json",
+        "options": {
+            "num_ctx": OLLAMA_NUM_CTX,
+            "temperature": OLLAMA_TEMPERATURE,
+            "num_predict": OLLAMA_NUM_PREDICT,
+        },
     }
 
     chunks: list[str] = []

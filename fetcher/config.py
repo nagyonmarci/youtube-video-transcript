@@ -90,6 +90,10 @@ OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
 AI_NOTES_QUICK_ENABLED = os.environ.get("AI_NOTES_QUICK_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "qwen3:4b")
 OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "120"))
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "32768"))
+OLLAMA_QUICK_NUM_CTX = int(os.environ.get("OLLAMA_QUICK_NUM_CTX", "4096"))
+OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.1"))
+OLLAMA_NUM_PREDICT = int(os.environ.get("OLLAMA_NUM_PREDICT", "8192"))
 AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")
 AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -137,6 +141,10 @@ def current_app_settings() -> dict:
         "ai_notes_quick_enabled": AI_NOTES_QUICK_ENABLED,
         "ollama_quick_model": OLLAMA_QUICK_MODEL,
         "ollama_quick_timeout": OLLAMA_QUICK_TIMEOUT,
+        "ollama_num_ctx": OLLAMA_NUM_CTX,
+        "ollama_quick_num_ctx": OLLAMA_QUICK_NUM_CTX,
+        "ollama_temperature": OLLAMA_TEMPERATURE,
+        "ollama_num_predict": OLLAMA_NUM_PREDICT,
         "ai_provider": AI_PROVIDER,
         "ai_cloud_model": AI_CLOUD_MODEL,
         "anthropic_api_key": ANTHROPIC_API_KEY,
@@ -153,6 +161,7 @@ def apply_app_settings(settings: dict) -> None:
     global AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, AI_NOTES_YEAR_BACKFILL_IDLE_SECONDS
     global AI_NOTES_WORKER_ENABLED, AI_NOTES_JOB_COOLDOWN_SECONDS
     global AI_NOTES_QUICK_ENABLED, OLLAMA_QUICK_MODEL, OLLAMA_QUICK_TIMEOUT
+    global OLLAMA_NUM_CTX, OLLAMA_QUICK_NUM_CTX, OLLAMA_TEMPERATURE, OLLAMA_NUM_PREDICT
     global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
 
     OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
@@ -174,6 +183,11 @@ def apply_app_settings(settings: dict) -> None:
     if settings.get("ollama_quick_model"):
         OLLAMA_QUICK_MODEL = str(settings["ollama_quick_model"]).strip()
     OLLAMA_QUICK_TIMEOUT = int_setting(settings.get("ollama_quick_timeout"), OLLAMA_QUICK_TIMEOUT, 10)
+    OLLAMA_NUM_CTX = int_setting(settings.get("ollama_num_ctx"), OLLAMA_NUM_CTX, 2048)
+    OLLAMA_QUICK_NUM_CTX = int_setting(settings.get("ollama_quick_num_ctx"), OLLAMA_QUICK_NUM_CTX, 512)
+    if settings.get("ollama_temperature") is not None:
+        OLLAMA_TEMPERATURE = float(settings.get("ollama_temperature") or OLLAMA_TEMPERATURE)
+    OLLAMA_NUM_PREDICT = int_setting(settings.get("ollama_num_predict"), OLLAMA_NUM_PREDICT, 256)
     if settings.get("ai_provider"):
         AI_PROVIDER = str(settings["ai_provider"]).lower().strip()
     if settings.get("ai_cloud_model"):
@@ -191,6 +205,10 @@ def apply_app_settings(settings: dict) -> None:
         timeout=OLLAMA_TIMEOUT,
         quick_model=OLLAMA_QUICK_MODEL,
         quick_timeout=OLLAMA_QUICK_TIMEOUT,
+        num_ctx=OLLAMA_NUM_CTX,
+        quick_num_ctx=OLLAMA_QUICK_NUM_CTX,
+        temperature=OLLAMA_TEMPERATURE,
+        num_predict=OLLAMA_NUM_PREDICT,
         provider=AI_PROVIDER,
         cloud_model=AI_CLOUD_MODEL,
         anthropic_api_key=ANTHROPIC_API_KEY,
