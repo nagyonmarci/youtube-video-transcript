@@ -58,11 +58,18 @@ function normalizeSettings(settings = {}) {
     ai_notes_quick_enabled: settings.ai_notes_quick_enabled ?? true,
     ollama_quick_model: settings.ollama_quick_model || 'qwen3:4b',
     ollama_quick_timeout: Number(settings.ollama_quick_timeout ?? 120),
+    ollama_num_ctx: Number(settings.ollama_num_ctx ?? 32768),
+    ollama_quick_num_ctx: Number(settings.ollama_quick_num_ctx ?? 4096),
+    ollama_temperature: Number(settings.ollama_temperature ?? 0.1),
+    ollama_num_predict: Number(settings.ollama_num_predict ?? 8192),
     ai_provider: settings.ai_provider || 'ollama',
     ai_cloud_model: settings.ai_cloud_model || 'claude-opus-4-7',
     anthropic_api_key: settings.anthropic_api_key || '',
     openai_api_key: settings.openai_api_key || '',
     openai_base_url: settings.openai_base_url || 'https://api.openai.com/v1',
+    ai_night_window_enabled: Boolean(settings.ai_night_window_enabled),
+    ai_night_window_start_hour: Number(settings.ai_night_window_start_hour ?? 17),
+    ai_night_window_stop_hour: Number(settings.ai_night_window_stop_hour ?? 7),
   };
 }
 
