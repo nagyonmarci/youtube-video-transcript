@@ -18,6 +18,7 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - Whisper fallback runs on a nightly cron (configurable) or on-demand from the header
 - Admin dashboard shows all three job queues (Fetch / Quick Summary / AI Notes) with independent Stop/Start controls per queue, running/stuck jobs, per-job runtime/duration, and allows pause/resume/delete
 - Admin resource monitor streams Ollama status live and shows loaded model, GPU/VRAM placement, AI worker state, and AI cooldown
+- Channel grid with drag & drop topic editor: drag channel cards between topic groups, create new topics, rename groups inline, delete topics (moves channels to uncategorized)
 - Daily automatic channel refresh (default: 07:00 `Europe/Budapest`)
 - UI language toggle: English / Hungarian (persisted in `localStorage`)
 
