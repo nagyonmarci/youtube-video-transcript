@@ -266,6 +266,38 @@ export default function SettingsForm({ appSettings, settingsDraft, settingsDirty
           />
           {t('label.aiYearBackfill')}
         </label>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={settingsDraft.ai_night_window_enabled}
+            onChange={e => onChange('ai_night_window_enabled', e.target.checked)}
+          />
+          {t('label.aiNightWindowEnabled')}
+        </label>
+        {settingsDraft.ai_night_window_enabled && (
+          <>
+            <label>
+              {t('label.aiNightWindowStart')}
+              <input
+                type="number"
+                min="0"
+                max="23"
+                value={settingsDraft.ai_night_window_start_hour}
+                onChange={e => onChange('ai_night_window_start_hour', Number(e.target.value))}
+              />
+            </label>
+            <label>
+              {t('label.aiNightWindowStop')}
+              <input
+                type="number"
+                min="0"
+                max="23"
+                value={settingsDraft.ai_night_window_stop_hour}
+                onChange={e => onChange('ai_night_window_stop_hour', Number(e.target.value))}
+              />
+            </label>
+          </>
+        )}
         <div className="settings-actions">
           <button type="submit" disabled={busy || !settingsDirty}>{t('btn.save')}</button>
           <button type="button" disabled={busy || !settingsDirty} onClick={onCancel}>{t('btn.cancel')}</button>

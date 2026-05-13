@@ -211,7 +211,10 @@
     "aiQuickTimeout": "Quick timeout (mp)",
     "anthropicApiKey": "Anthropic API kulcs",
     "openaiApiKey": "OpenAI API kulcs",
-    "openaiBaseUrl": "OpenAI Base URL"
+    "openaiBaseUrl": "OpenAI Base URL",
+    "aiNightWindowEnabled": "Éjszakai ablak (teli GPU terhelés)",
+    "aiNightWindowStart": "Kezdő óra (0–23)",
+    "aiNightWindowStop": "Záró óra (0–23)"
   },
   "tooltip": {
     "timedTranscript": "Időbélyeges transzkript",

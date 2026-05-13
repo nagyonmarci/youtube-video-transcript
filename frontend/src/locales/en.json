@@ -210,7 +210,10 @@
     "aiQuickTimeout": "Quick timeout (sec)",
     "anthropicApiKey": "Anthropic API key",
     "openaiApiKey": "OpenAI API key",
-    "openaiBaseUrl": "OpenAI Base URL"
+    "openaiBaseUrl": "OpenAI Base URL",
+    "aiNightWindowEnabled": "Night window (full GPU load)",
+    "aiNightWindowStart": "Start hour (0–23)",
+    "aiNightWindowStop": "Stop hour (0–23)"
   },
   "tooltip": {
     "timedTranscript": "Timed transcript",
