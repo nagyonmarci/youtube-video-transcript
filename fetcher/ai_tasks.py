@@ -60,7 +60,24 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
             "ai_notes_error": None,
             "ai_notes_generated_at": now_iso(),
         })
-        logger.info(f"AI notes generated for {video.get('video_id') or directus_video_id}")
+        vid = video.get("video_id") or directus_video_id
+        if metrics:
+            ctx_used = metrics.get("prompt_eval_count") or 0
+            ctx_limit = metrics.get("num_ctx") or 0
+            out_used = metrics.get("eval_count") or 0
+            out_limit = metrics.get("num_predict") or 0
+            ctx_pct = f"{round(ctx_used / ctx_limit * 100)}%" if ctx_limit else "?"
+            out_pct = f"{round(out_used / out_limit * 100)}%" if out_limit else "?"
+            tps = metrics.get("eval_tokens_per_second")
+            ttft = metrics.get("first_token_seconds")
+            logger.info(
+                f"AI notes done {vid}: "
+                f"ctx {ctx_used:,}/{ctx_limit:,} ({ctx_pct}) · "
+                f"out {out_used:,}/{out_limit:,} ({out_pct}) · "
+                f"{tps} tok/s · TTFT {ttft}s"
+            )
+        else:
+            logger.info(f"AI notes generated for {vid}")
         return True
     except asyncio.CancelledError:
         logger.info(f"AI notes stopped for {video.get('video_id') or directus_video_id}")

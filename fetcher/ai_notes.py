@@ -394,6 +394,9 @@ async def _generate_ai_notes_ollama(
         "eval_count": eval_count or None,
         "eval_seconds": eval_seconds,
         "eval_tokens_per_second": round(eval_count / eval_seconds, 2) if eval_count and eval_seconds else None,
+        "num_ctx": OLLAMA_NUM_CTX,
+        "num_predict": OLLAMA_NUM_PREDICT,
+        "temperature": OLLAMA_TEMPERATURE,
     }
     return {
         "summary": str(parsed.get("summary", "")).strip(),
