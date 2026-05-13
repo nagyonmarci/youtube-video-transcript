@@ -38,11 +38,18 @@ class AppSettingsRequest(BaseModel):
     ai_notes_quick_enabled: Optional[bool] = None
     ollama_quick_model: Optional[str] = None
     ollama_quick_timeout: Optional[int] = None
+    ollama_num_ctx: Optional[int] = None
+    ollama_quick_num_ctx: Optional[int] = None
+    ollama_temperature: Optional[float] = None
+    ollama_num_predict: Optional[int] = None
     ai_provider: Optional[str] = None
     ai_cloud_model: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
+    ai_night_window_enabled: Optional[bool] = None
+    ai_night_window_start_hour: Optional[int] = None
+    ai_night_window_stop_hour: Optional[int] = None
 
 
 class AiNotesRequest(BaseModel):
