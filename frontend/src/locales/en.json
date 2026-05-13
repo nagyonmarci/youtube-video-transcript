@@ -48,6 +48,8 @@
     "stop": "Stop",
     "copy": "Copy",
     "generateMissing": "Generate missing",
+    "newTopic": "New topic",
+    "deleteTopic": "Delete topic",
     "whisperStart": "🎙 Start Whisper",
     "settings": "Settings",
     "transcript": "Transcript",
@@ -216,6 +218,7 @@
   },
   "placeholder": {
     "searchChannel": "Search...",
+    "newTopic": "Topic name...",
     "searchChannelAdmin": "Search by name, topic, handle or URL...",
     "channelTopic": "e.g. AI, history, development",
     "searchVideo": "Search by title...",
@@ -323,6 +326,7 @@
   },
   "confirm": {
     "deleteChannel": "Delete {name}?",
+    "deleteTopic": "Delete topic \"{name}\"? The {count} channels will become uncategorized.",
     "deleteAiNotes": "Delete AI notes for {count} videos?",
     "deleteAiNote": "Delete AI note for this video?\n\n{title}"
   },

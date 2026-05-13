@@ -48,6 +48,8 @@
     "stop": "Stop",
     "copy": "Másolás",
     "generateMissing": "Hiányzók generálása",
+    "newTopic": "Új téma",
+    "deleteTopic": "Téma törlése",
     "whisperStart": "🎙 Whisper indítás",
     "settings": "Beállítás",
     "transcript": "Transzkript",
@@ -217,6 +219,7 @@
   },
   "placeholder": {
     "searchChannel": "Keresés...",
+    "newTopic": "Téma neve...",
     "searchChannelAdmin": "Keresés név, téma, handle vagy URL alapján...",
     "channelTopic": "pl. AI, történelem, fejlesztés",
     "searchVideo": "Cím keresés...",
@@ -324,6 +327,7 @@
   },
   "confirm": {
     "deleteChannel": "Töröljük: {name}?",
+    "deleteTopic": "Toroljuk a(z) \"{name}\" temat? A {count} csatorna tema nelkuli lesz.",
     "deleteAiNotes": "Töröljük az AI noteket {count} videóhoz?",
     "deleteAiNote": "Töröljük az AI jegyzetet ehhez a videóhoz?\n\n{title}"
   },
