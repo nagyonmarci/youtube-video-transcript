@@ -24,6 +24,12 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
   const [editingTopic, setEditingTopic] = useState(null);
   const topicInputRef = useRef(null);
 
+  // New topic creation
+  const [pendingTopics, setPendingTopics] = useState([]);
+  const [addingTopic, setAddingTopic] = useState(false);
+  const [newTopicValue, setNewTopicValue] = useState('');
+  const newTopicInputRef = useRef(null);
+
   const SORT_OPTIONS = [
     { value: 'name_asc',   label: t('sort.nameAZ') },
     { value: 'name_desc',  label: t('sort.nameZA') },
@@ -86,10 +92,15 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     });
   }, [filtered, noTopicLabel]);
 
-  // Whether "No topic" group is already in the list
+  // Pending topics not already backed by real channels
+  const pendingTopicsToShow = useMemo(() =>
+    pendingTopics.filter(pt => !groupedChannels.some(([label]) => label === pt)),
+    [pendingTopics, groupedChannels]
+  );
+
   const hasNoTopicGroup = groupedChannels.some(([label]) => label === noTopicLabel);
 
-  // ---- Existing action handlers ----
+  // ---- Channel action handlers ----
 
   async function handleRefresh(e, ch) {
     e.stopPropagation();
@@ -146,7 +157,6 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
   const handleDragStart = useCallback((e, ch) => {
     setDraggedChannelId(ch.id);
     e.dataTransfer.effectAllowed = 'move';
-    // Minimal ghost label
     e.dataTransfer.setData('text/plain', ch.id);
   }, []);
 
@@ -183,6 +193,8 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
 
     try {
       await updateChannel(id, { topic: newTopic });
+      // If target was a pending (empty) topic, it's now backed by a real channel
+      setPendingTopics(prev => prev.filter(p => p !== newTopic));
       onChannelsChanged();
     } catch (err) {
       showMsg(t('msg.errGeneric', { error: err.message }), true);
@@ -206,6 +218,16 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     const oldKey = oldName === noTopicLabel ? '' : oldName;
     if (newName === oldKey) return;
 
+    // If it was a pending topic, just rename it locally
+    if (pendingTopics.includes(oldName)) {
+      if (newName && !pendingTopics.includes(newName) && !groupedChannels.some(([l]) => l === newName)) {
+        setPendingTopics(prev => prev.map(p => p === oldName ? newName : p));
+      } else {
+        setPendingTopics(prev => prev.filter(p => p !== oldName));
+      }
+      return;
+    }
+
     const toUpdate = channels.filter(ch => (ch.topic || '').trim() === oldKey);
     if (!toUpdate.length) return;
     try {
@@ -221,17 +243,58 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     if (e.key === 'Escape') setEditingTopic(null);
   }
 
+  // ---- Topic delete ----
+
+  async function handleDeleteTopic(e, topicLabel) {
+    e.stopPropagation();
+
+    // Pending topic has no channels — just discard it
+    if (pendingTopics.includes(topicLabel)) {
+      setPendingTopics(prev => prev.filter(p => p !== topicLabel));
+      return;
+    }
+
+    const topicKey = topicLabel === noTopicLabel ? '' : topicLabel;
+    const toUpdate = channels.filter(ch => (ch.topic || '').trim() === topicKey);
+    if (toUpdate.length && !confirm(t('confirm.deleteTopic', { name: topicLabel, count: toUpdate.length }))) return;
+    try {
+      await Promise.all(toUpdate.map(ch => updateChannel(ch.id, { topic: '' })));
+      onChannelsChanged();
+    } catch (err) {
+      showMsg(t('msg.errGeneric', { error: err.message }), true);
+    }
+  }
+
+  // ---- New topic creation ----
+
+  function handleAddTopic() {
+    const name = newTopicValue.trim();
+    setNewTopicValue('');
+    setAddingTopic(false);
+    if (!name) return;
+    if (pendingTopics.includes(name) || groupedChannels.some(([l]) => l === name)) return;
+    setPendingTopics(prev => [...prev, name]);
+  }
+
+  function handleNewTopicKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); handleAddTopic(); }
+    if (e.key === 'Escape') { setAddingTopic(false); setNewTopicValue(''); }
+  }
+
+  // ---- Render ----
+
   const displayedTotalVideos = totalVideos ?? channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
 
-  function renderTopicSection(topicLabel, topicChannels) {
+  function renderTopicSection(topicLabel, topicChannels, isPending = false) {
     const isEditing = editingTopic?.oldName === topicLabel;
     const isDropOver = dragOverTopic === topicLabel;
     const isDragging = draggedChannelId !== null;
+    const canDelete = topicLabel !== noTopicLabel || isPending;
 
     return (
       <section
         key={topicLabel}
-        className={`channel-topic-group${isDropOver ? ' channel-drop-over' : ''}`}
+        className={`channel-topic-group${isDropOver ? ' channel-drop-over' : ''}${isPending ? ' channel-topic-pending' : ''}`}
         onDragOver={isDragging ? (e) => handleDragOver(e, topicLabel) : undefined}
         onDragLeave={isDragging ? handleDragLeave : undefined}
         onDrop={isDragging ? (e) => handleDrop(e, topicLabel) : undefined}
@@ -250,14 +313,22 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
             />
           ) : (
             <h4
-              className="channel-topic-label"
-              onClick={(e) => startEditTopic(e, topicLabel)}
-              title={t('label.clickToRename')}
+              className={`channel-topic-label${topicLabel === noTopicLabel ? ' channel-topic-label-muted' : ''}`}
+              onClick={topicLabel !== noTopicLabel ? (e) => startEditTopic(e, topicLabel) : undefined}
+              title={topicLabel !== noTopicLabel ? t('label.clickToRename') : undefined}
             >
               {topicLabel}
             </h4>
           )}
-          <span>{t('label.channelCount', { count: topicChannels.length })}</span>
+          <span className="channel-topic-count">{t('label.channelCount', { count: topicChannels.length })}</span>
+          {canDelete && (
+            <button
+              className="channel-topic-delete-btn"
+              onClick={(e) => handleDeleteTopic(e, topicLabel)}
+              title={t('btn.deleteTopic')}
+              tabIndex={-1}
+            >×</button>
+          )}
         </div>
         <div className="channel-grid">
           {topicChannels.map(ch => {
@@ -359,7 +430,10 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
         renderTopicSection(topic, topicChannels)
       )}
 
-      {/* Always show "No topic" as a drop target when dragging and no such group exists */}
+      {/* Pending (newly created, empty) topic groups */}
+      {pendingTopicsToShow.map(pt => renderTopicSection(pt, [], true))}
+
+      {/* "No topic" drop zone while dragging, if no ungrouped channels exist */}
       {draggedChannelId && !hasNoTopicGroup && topicFilter === 'all' && !search &&
         renderTopicSection(noTopicLabel, [])
       }
@@ -367,6 +441,31 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       {filtered.length === 0 && (search || topicFilter !== 'all') && (
         <div style={{ fontSize: '0.85rem', color: 'var(--text2)', padding: '0.5rem' }}>
           {t('state.noChannelSearch', { query: search || topicFilter })}
+        </div>
+      )}
+
+      {/* Add new topic */}
+      {topicFilter === 'all' && !search && (
+        <div className="channel-add-topic">
+          {addingTopic ? (
+            <div className="channel-add-topic-form">
+              <input
+                ref={newTopicInputRef}
+                className="channel-topic-edit-input"
+                value={newTopicValue}
+                onChange={e => setNewTopicValue(e.target.value)}
+                onKeyDown={handleNewTopicKeyDown}
+                placeholder={t('placeholder.newTopic')}
+                autoFocus
+              />
+              <button onClick={handleAddTopic}>{t('btn.add')}</button>
+              <button onClick={() => { setAddingTopic(false); setNewTopicValue(''); }}>{t('btn.cancel')}</button>
+            </div>
+          ) : (
+            <button className="channel-add-topic-btn" onClick={() => setAddingTopic(true)}>
+              + {t('btn.newTopic')}
+            </button>
+          )}
         </div>
       )}
     </div>

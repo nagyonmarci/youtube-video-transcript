@@ -808,6 +808,73 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     outline: none;
     border-radius: 0;
   }
+  .channel-topic-label-muted {
+    color: var(--text2);
+    cursor: default;
+  }
+  .channel-topic-label-muted:hover {
+    border-bottom-color: transparent;
+  }
+  .channel-topic-count {
+    color: var(--text2);
+    font-size: 0.72rem;
+    flex: 1;
+  }
+  .channel-topic-delete-btn {
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.15rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    border-radius: 4px;
+  }
+  .channel-topic-header:hover .channel-topic-delete-btn {
+    opacity: 1;
+  }
+  .channel-topic-delete-btn:hover {
+    color: var(--red);
+    background: rgba(244,67,54,0.12);
+  }
+  .channel-topic-pending {
+    opacity: 0.75;
+  }
+  .channel-add-topic {
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--border);
+  }
+  .channel-add-topic-btn {
+    background: none;
+    border: 1px dashed var(--border);
+    color: var(--text2);
+    font-size: 0.8rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .channel-add-topic-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: none;
+  }
+  .channel-add-topic-form {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .channel-add-topic-form .channel-topic-edit-input {
+    flex: 1;
+    max-width: 200px;
+  }
+  .channel-add-topic-form button {
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+  }
 
   /* --- Video Section --- */
   .video-section {
