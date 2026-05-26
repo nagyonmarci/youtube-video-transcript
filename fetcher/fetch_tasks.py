@@ -21,6 +21,15 @@ from youtube_fetcher import (
 logger = logging.getLogger(__name__)
 
 
+def _is_members_video(video: dict, stored_video: Optional[dict] = None) -> bool:
+    """Return True when a video is known or labelled as members-only."""
+    if video.get("is_members_only") or (stored_video or {}).get("is_members_only"):
+        return True
+
+    title = str(video.get("title") or (stored_video or {}).get("title") or "")
+    return bool(re.search(r"\bmembers?\b", title, re.IGNORECASE))
+
+
 async def _backfill_metadata(existing: dict, videos: list):
     """Backfill lightweight metadata for already-stored videos from a fresh channel listing."""
     by_video_id = {v["video_id"]: v for v in videos}
@@ -154,14 +163,22 @@ async def process_channel_task(task: dict):
             existing = {v["video_id"]: v for v in existing_videos}
 
         new_videos = [v for v in videos if v["video_id"] not in existing]
-        transcript_videos = [
+        transcript_candidates = [
             v for v in videos
             if v["video_id"] not in existing
             or (existing.get(v["video_id"], {}).get("status") or "pending") != "done"
         ]
+        transcript_videos = [
+            v for v in transcript_candidates
+            if not _is_members_video(v, existing.get(v["video_id"]))
+        ]
+        skipped_members = len(transcript_candidates) - len(transcript_videos)
+        transcript_new = sum(1 for v in transcript_videos if v["video_id"] not in existing)
+        transcript_retries = len(transcript_videos) - transcript_new
         logger.info(
             f"Channel {channel_url}: {len(videos)} total, {len(new_videos)} new, "
-            f"{len(transcript_videos) - len(new_videos)} transcript retries"
+            f"{transcript_new} transcript new, {transcript_retries} transcript retries, "
+            f"{skipped_members} members-only skipped"
         )
 
         if channel_id:
