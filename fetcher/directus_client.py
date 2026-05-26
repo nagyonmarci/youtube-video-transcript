@@ -565,7 +565,7 @@ class DirectusClient:
             return None
 
     async def get_videos_by_channel(self, channel_id: str) -> list:
-        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,uploaded_at,thumbnail_url,is_members_only,status'
+        params = f'?filter[channel_id][_eq]={channel_id}&limit=-1&fields=id,video_id,title,uploaded_at,thumbnail_url,is_members_only,status'
         result = await self._request("GET", f"/items/videos{params}")
         return result.get("data", [])
 
