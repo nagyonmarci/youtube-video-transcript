@@ -1,3 +1,5 @@
+import QuickAddPopover from './QuickAddPopover.jsx';
+
 export default function AppHeader({
   fetcherStatus, whisperStatus, fetcherRunning, whisperRunning,
   handleStop, handleWhisperStart, handleWhisperStop,
@@ -15,6 +17,7 @@ export default function AppHeader({
         <a href="/daily" className={path === '/daily' ? 'active' : ''}>{t('nav.dailyUpdates')}</a>
         <a href="/search" className={path === '/search' ? 'active' : ''}>{t('nav.search')}</a>
         <a href="/admin" className={path === '/admin' ? 'active' : ''}>{t('nav.admin')}</a>
+        <QuickAddPopover />
       </nav>
 
       <div className="header-status">

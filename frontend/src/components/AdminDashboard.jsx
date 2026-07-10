@@ -25,6 +25,7 @@ import TopActions from './TopActions.jsx';
 import ScheduleForm from './ScheduleForm.jsx';
 import SettingsForm from './SettingsForm.jsx';
 import StatisticsPanel from './StatisticsPanel.jsx';
+import CollapsibleSection from './CollapsibleSection.jsx';
 import { useT } from '../lib/i18n.jsx';
 import { keepIfSame } from '../lib/dataUtils.js';
 import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
@@ -71,6 +72,22 @@ function normalizeSettings(settings = {}) {
     ai_night_window_start_hour: Number(settings.ai_night_window_start_hour ?? 17),
     ai_night_window_stop_hour: Number(settings.ai_night_window_stop_hour ?? 7),
   };
+}
+
+const SECTION_IDS = ['statistics', 'processing', 'schedule', 'setup', 'quickActions', 'channelAdmin'];
+const SECTION_STORAGE_KEY = 'yt_admin_sections';
+
+function loadSectionPrefs() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || 'null'); } catch { raw = null; }
+  const savedOrder = Array.isArray(raw?.order) ? raw.order.filter(id => SECTION_IDS.includes(id)) : [];
+  const order = [...savedOrder, ...SECTION_IDS.filter(id => !savedOrder.includes(id))];
+  const collapsed = { ...Object.fromEntries(SECTION_IDS.map(id => [id, true])), ...(raw?.collapsed || {}) };
+  return { order, collapsed };
+}
+
+function saveSectionPrefs(prefs) {
+  try { localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(prefs)); } catch {}
 }
 
 function formatBytes(value) {
@@ -408,7 +425,31 @@ export default function AdminDashboard({
   const [jobs, setJobs] = useState([]);
   const [resourceSnapshot, setResourceSnapshot] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [sectionPrefs, setSectionPrefs] = useState(loadSectionPrefs);
+  const [draggedSectionId, setDraggedSectionId] = useState(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState(null);
   const { msg, showMsg } = useMessage();
+
+  useEffect(() => { saveSectionPrefs(sectionPrefs); }, [sectionPrefs]);
+
+  function toggleSection(id) {
+    setSectionPrefs(prev => ({ ...prev, collapsed: { ...prev.collapsed, [id]: !prev.collapsed[id] } }));
+  }
+  function handleSectionDragStart(id) { setDraggedSectionId(id); }
+  function handleSectionDragEnd() { setDraggedSectionId(null); setDragOverSectionId(null); }
+  function handleSectionDragOver(id) { setDragOverSectionId(id); }
+  function handleSectionDragLeave() { setDragOverSectionId(null); }
+  function handleSectionDrop(targetId) {
+    const draggedId = draggedSectionId;
+    setDraggedSectionId(null);
+    setDragOverSectionId(null);
+    if (!draggedId || draggedId === targetId) return;
+    setSectionPrefs(prev => {
+      const next = prev.order.filter(id => id !== draggedId);
+      next.splice(next.indexOf(targetId), 0, draggedId);
+      return { ...prev, order: next };
+    });
+  }
 
   async function loadAdminData() {
     try {
@@ -552,6 +593,215 @@ export default function AdminDashboard({
   const aiWorkers = fetcherStatus?.workers?.ai_concurrency ?? resourceStatus.ai_worker_concurrency;
   const stoppedQueues = fetcherStatus?.stopped_queues || {};
 
+  function getSectionConfig(id) {
+    switch (id) {
+      case 'statistics':
+        return {
+          title: t('header.statistics'),
+          body: <StatisticsPanel stats={stats} coverage={coverage} channels={channels} monthlyData={monthlyData} />,
+        };
+      case 'processing':
+        return {
+          title: t('header.processing'),
+          headerExtra: (
+            <>
+              <button disabled={busy} onClick={() => runAction(refreshDates, t('msg.dateRefreshQueued'))}>
+                {t('header.missingDates')}
+              </button>
+              <button disabled={busy} onClick={() => runAction(refreshThumbnails, t('msg.thumbnailRefreshQueued'))}>
+                {t('header.missingImages')}
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => runAction(
+                  () => generateAiNotes(),
+                  result => result?.existing
+                    ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
+                    : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
+                )}
+              >
+                {t('header.aiNotes')}
+              </button>
+            </>
+          ),
+          body: (
+            <>
+              {/* Fetch queue */}
+              <div className="queue-section">
+                <StatusLine
+                  title={t('label.fetcher')}
+                  queueSize={fetcherStatus?.queue_size ?? 0}
+                  queueStats={fetchQueue}
+                  workerCount={fetchWorkers}
+                  current={fetcherStatus?.current_task}
+                  stopped={!!stoppedQueues.fetch}
+                  onStop={() => runAction(() => stopProcessing('fetch'), t('msg.queueRefreshed'))}
+                  onStart={() => runAction(() => resumeProcessing('fetch'), t('msg.queueRefreshed'))}
+                />
+                <JobQueuePanel jobs={jobs.filter(j => j.queue === 'fetch')} busy={busy} onAction={runJobAction} />
+              </div>
+
+              {/* Quick Notes queue */}
+              <div className="queue-section">
+                <StatusLine
+                  title={t('label.quickWorker')}
+                  queueSize={fetcherStatus?.quick_queue_size ?? 0}
+                  queueStats={quickQueue}
+                  workerCount={quickWorkers}
+                  current={fetcherStatus?.current_quick_task}
+                  stopped={!!stoppedQueues.quick}
+                  onStop={() => runAction(() => stopProcessing('quick'), t('msg.queueRefreshed'))}
+                  onStart={() => runAction(() => resumeProcessing('quick'), t('msg.queueRefreshed'))}
+                />
+                <JobQueuePanel jobs={jobs.filter(j => j.queue === 'quick')} busy={busy} onAction={runJobAction} />
+              </div>
+
+              {/* AI Notes queue */}
+              <div className="queue-section">
+                <StatusLine
+                  title={t('label.aiWorker')}
+                  queueSize={fetcherStatus?.ai_queue_size ?? 0}
+                  queueStats={aiQueue}
+                  workerCount={aiWorkers}
+                  current={fetcherStatus?.current_ai_task}
+                  stopped={!!stoppedQueues.ai}
+                  onStop={() => runAction(() => stopProcessing('ai'), t('msg.queueRefreshed'))}
+                  onStart={() => runAction(() => resumeProcessing('ai'), t('msg.queueRefreshed'))}
+                />
+                <div className={`ai-status-panel ai-status-${aiStatus.tone}`}>
+                  <div className="ai-status-main">
+                    <div className="ai-status-kicker">{t('header.aiStatus')}</div>
+                    <strong>{aiStatus.title}</strong>
+                    <p>{aiStatus.detail}</p>
+                  </div>
+                  <div className="ai-status-side">
+                    <span className="ai-status-pill">{t('metric.missingAi')}: {missingAiNotes}</span>
+                    <span className="ai-status-pill">{t('label.queueBreakdown', {
+                      queued: Number(aiQueue.queued ?? 0),
+                      running: Number(aiQueue.running ?? 0),
+                      paused: Number(aiQueue.paused ?? 0),
+                    })}</span>
+                    <span className="ai-status-pill">{t('label.aiBatchLimit')}: {aiBatchLimit}</span>
+                    <button
+                      disabled={busy || !aiCanStart}
+                      onClick={() => runAction(
+                        () => generateAiNotes(),
+                        result => result?.existing
+                          ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
+                          : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
+                      )}
+                    >
+                      {t('btn.generateMissing')}
+                    </button>
+                  </div>
+                </div>
+                <JobQueuePanel jobs={jobs.filter(j => j.queue === 'ai')} busy={busy} onAction={runJobAction} />
+              </div>
+
+              {/* Whisper + Resource cards */}
+              <div className="queue-section">
+                <StatusLine
+                  title={t('label.whisper')}
+                  queueSize={whisperStatus?.queue_size ?? 0}
+                  current={whisperStatus?.current_task}
+                  onStop={() => runAction(stopWhisper, t('msg.queueRefreshed'))}
+                />
+              </div>
+              <div className="resource-panel">
+                <div className="resource-card">
+                  <span>{t('resource.ollama')}</span>
+                  <strong>{ollamaStatus.online ? t('status.running') : t('status.empty')}</strong>
+                  <p>{ollamaStatus.online ? (primaryOllamaModel?.name || t('resource.noLoadedModel')) : (ollamaStatus.error || t('resource.notAvailable'))}</p>
+                  <small>{t('resource.refreshedAt', { time: sampledAt })}</small>
+                </div>
+                <div className="resource-card">
+                  <span>{t('resource.gpu')}</span>
+                  <strong>{processorPercent == null ? '-' : `${processorPercent}%`}</strong>
+                  <p>{primaryOllamaModel ? t('resource.vramUsage', {
+                    used: formatBytes(primaryOllamaModel.size_vram),
+                    total: formatBytes(primaryOllamaModel.size),
+                  }) : t('resource.noLoadedModel')}</p>
+                  <small>{t('resource.realtimeHint')}</small>
+                </div>
+                <div className="resource-card">
+                  <span>{t('resource.aiWorker')}</span>
+                  <strong>{resourceStatus.ai_worker_enabled ? t('status.running') : t('status.paused')}</strong>
+                  <p>{t('resource.workerDetails', {
+                    workers: aiWorkers ?? 0,
+                    queued: Number(aiQueue.queued ?? 0),
+                    running: Number(aiQueue.running ?? 0),
+                  })}</p>
+                  <small>{t('resource.cooldown', { seconds: resourceStatus.ai_job_cooldown_seconds ?? appSettings.ai_notes_job_cooldown_seconds })}</small>
+                </div>
+              </div>
+            </>
+          ),
+        };
+      case 'schedule':
+        return {
+          title: t('header.schedule'),
+          subtitle: `${scheduleCron} · ${scheduleTimezone}`,
+          body: (
+            <ScheduleForm
+              scheduleTime={scheduleTime}
+              scheduleTimezone={scheduleTimezone}
+              busy={busy}
+              onTimeChange={setScheduleTime}
+              onTimezoneChange={setScheduleTimezone}
+              onSubmit={saveSchedule}
+            />
+          ),
+        };
+      case 'setup':
+        return {
+          title: t('header.setup'),
+          subtitle: (
+            <>
+              {appSettings.ai_notes_auto ? t('label.aiAutoOn') : t('label.aiManualOnly')}
+              {' · '}
+              {appSettings.ai_provider !== 'ollama' ? appSettings.ai_cloud_model : appSettings.ollama_chat_model}
+              {appSettings.ai_provider !== 'ollama' && ` (${appSettings.ai_provider})`}
+            </>
+          ),
+          body: (
+            <SettingsForm
+              settingsDraft={settingsDraft}
+              settingsDirty={settingsDirty}
+              busy={busy}
+              onChange={updateSettingsDraft}
+              onSubmit={saveAppSettings}
+              onCancel={() => {
+                settingsDirtyRef.current = false;
+                setSettingsDirty(false);
+                setSettingsDraft(appSettings);
+              }}
+            />
+          ),
+        };
+      case 'quickActions':
+        return {
+          title: t('header.quickActions'),
+          body: <TopActions channels={channels} selectedChannel={selectedChannel} onChannelsChanged={onChannelsChanged} />,
+        };
+      case 'channelAdmin':
+        return {
+          title: t('header.channelAdmin'),
+          subtitle: t('header.channelAdminSub', { count: channels.length }),
+          body: (
+            <ChannelAdminPanel
+              channels={channels}
+              onChanged={async () => {
+                await onChannelsChanged();
+                await loadAdminData();
+              }}
+            />
+          ),
+        };
+      default:
+        return {};
+    }
+  }
+
   return (
     <section className="admin-dashboard">
       <div className="view-header">
@@ -586,189 +836,29 @@ export default function AdminDashboard({
         </div>
       </div>
 
-      <StatisticsPanel
-        stats={stats}
-        coverage={coverage}
-        channels={channels}
-        monthlyData={monthlyData}
-      />
-
-      <section className="admin-section">
-        <div className="admin-section-header">
-          <h3>{t('header.processing')}</h3>
-          <div className="admin-section-actions">
-            <button disabled={busy} onClick={() => runAction(refreshDates, t('msg.dateRefreshQueued'))}>
-              {t('header.missingDates')}
-            </button>
-            <button disabled={busy} onClick={() => runAction(refreshThumbnails, t('msg.thumbnailRefreshQueued'))}>
-              {t('header.missingImages')}
-            </button>
-            <button
-              disabled={busy}
-              onClick={() => runAction(
-                () => generateAiNotes(),
-                result => result?.existing
-                  ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                  : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
-              )}
-            >
-              {t('header.aiNotes')}
-            </button>
-          </div>
-        </div>
-
-        {/* Fetch queue */}
-        <div className="queue-section">
-          <StatusLine
-            title={t('label.fetcher')}
-            queueSize={fetcherStatus?.queue_size ?? 0}
-            queueStats={fetchQueue}
-            workerCount={fetchWorkers}
-            current={fetcherStatus?.current_task}
-            stopped={!!stoppedQueues.fetch}
-            onStop={() => runAction(() => stopProcessing('fetch'), t('msg.queueRefreshed'))}
-            onStart={() => runAction(() => resumeProcessing('fetch'), t('msg.queueRefreshed'))}
-          />
-          <JobQueuePanel jobs={jobs.filter(j => j.queue === 'fetch')} busy={busy} onAction={runJobAction} />
-        </div>
-
-        {/* Quick Notes queue */}
-        <div className="queue-section">
-          <StatusLine
-            title={t('label.quickWorker')}
-            queueSize={fetcherStatus?.quick_queue_size ?? 0}
-            queueStats={quickQueue}
-            workerCount={quickWorkers}
-            current={fetcherStatus?.current_quick_task}
-            stopped={!!stoppedQueues.quick}
-            onStop={() => runAction(() => stopProcessing('quick'), t('msg.queueRefreshed'))}
-            onStart={() => runAction(() => resumeProcessing('quick'), t('msg.queueRefreshed'))}
-          />
-          <JobQueuePanel jobs={jobs.filter(j => j.queue === 'quick')} busy={busy} onAction={runJobAction} />
-        </div>
-
-        {/* AI Notes queue */}
-        <div className="queue-section">
-          <StatusLine
-            title={t('label.aiWorker')}
-            queueSize={fetcherStatus?.ai_queue_size ?? 0}
-            queueStats={aiQueue}
-            workerCount={aiWorkers}
-            current={fetcherStatus?.current_ai_task}
-            stopped={!!stoppedQueues.ai}
-            onStop={() => runAction(() => stopProcessing('ai'), t('msg.queueRefreshed'))}
-            onStart={() => runAction(() => resumeProcessing('ai'), t('msg.queueRefreshed'))}
-          />
-          <div className={`ai-status-panel ai-status-${aiStatus.tone}`}>
-            <div className="ai-status-main">
-              <div className="ai-status-kicker">{t('header.aiStatus')}</div>
-              <strong>{aiStatus.title}</strong>
-              <p>{aiStatus.detail}</p>
-            </div>
-            <div className="ai-status-side">
-              <span className="ai-status-pill">{t('metric.missingAi')}: {missingAiNotes}</span>
-              <span className="ai-status-pill">{t('label.queueBreakdown', {
-                queued: Number(aiQueue.queued ?? 0),
-                running: Number(aiQueue.running ?? 0),
-                paused: Number(aiQueue.paused ?? 0),
-              })}</span>
-              <span className="ai-status-pill">{t('label.aiBatchLimit')}: {aiBatchLimit}</span>
-              <button
-                disabled={busy || !aiCanStart}
-                onClick={() => runAction(
-                  () => generateAiNotes(),
-                  result => result?.existing
-                    ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                    : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
-                )}
-              >
-                {t('btn.generateMissing')}
-              </button>
-            </div>
-          </div>
-          <JobQueuePanel jobs={jobs.filter(j => j.queue === 'ai')} busy={busy} onAction={runJobAction} />
-        </div>
-
-        {/* Whisper + Resource cards */}
-        <div className="queue-section">
-          <StatusLine
-            title={t('label.whisper')}
-            queueSize={whisperStatus?.queue_size ?? 0}
-            current={whisperStatus?.current_task}
-            onStop={() => runAction(stopWhisper, t('msg.queueRefreshed'))}
-          />
-        </div>
-        <div className="resource-panel">
-          <div className="resource-card">
-            <span>{t('resource.ollama')}</span>
-            <strong>{ollamaStatus.online ? t('status.running') : t('status.empty')}</strong>
-            <p>{ollamaStatus.online ? (primaryOllamaModel?.name || t('resource.noLoadedModel')) : (ollamaStatus.error || t('resource.notAvailable'))}</p>
-            <small>{t('resource.refreshedAt', { time: sampledAt })}</small>
-          </div>
-          <div className="resource-card">
-            <span>{t('resource.gpu')}</span>
-            <strong>{processorPercent == null ? '-' : `${processorPercent}%`}</strong>
-            <p>{primaryOllamaModel ? t('resource.vramUsage', {
-              used: formatBytes(primaryOllamaModel.size_vram),
-              total: formatBytes(primaryOllamaModel.size),
-            }) : t('resource.noLoadedModel')}</p>
-            <small>{t('resource.realtimeHint')}</small>
-          </div>
-          <div className="resource-card">
-            <span>{t('resource.aiWorker')}</span>
-            <strong>{resourceStatus.ai_worker_enabled ? t('status.running') : t('status.paused')}</strong>
-            <p>{t('resource.workerDetails', {
-              workers: aiWorkers ?? 0,
-              queued: Number(aiQueue.queued ?? 0),
-              running: Number(aiQueue.running ?? 0),
-            })}</p>
-            <small>{t('resource.cooldown', { seconds: resourceStatus.ai_job_cooldown_seconds ?? appSettings.ai_notes_job_cooldown_seconds })}</small>
-          </div>
-        </div>
-      </section>
-
-      <ScheduleForm
-        scheduleCron={scheduleCron}
-        scheduleTime={scheduleTime}
-        scheduleTimezone={scheduleTimezone}
-        busy={busy}
-        onTimeChange={setScheduleTime}
-        onTimezoneChange={setScheduleTimezone}
-        onSubmit={saveSchedule}
-      />
-
-      <SettingsForm
-        appSettings={appSettings}
-        settingsDraft={settingsDraft}
-        settingsDirty={settingsDirty}
-        busy={busy}
-        onChange={updateSettingsDraft}
-        onSubmit={saveAppSettings}
-        onCancel={() => {
-          settingsDirtyRef.current = false;
-          setSettingsDirty(false);
-          setSettingsDraft(appSettings);
-        }}
-      />
-
-      <section className="admin-section">
-        <div className="admin-section-header">
-          <h3>{t('header.quickActions')}</h3>
-        </div>
-        <TopActions
-          channels={channels}
-          selectedChannel={selectedChannel}
-          onChannelsChanged={onChannelsChanged}
-        />
-      </section>
-
-      <ChannelAdminPanel
-        channels={channels}
-        onChanged={async () => {
-          await onChannelsChanged();
-          await loadAdminData();
-        }}
-      />
+      {sectionPrefs.order.map(id => {
+        const { title, subtitle, headerExtra, body } = getSectionConfig(id);
+        return (
+          <CollapsibleSection
+            key={id}
+            id={id}
+            title={title}
+            subtitle={subtitle}
+            headerExtra={headerExtra}
+            open={sectionPrefs.collapsed[id] !== true}
+            onToggle={toggleSection}
+            isDragging={draggedSectionId !== null}
+            isDragOver={dragOverSectionId === id}
+            onDragStart={handleSectionDragStart}
+            onDragEnd={handleSectionDragEnd}
+            onDragOver={handleSectionDragOver}
+            onDragLeave={handleSectionDragLeave}
+            onDrop={handleSectionDrop}
+          >
+            {body}
+          </CollapsibleSection>
+        );
+      })}
     </section>
   );
 }

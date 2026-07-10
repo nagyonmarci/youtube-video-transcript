@@ -64,7 +64,8 @@
     "cancelSelection": "✕ Visszavonás",
     "scrollToTop": "Ugrás a lap tetejére",
     "lastWeek": "Utolsó 7 nap",
-    "editTranscript": "Transzkript szerkesztése"
+    "editTranscript": "Transzkript szerkesztése",
+    "quickAdd": "Gyors hozzáadás"
   },
   "export": {
     "label": "Export",

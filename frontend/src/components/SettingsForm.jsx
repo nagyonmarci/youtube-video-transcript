@@ -1,23 +1,9 @@
 import { useT } from '../lib/i18n.jsx';
 
-export default function SettingsForm({ appSettings, settingsDraft, settingsDirty, busy, onChange, onSubmit, onCancel }) {
+export default function SettingsForm({ settingsDraft, settingsDirty, busy, onChange, onSubmit, onCancel }) {
   const { t } = useT();
   return (
-    <section className="admin-section">
-      <div className="admin-section-header">
-        <div>
-          <h3>{t('header.setup')}</h3>
-          <span>
-            {appSettings.ai_notes_auto ? t('label.aiAutoOn') : t('label.aiManualOnly')}
-            {' · '}
-            {appSettings.ai_provider !== 'ollama'
-              ? appSettings.ai_cloud_model
-              : appSettings.ollama_chat_model}
-            {appSettings.ai_provider !== 'ollama' && ` (${appSettings.ai_provider})`}
-          </span>
-        </div>
-      </div>
-      <form className="settings-form" onSubmit={onSubmit}>
+    <form className="settings-form" onSubmit={onSubmit}>
         <label>
           {t('label.ollamaBaseUrl')}
           <input
@@ -303,6 +289,5 @@ export default function SettingsForm({ appSettings, settingsDraft, settingsDirty
           <button type="button" disabled={busy || !settingsDirty} onClick={onCancel}>{t('btn.cancel')}</button>
         </div>
       </form>
-    </section>
   );
 }

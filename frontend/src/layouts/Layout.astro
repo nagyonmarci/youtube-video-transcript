@@ -377,10 +377,50 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     flex-wrap: wrap;
     margin-bottom: 0.6rem;
   }
-  .admin-section-header h3 {
-    font-size: 0.95rem;
+  .admin-section-header.admin-section-drag-over {
+    outline: 2px dashed var(--primary);
+    outline-offset: 2px;
+    border-radius: 6px;
   }
-  .admin-section-header span {
+  .admin-section-header-main {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .admin-section-handle {
+    cursor: grab;
+    opacity: 0.6;
+    font-size: 0.9rem;
+  }
+  .admin-section-handle:active {
+    cursor: grabbing;
+  }
+  .admin-section-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .admin-section-chevron {
+    display: inline-block;
+    transition: transform 0.15s;
+    font-size: 0.8rem;
+  }
+  .admin-section-chevron-open {
+    transform: rotate(90deg);
+  }
+  .admin-section-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+  .admin-section-subtitle {
     color: var(--text2);
     font-size: 0.8rem;
   }
@@ -639,6 +679,41 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     font-size: 0.85rem;
     margin-bottom: 0.5rem;
     color: var(--text2);
+  }
+
+  .quick-add-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .quick-add-trigger {
+    padding: 0.3rem 0.6rem;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .quick-add-trigger:hover {
+    background: var(--bg2);
+    border-color: #555;
+  }
+  .quick-add-popover {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 200;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: min(320px, calc(100vw - 2rem));
   }
 
   .status-msg {
@@ -970,26 +1045,6 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   }
 
   /* --- Channel Admin --- */
-  .admin-panel {
-    border-top: 1px solid var(--border);
-    padding-top: 0.75rem;
-  }
-  .admin-panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-  }
-  .admin-panel-header h2 {
-    font-size: 1rem;
-    font-weight: 700;
-  }
-  .admin-panel-header p {
-    color: var(--text2);
-    font-size: 0.82rem;
-    margin-top: 0.15rem;
-  }
   .admin-toolbar {
     margin-bottom: 0.75rem;
     max-width: 420px;

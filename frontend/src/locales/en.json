@@ -64,7 +64,8 @@
     "cancelSelection": "✕ Cancel",
     "scrollToTop": "Scroll to top",
     "lastWeek": "Last 7 days",
-    "editTranscript": "Edit transcript"
+    "editTranscript": "Edit transcript",
+    "quickAdd": "Quick add"
   },
   "export": {
     "label": "Export",
