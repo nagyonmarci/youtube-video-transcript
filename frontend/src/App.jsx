@@ -16,7 +16,7 @@ function readUrlFilters() {
     search: p.get('q') || '',
     statusFilter: p.get('status') || 'all',
     aiFilter: p.get('ai') || 'all',
-    membersFilter: p.get('members') || 'all',
+    membersFilter: p.get('members') || 'hide',
   };
 }
 
@@ -93,7 +93,7 @@ function AppInner() {
     if (search) p.set('q', search);
     if (statusFilter !== 'all') p.set('status', statusFilter);
     if (aiFilter !== 'all') p.set('ai', aiFilter);
-    if (membersFilter !== 'all') p.set('members', membersFilter);
+    if (membersFilter !== 'hide') p.set('members', membersFilter);
     const qs = p.toString();
     window.history.replaceState({}, '', qs ? `?${qs}` : window.location.pathname);
   }, [search, statusFilter, aiFilter, membersFilter]);
@@ -155,7 +155,7 @@ function AppInner() {
     setSearch('');
     setStatusFilter('all');
     setAiFilter('all');
-    setMembersFilter('all');
+    setMembersFilter('hide');
   }
 
   function handleSearchChange(value) {

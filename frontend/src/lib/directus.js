@@ -44,7 +44,7 @@ export async function getVideos(channelId, opts = {}) {
     search: opts.search || '',
     status_filter: opts.statusFilter || 'all',
     ai_filter: opts.aiFilter || 'all',
-    members_filter: opts.membersFilter || 'all',
+    members_filter: opts.membersFilter || 'hide',
   });
   return req('GET', `/ui/videos?${query}`);
 }
@@ -56,7 +56,7 @@ export async function getAllVideos(opts = {}) {
     search: opts.search || '',
     status_filter: opts.statusFilter || 'all',
     ai_filter: opts.aiFilter || 'all',
-    members_filter: opts.membersFilter || 'all',
+    members_filter: opts.membersFilter || 'hide',
   });
   return req('GET', `/ui/videos?${query}`);
 }

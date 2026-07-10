@@ -38,6 +38,10 @@ UI_VIDEO_UPDATE_FIELDS = {
     "ai_notes_status",
     "ai_notes_error",
 }
+NOT_MEMBERS_ONLY = {
+    "filter[_or][0][is_members_only][_neq]": "true",
+    "filter[_or][1][is_members_only][_null]": "true",
+}
 
 
 def directus_query(path: str, params: dict) -> str:
@@ -74,7 +78,8 @@ async def count_ui_videos(extra_params: Optional[dict] = None) -> int:
 @router.get("/ui/channels")
 async def ui_channels():
     data = await directus._request("GET", "/items/channels?sort[]=-added_at&limit=-1")
-    count_data = await directus._request("GET", "/items/videos?aggregate[count]=id&groupBy[]=channel_id&limit=-1")
+    count_params = {"aggregate[count]": "id", "groupBy[]": "channel_id", "limit": "-1", **NOT_MEMBERS_ONLY}
+    count_data = await directus._request("GET", directus_query("/items/videos", count_params))
     counts = {
         row.get("channel_id"): int((row.get("count") or {}).get("id") or 0)
         for row in count_data.get("data", [])
@@ -108,7 +113,7 @@ async def ui_videos(
     search: str = "",
     status_filter: str = "all",
     ai_filter: str = "all",
-    members_filter: str = "all",
+    members_filter: str = "hide",
 ):
     page = max(1, page)
     params = {
@@ -141,6 +146,7 @@ async def ui_daily_videos(date: str, tz: str = "Europe/Budapest"):
         "sort": "-uploaded_at",
         "limit": "-1",
         "fields": UI_VIDEO_FIELDS,
+        **NOT_MEMBERS_ONLY,
     }
     data = await directus._request("GET", directus_query("/items/videos", params))
     return data.get("data", [])
@@ -148,7 +154,7 @@ async def ui_daily_videos(date: str, tz: str = "Europe/Budapest"):
 
 @router.get("/ui/videos/count")
 async def ui_video_count():
-    return {"count": await count_ui_videos()}
+    return {"count": await count_ui_videos(NOT_MEMBERS_ONLY)}
 
 
 @router.get("/ui/admin-stats")
@@ -158,20 +164,25 @@ async def ui_admin_stats():
     start = local_start.astimezone(timezone.utc)
     end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
     total, today_count, errors, missing_transcripts, missing_ai = await asyncio.gather(
-        count_ui_videos(),
+        count_ui_videos(NOT_MEMBERS_ONLY),
         count_ui_videos({
             "filter[uploaded_at][_gte]": start.isoformat(),
             "filter[uploaded_at][_lt]": end.isoformat(),
+            **NOT_MEMBERS_ONLY,
         }),
-        count_ui_videos({"filter[status][_eq]": "error"}),
+        count_ui_videos({"filter[status][_eq]": "error", **NOT_MEMBERS_ONLY}),
         count_ui_videos({
-            "filter[_or][0][transcript][_null]": "true",
-            "filter[_or][1][status][_in]": "pending,no_transcript,error",
+            "filter[_and][0][_or][0][transcript][_null]": "true",
+            "filter[_and][0][_or][1][status][_in]": "pending,no_transcript,error",
+            "filter[_and][1][_or][0][is_members_only][_neq]": "true",
+            "filter[_and][1][_or][1][is_members_only][_null]": "true",
         }),
         count_ui_videos({
             "filter[_and][0][transcript][_nnull]": "true",
             "filter[_and][1][_or][0][summary][_null]": "true",
             "filter[_and][1][_or][1][critique][_null]": "true",
+            "filter[_and][2][_or][0][is_members_only][_neq]": "true",
+            "filter[_and][2][_or][1][is_members_only][_null]": "true",
         }),
     )
     return {
@@ -185,10 +196,11 @@ async def ui_admin_stats():
 
 @router.get("/ui/channel-coverage")
 async def ui_channel_coverage():
+    base_params = {"aggregate[count]": "id", "groupBy[]": "channel_id", "limit": "-1"}
     total, transcript_done, ai_done = await asyncio.gather(
-        directus._request("GET", "/items/videos?aggregate[count]=id&groupBy[]=channel_id&limit=-1"),
-        directus._request("GET", "/items/videos?filter[status][_eq]=done&aggregate[count]=id&groupBy[]=channel_id&limit=-1"),
-        directus._request("GET", "/items/videos?filter[ai_notes_status][_eq]=done&aggregate[count]=id&groupBy[]=channel_id&limit=-1"),
+        directus._request("GET", directus_query("/items/videos", {**base_params, **NOT_MEMBERS_ONLY})),
+        directus._request("GET", directus_query("/items/videos", {**base_params, "filter[status][_eq]": "done", **NOT_MEMBERS_ONLY})),
+        directus._request("GET", directus_query("/items/videos", {**base_params, "filter[ai_notes_status][_eq]": "done", **NOT_MEMBERS_ONLY})),
     )
     return {
         "total": total.get("data", []),
@@ -206,7 +218,7 @@ async def ui_monthly_video_counts():
         month += 12
         year -= 1
     cutoff = cutoff.replace(year=year, month=month)
-    params = {"filter[uploaded_at][_gte]": cutoff.isoformat(), "fields": "uploaded_at", "limit": "-1"}
+    params = {"filter[uploaded_at][_gte]": cutoff.isoformat(), "fields": "uploaded_at", "limit": "-1", **NOT_MEMBERS_ONLY}
     data = await directus._request("GET", directus_query("/items/videos", params))
     counts: dict[str, int] = {}
     for video in data.get("data", []):
