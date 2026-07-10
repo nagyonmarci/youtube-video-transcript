@@ -15,7 +15,7 @@ from youtube_fetcher import (
     fetch_channel_videos, fetch_video_info, fetch_transcript_variants,
     fetch_video_date_info, parse_uploaded_at, is_members_only_video,
     best_thumbnail_url, extract_handle_from_url, youtube_thumbnail_url,
-    rate_limited_sleep_transcript,
+    rate_limited_sleep_transcript, rate_limited_sleep_channel,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,18 +30,36 @@ def _is_members_video(video: dict, stored_video: Optional[dict] = None) -> bool:
     return bool(re.search(r"\bmembers?\b", title, re.IGNORECASE))
 
 
-async def _backfill_metadata(existing: dict, videos: list):
+async def _backfill_metadata(existing: dict, videos: list, loop):
     """Backfill lightweight metadata for already-stored videos from a fresh channel listing."""
     by_video_id = {v["video_id"]: v for v in videos}
     backfilled = 0
+    date_calls_made = 0
     for yt_id, stored_video in existing.items():
         channel_video = by_video_id.get(yt_id) or {}
         update_data = {}
-        if not stored_video.get("uploaded_at") and channel_video.get("uploaded_at"):
-            update_data["uploaded_at"] = channel_video["uploaded_at"]
+        is_members = bool(stored_video.get("is_members_only")) or _is_members_video(channel_video, stored_video)
+
+        uploaded_at = channel_video.get("uploaded_at")
+        if not stored_video.get("uploaded_at") and not uploaded_at and is_members:
+            # Members-only videos rarely get a precise date from the flat-playlist listing,
+            # and never reach the transcript-processing path that would normally backfill this.
+            if date_calls_made > 0:
+                await rate_limited_sleep_channel()
+            date_info = await loop.run_in_executor(None, fetch_video_date_info, yt_id)
+            date_calls_made += 1
+            if date_info:
+                uploaded_at = parse_uploaded_at(date_info)
+                if date_info.get("duration") and not stored_video.get("duration_seconds"):
+                    update_data["duration_seconds"] = date_info["duration"]
+                if is_members_only_video(date_info):
+                    is_members = True
+
+        if not stored_video.get("uploaded_at") and uploaded_at:
+            update_data["uploaded_at"] = uploaded_at
         if not stored_video.get("thumbnail_url") and channel_video.get("thumbnail_url"):
             update_data["thumbnail_url"] = channel_video["thumbnail_url"]
-        if not stored_video.get("is_members_only") and _is_members_video(channel_video, stored_video):
+        if is_members and not stored_video.get("is_members_only"):
             update_data["is_members_only"] = True
         if not update_data:
             continue
@@ -185,7 +203,7 @@ async def process_channel_task(task: dict):
             await directus.update_channel(channel_id, {"video_count": len(videos)})
 
         if existing:
-            await _backfill_metadata(existing, videos)
+            await _backfill_metadata(existing, videos, loop)
 
         await _process_channel_transcripts(transcript_videos, existing, channel_url, channel_id, loop)
 

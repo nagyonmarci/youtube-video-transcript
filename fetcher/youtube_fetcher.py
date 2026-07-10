@@ -113,6 +113,13 @@ def best_thumbnail_url(info: dict) -> Optional[str]:
     return max(candidates, key=lambda candidate: candidate[0])[1]
 
 
+MEMBERS_ONLY_STDERR_RE = re.compile(r"members-only content|join this channel to get access", re.IGNORECASE)
+
+
+def _stderr_indicates_members_only(stderr: str) -> bool:
+    return bool(stderr) and bool(MEMBERS_ONLY_STDERR_RE.search(stderr))
+
+
 def is_members_only_video(info: dict) -> bool:
     """Detect videos that are restricted to channel members/subscribers."""
     availability = str(info.get("availability") or "").lower()
@@ -159,6 +166,8 @@ def fetch_video_info(video_url_or_id: str) -> dict:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.stdout.strip():
                 return json.loads(result.stdout)
+            if _stderr_indicates_members_only(result.stderr or ""):
+                return {"availability": "subscriber_only"}
         except Exception as e:
             logger.debug(f"yt-dlp metadata fetch failed for {video_url}: {e}")
     return {}
@@ -187,9 +196,11 @@ def fetch_video_date_info(video_url_or_id: str) -> dict:
         return {}
 
     if result.returncode != 0:
-        error = (result.stderr or "").strip().splitlines()
+        error = (result.stderr or "").strip()
+        if _stderr_indicates_members_only(error):
+            return {"availability": "subscriber_only"}
         if error:
-            logger.debug(f"yt-dlp date metadata unavailable for {video_url}: {error[-1]}")
+            logger.debug(f"yt-dlp date metadata unavailable for {video_url}: {error.splitlines()[-1]}")
         return {}
 
     line = (result.stdout or "").splitlines()
