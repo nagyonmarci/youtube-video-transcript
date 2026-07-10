@@ -38,14 +38,8 @@ function formatDateTime(iso) {
   });
 }
 
-function groupByChannel(videos) {
-  return videos.reduce((groups, video) => {
-    const channel = video.channel_id;
-    const key = channel?.name || channel?.channel_handle || '';
-    if (!groups[key]) groups[key] = { label: key, videos: [] };
-    groups[key].videos.push(video);
-    return groups;
-  }, {});
+function channelLabel(video) {
+  return video.channel_id?.name || video.channel_id?.channel_handle || '';
 }
 
 function listPreview(items, limit = 3) {
@@ -94,9 +88,6 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
     }
     return result;
   }, [videos, filter, titleSearch]);
-
-  const groups = useMemo(() => groupByChannel(filteredVideos), [filteredVideos]);
-  const groupEntries = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, 'hu'));
 
   async function handleGenerateAi(video) {
     setBusyId(video.id);
@@ -147,80 +138,71 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
 
       {loading ? (
         <div className="video-empty">{t('state.loading')}</div>
-      ) : groupEntries.length === 0 ? (
+      ) : filteredVideos.length === 0 ? (
         <div className="video-empty">{t('state.noVideos')}</div>
       ) : (
-        <div className="daily-groups">
-          {groupEntries.map(([key, group]) => (
-            <section key={key} className="daily-channel">
-              <div className="daily-channel-header">
-                <h3>{group.label || t('state.unknownChannel')}</h3>
-                <span>{t('label.videoCount', { count: group.videos.length })}</span>
+        <div className="daily-video-list">
+          {filteredVideos.map(video => (
+            <article key={video.id} className="daily-video-card">
+              {video.thumbnail_url && (
+                <img
+                  src={video.thumbnail_url}
+                  alt=""
+                  loading="lazy"
+                  style={{ width: '120px', height: '68px', objectFit: 'cover', borderRadius: '6px', flex: '0 0 auto', background: 'rgba(255,255,255,0.06)' }}
+                />
+              )}
+              <div className="daily-video-main">
+                <a href={video.url} target="_blank" rel="noopener noreferrer" className="daily-video-title">
+                  {video.title || t('state.unknownTitle')}
+                </a>
+                <div className="daily-video-meta">
+                  <span>{channelLabel(video) || t('state.unknownChannel')}</span>
+                  <span>{formatDateTime(video.uploaded_at)}</span>
+                  <span className={`badge badge-${video.status}`}>{video.status}</span>
+                  {video.ai_notes_status && (
+                    <span className={`badge badge-${video.ai_notes_status}`}>{video.ai_notes_status}</span>
+                  )}
+                </div>
+                {video.summary ? (
+                  <p className="daily-summary">{video.summary}</p>
+                ) : (
+                  <p className="daily-summary daily-muted">{t('state.noAiSummary')}</p>
+                )}
+                {video.topics?.length > 0 && (
+                  <div className="topic-row">
+                    {video.topics.slice(0, 6).map(topic => <span key={topic}>{topic}</span>)}
+                  </div>
+                )}
+                {listPreview(video.takeaways)}
               </div>
-              <div className="daily-video-list">
-                {group.videos.map(video => (
-                  <article key={video.id} className="daily-video-card">
-                    {video.thumbnail_url && (
-                      <img
-                        src={video.thumbnail_url}
-                        alt=""
-                        loading="lazy"
-                        style={{ width: '120px', height: '68px', objectFit: 'cover', borderRadius: '6px', flex: '0 0 auto', background: 'rgba(255,255,255,0.06)' }}
-                      />
-                    )}
-                    <div className="daily-video-main">
-                      <a href={video.url} target="_blank" rel="noopener noreferrer" className="daily-video-title">
-                        {video.title || t('state.unknownTitle')}
-                      </a>
-                      <div className="daily-video-meta">
-                        <span>{formatDateTime(video.uploaded_at)}</span>
-                        <span className={`badge badge-${video.status}`}>{video.status}</span>
-                        {video.ai_notes_status && (
-                          <span className={`badge badge-${video.ai_notes_status}`}>{video.ai_notes_status}</span>
-                        )}
-                      </div>
-                      {video.summary ? (
-                        <p className="daily-summary">{video.summary}</p>
-                      ) : (
-                        <p className="daily-summary daily-muted">{t('state.noAiSummary')}</p>
-                      )}
-                      {video.topics?.length > 0 && (
-                        <div className="topic-row">
-                          {video.topics.slice(0, 6).map(topic => <span key={topic}>{topic}</span>)}
-                        </div>
-                      )}
-                      {listPreview(video.takeaways)}
-                    </div>
-                    <div className="daily-video-actions">
-                      {video.transcript && <button onClick={() => onSelectVideo(video)}>{t('btn.transcript')}</button>}
-                      {video.transcript && (
-                        <button disabled={busyId === video.id || video.ai_notes_status === 'pending'} onClick={() => handleGenerateAi(video)}>
-                          {video.summary ? t('btn.aiRegen') : t('btn.aiNote')}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => downloadFile(videoToMd(video, { timed: true }), `${sanitizeFilename(video.title)}.md`)}
-                      >
-                        {t('export.md')}
-                      </button>
-                      <button
-                        onClick={() => downloadFile(videoToObsidianMd(video, { timed: true }), obsidianFilename(video))}
-                      >
-                        {t('export.obsidian')}
-                      </button>
-                      {(video.obsidian_note || video.summary) && (
-                        <button
-                          title={t('tooltip.mindmap')}
-                          onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
-                        >
-                          {t('export.mindmap')}
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                ))}
+              <div className="daily-video-actions">
+                {video.transcript && <button onClick={() => onSelectVideo(video)}>{t('btn.transcript')}</button>}
+                {video.transcript && (
+                  <button disabled={busyId === video.id || video.ai_notes_status === 'pending'} onClick={() => handleGenerateAi(video)}>
+                    {video.summary ? t('btn.aiRegen') : t('btn.aiNote')}
+                  </button>
+                )}
+                <button
+                  onClick={() => downloadFile(videoToMd(video, { timed: true }), `${sanitizeFilename(video.title)}.md`)}
+                >
+                  {t('export.md')}
+                </button>
+                <button
+                  onClick={() => downloadFile(videoToObsidianMd(video, { timed: true }), obsidianFilename(video))}
+                >
+                  {t('export.obsidian')}
+                </button>
+                {(video.obsidian_note || video.summary) && (
+                  <button
+                    title={t('tooltip.mindmap')}
+                    onClick={() => downloadFile(videoToMarkmapMd(video), markmapFilename(video))}
+                  >
+                    {t('export.mindmap')}
+                  </button>
+                )}
               </div>
-            </section>
+            </article>
           ))}
         </div>
       )}
