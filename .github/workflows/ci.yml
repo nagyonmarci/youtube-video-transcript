@@ -164,6 +164,7 @@ jobs:
         with:
           scan-type: image
           image-ref: youtube-video-transcript-fetcher:latest
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "0"
@@ -183,6 +184,7 @@ jobs:
         with:
           scan-type: image
           image-ref: youtube-video-transcript-frontend:latest
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "0"
