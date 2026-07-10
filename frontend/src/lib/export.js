@@ -2,19 +2,10 @@
  * Client-side export utilities for generating TXT/MD files from transcript data.
  */
 
-function formatDuration(seconds) {
-  if (!seconds) return '';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+import { formatDuration as formatDurationOrDash, formatDate as formatDateOrDash } from './formatUtils.js';
 
-function formatDate(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('hu-HU');
-}
+const formatDuration = seconds => formatDurationOrDash(seconds, '');
+const formatDate = iso => formatDateOrDash(iso, '');
 
 function isoDate(iso) {
   if (!iso) return '';

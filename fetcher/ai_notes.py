@@ -252,6 +252,223 @@ async def generate_quick_summary(
         return None
 
 
+def _parse_ollama_line(line: str) -> dict:
+    """Ollama NDJSON: one {"message": {"content": ...}, "done": ...} object per line."""
+    try:
+        chunk = json.loads(line)
+    except json.JSONDecodeError:
+        return {}
+    event: dict = {}
+    delta = chunk.get("message", {}).get("content", "")
+    if delta:
+        event["delta"] = delta
+    if chunk.get("done"):
+        event["done"] = True
+        event["usage"] = {"final_chunk": chunk}
+    return event
+
+
+def _parse_anthropic_line(line: str) -> Optional[dict]:
+    """Anthropic SSE: "data: {...}" events, terminated by "data: [DONE]"."""
+    if not line.startswith("data: "):
+        return {}
+    data = line[6:]
+    if data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return {}
+    event_type = payload.get("type")
+    if event_type == "content_block_delta":
+        delta = payload.get("delta", {}).get("text", "")
+        return {"delta": delta} if delta else {}
+    if event_type == "message_start":
+        usage = payload.get("message", {}).get("usage", {})
+        return {"usage": {"input_tokens": usage.get("input_tokens", 0)}}
+    if event_type == "message_delta":
+        usage = payload.get("usage", {})
+        return {"usage": {"output_tokens": usage.get("output_tokens", 0)}}
+    return {}
+
+
+def _parse_openai_line(line: str) -> Optional[dict]:
+    """OpenAI-compatible SSE: "data: {...}" events, terminated by "data: [DONE]"."""
+    if not line.startswith("data: "):
+        return {}
+    data = line[6:]
+    if data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return {}
+    choices = payload.get("choices") or []
+    delta = choices[0].get("delta", {}).get("content", "") if choices else ""
+    event = {"delta": delta} if delta else {}
+    usage = payload.get("usage") or {}
+    extra_usage = {}
+    if usage.get("prompt_tokens"):
+        extra_usage["prompt_tokens"] = usage["prompt_tokens"]
+    if usage.get("completion_tokens"):
+        extra_usage["completion_tokens"] = usage["completion_tokens"]
+    if extra_usage:
+        event["usage"] = extra_usage
+    return event
+
+
+async def _stream_chat(
+    *,
+    provider_name: str,
+    model: str,
+    url: str,
+    headers: Optional[dict],
+    payload: dict,
+    timeout: int,
+    parse_line: Callable[[str], Optional[dict]],
+    generating_prefix: str,
+    progress_callback: Optional[ProgressCallback],
+    prompt: str,
+    transcript: str,
+) -> tuple[str, dict, Optional[float], int, float]:
+    """Shared chat-completion streaming loop: first-token/progress callbacks, a 10s
+    progress ticker, and timeout handling, identical across every provider.
+
+    `parse_line` turns one response line into an event dict — any of `delta` (text
+    chunk), `usage` (dict merged into the returned usage state), `done` (stop the
+    stream) — or `None` to stop the stream early (e.g. an SSE "[DONE]").
+
+    Returns (content, usage, first_token_seconds, chunk_count, stream_started).
+    """
+    chunks: list[str] = []
+    usage: dict = {}
+    first_token_at: list[Optional[float]] = [None]
+    stream_started = time.monotonic()
+
+    if progress_callback:
+        await progress_callback({
+            "phase": "waiting_first_token",
+            "progress_label": f"Waiting for {provider_name} first token ({model})",
+            "prompt_chars": len(prompt),
+            "transcript_chars": len(transcript),
+        })
+
+    async def _stream() -> None:
+        # read=None: no per-chunk timeout so slow/large models don't get cut off mid-stream.
+        # connect=30: still guards against an unreachable server.
+        # The outer asyncio.wait_for provides the overall deadline via `timeout`.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    event = parse_line(line)
+                    if event is None:
+                        break
+                    delta = event.get("delta")
+                    if delta:
+                        if first_token_at[0] is None:
+                            first_token_at[0] = round(time.monotonic() - stream_started, 3)
+                        chunks.append(delta)
+                    if "usage" in event:
+                        usage.update(event["usage"])
+                    if event.get("done"):
+                        break
+
+    async def _progress_ticker() -> None:
+        while True:
+            await asyncio.sleep(10)
+            if not progress_callback:
+                continue
+            elapsed_label = _fmt_elapsed(time.monotonic() - stream_started)
+            if first_token_at[0] is None:
+                await progress_callback({
+                    "phase": "waiting_first_token",
+                    "progress_label": f"Waiting for {provider_name} first token ({elapsed_label} elapsed)",
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+            else:
+                output_chars = sum(len(c) for c in chunks)
+                await progress_callback({
+                    "phase": "generating",
+                    "progress_label": f"{generating_prefix} ({elapsed_label} elapsed, {output_chars} chars)",
+                    "first_token_seconds": first_token_at[0],
+                    "prompt_chars": len(prompt),
+                    "transcript_chars": len(transcript),
+                })
+
+    progress_task = asyncio.create_task(_progress_ticker())
+    try:
+        await asyncio.wait_for(_stream(), timeout=timeout)
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - stream_started, 1)
+        raise TimeoutError(
+            f"{provider_name} did not finish within {timeout}s "
+            f"(elapsed: {elapsed}s, model: {model}, "
+            f"first_token: {first_token_at[0]})"
+        )
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
+    return "".join(chunks), usage, first_token_at[0], len(chunks), stream_started
+
+
+async def _finish_notes(
+    *,
+    provider: str,
+    model: str,
+    content: str,
+    transcript: str,
+    prompt: str,
+    prompt_build_seconds: float,
+    stream_started: float,
+    first_token_seconds: Optional[float],
+    progress_callback: Optional[ProgressCallback],
+    parsing_label: str,
+    extra_metrics: dict,
+) -> dict:
+    """Shared JSON-parse + result-shape step, identical across every provider."""
+    if progress_callback:
+        await progress_callback({
+            "phase": "parsing_json",
+            "progress_label": parsing_label,
+            "first_token_seconds": first_token_seconds,
+            "output_chars": len(content),
+        })
+    parse_start = time.monotonic()
+    parsed = extract_json(content)
+    parse_seconds = round(time.monotonic() - parse_start, 3)
+    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
+    metrics = {
+        "model": model,
+        "provider": provider,
+        "transcript_chars": len(transcript),
+        "prompt_chars": len(prompt),
+        "output_chars": len(content),
+        "prompt_build_seconds": prompt_build_seconds,
+        "first_token_seconds": first_token_seconds,
+        "json_parse_seconds": parse_seconds,
+        "total_seconds": total_seconds,
+        **extra_metrics,
+    }
+    return {
+        "summary": str(parsed.get("summary", "")).strip(),
+        "topics": normalize_list(parsed.get("topics")),
+        "takeaways": normalize_list(parsed.get("takeaways")),
+        "questions": normalize_list(parsed.get("questions")),
+        "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
+        "study_guide": str(parsed.get("study_guide", "")).strip(),
+        "critique": str(parsed.get("critique", "")).strip(),
+        "_metrics": metrics,
+    }
+
+
 async def _generate_ai_notes_ollama(
     video: dict, progress_callback: Optional[ProgressCallback] = None
 ) -> Optional[dict]:
@@ -264,16 +481,15 @@ async def _generate_ai_notes_ollama(
     prompt = build_prompt({**video, "transcript": compacted, "transcript_timed": None})
     prompt_build_seconds = round(time.monotonic() - prompt_start, 3)
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a source-grounded English note-taking assistant. Always return valid JSON only.",
-        },
-        {"role": "user", "content": prompt},
-    ]
     payload = {
         "model": OLLAMA_CHAT_MODEL,
-        "messages": messages,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a source-grounded English note-taking assistant. Always return valid JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
         "stream": True,
         "format": "json",
         "options": {
@@ -283,131 +499,48 @@ async def _generate_ai_notes_ollama(
         },
     }
 
-    chunks: list[str] = []
-    _final: list[dict] = [{}]
-    _first_token_at: list[Optional[float]] = [None]
-    stream_started = time.monotonic()
+    content, usage, first_token_seconds, chunk_count, stream_started = await _stream_chat(
+        provider_name="Ollama",
+        model=OLLAMA_CHAT_MODEL,
+        url=f"{OLLAMA_BASE_URL}/api/chat",
+        headers=None,
+        payload=payload,
+        timeout=OLLAMA_TIMEOUT,
+        parse_line=_parse_ollama_line,
+        generating_prefix="Generating...",
+        progress_callback=progress_callback,
+        prompt=prompt,
+        transcript=transcript,
+    )
 
-    if progress_callback:
-        await progress_callback({
-            "phase": "waiting_first_token",
-            "progress_label": f"Waiting for Ollama first token ({OLLAMA_CHAT_MODEL})",
-            "prompt_chars": len(prompt),
-            "transcript_chars": len(transcript),
-        })
-
-    async def _stream() -> None:
-        # read=None: no per-chunk timeout so slow/large models don't get cut off mid-stream.
-        # connect=30: still guards against an unreachable server.
-        # The outer asyncio.wait_for provides the overall deadline via OLLAMA_TIMEOUT.
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
-            async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/chat", json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = chunk.get("message", {}).get("content", "")
-                    if delta:
-                        if _first_token_at[0] is None:
-                            _first_token_at[0] = round(time.monotonic() - stream_started, 3)
-                        chunks.append(delta)
-                    if chunk.get("done"):
-                        _final[0] = chunk
-
-    async def _progress_ticker() -> None:
-        while True:
-            await asyncio.sleep(10)
-            if not progress_callback:
-                continue
-            elapsed = time.monotonic() - stream_started
-            label = _fmt_elapsed(elapsed)
-            if _first_token_at[0] is None:
-                await progress_callback({
-                    "phase": "waiting_first_token",
-                    "progress_label": f"Waiting for Ollama first token ({label} elapsed)",
-                    "prompt_chars": len(prompt),
-                    "transcript_chars": len(transcript),
-                })
-            else:
-                output_chars = sum(len(c) for c in chunks)
-                await progress_callback({
-                    "phase": "generating",
-                    "progress_label": f"Generating... ({label} elapsed, {output_chars} chars)",
-                    "first_token_seconds": _first_token_at[0],
-                    "prompt_chars": len(prompt),
-                    "transcript_chars": len(transcript),
-                })
-
-    progress_task = asyncio.create_task(_progress_ticker())
-    try:
-        await asyncio.wait_for(_stream(), timeout=OLLAMA_TIMEOUT)
-    except asyncio.TimeoutError:
-        elapsed = round(time.monotonic() - stream_started, 1)
-        raise TimeoutError(
-            f"Ollama did not finish within {OLLAMA_TIMEOUT}s "
-            f"(elapsed: {elapsed}s, model: {OLLAMA_CHAT_MODEL}, "
-            f"first_token: {_first_token_at[0]})"
-        )
-    finally:
-        progress_task.cancel()
-        try:
-            await progress_task
-        except asyncio.CancelledError:
-            pass
-
-    first_token_seconds = _first_token_at[0]
-    final_chunk = _final[0]
-
-    content = "".join(chunks)
-    if progress_callback:
-        await progress_callback({
-            "phase": "parsing_json",
-            "progress_label": "Parsing Ollama JSON response",
-            "first_token_seconds": first_token_seconds,
-            "output_chars": len(content),
-        })
-    parse_start = time.monotonic()
-    parsed = extract_json(content)
-    parse_seconds = round(time.monotonic() - parse_start, 3)
-    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
+    final_chunk = usage.get("final_chunk", {})
     eval_count = int(final_chunk.get("eval_count") or 0)
     eval_seconds = ns_to_seconds(final_chunk.get("eval_duration"))
-    metrics = {
-        "model": OLLAMA_CHAT_MODEL,
-        "provider": "ollama",
-        "transcript_chars": len(transcript),
-        "prompt_chars": len(prompt),
-        "output_chars": len(content),
-        "chunks": len(chunks),
-        "prompt_build_seconds": prompt_build_seconds,
-        "first_token_seconds": first_token_seconds,
-        "json_parse_seconds": parse_seconds,
-        "total_seconds": total_seconds,
-        "ollama_total_seconds": ns_to_seconds(final_chunk.get("total_duration")),
-        "ollama_load_seconds": ns_to_seconds(final_chunk.get("load_duration")),
-        "prompt_eval_count": final_chunk.get("prompt_eval_count"),
-        "prompt_eval_seconds": ns_to_seconds(final_chunk.get("prompt_eval_duration")),
-        "eval_count": eval_count or None,
-        "eval_seconds": eval_seconds,
-        "eval_tokens_per_second": round(eval_count / eval_seconds, 2) if eval_count and eval_seconds else None,
-        "num_ctx": OLLAMA_NUM_CTX,
-        "num_predict": OLLAMA_NUM_PREDICT,
-        "temperature": OLLAMA_TEMPERATURE,
-    }
-    return {
-        "summary": str(parsed.get("summary", "")).strip(),
-        "topics": normalize_list(parsed.get("topics")),
-        "takeaways": normalize_list(parsed.get("takeaways")),
-        "questions": normalize_list(parsed.get("questions")),
-        "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
-        "study_guide": str(parsed.get("study_guide", "")).strip(),
-        "critique": str(parsed.get("critique", "")).strip(),
-        "_metrics": metrics,
-    }
+    return await _finish_notes(
+        provider="ollama",
+        model=OLLAMA_CHAT_MODEL,
+        content=content,
+        transcript=transcript,
+        prompt=prompt,
+        prompt_build_seconds=prompt_build_seconds,
+        stream_started=stream_started,
+        first_token_seconds=first_token_seconds,
+        progress_callback=progress_callback,
+        parsing_label="Parsing Ollama JSON response",
+        extra_metrics={
+            "chunks": chunk_count,
+            "ollama_total_seconds": ns_to_seconds(final_chunk.get("total_duration")),
+            "ollama_load_seconds": ns_to_seconds(final_chunk.get("load_duration")),
+            "prompt_eval_count": final_chunk.get("prompt_eval_count"),
+            "prompt_eval_seconds": ns_to_seconds(final_chunk.get("prompt_eval_duration")),
+            "eval_count": eval_count or None,
+            "eval_seconds": eval_seconds,
+            "eval_tokens_per_second": round(eval_count / eval_seconds, 2) if eval_count and eval_seconds else None,
+            "num_ctx": OLLAMA_NUM_CTX,
+            "num_predict": OLLAMA_NUM_PREDICT,
+            "temperature": OLLAMA_TEMPERATURE,
+        },
+    )
 
 
 async def _generate_ai_notes_anthropic(
@@ -437,130 +570,37 @@ async def _generate_ai_notes_anthropic(
         "content-type": "application/json",
     }
 
-    chunks: list[str] = []
-    _first_token_at: list[Optional[float]] = [None]
-    _input_tokens: list[int] = [0]
-    _output_tokens: list[int] = [0]
-    stream_started = time.monotonic()
+    content, usage, first_token_seconds, chunk_count, stream_started = await _stream_chat(
+        provider_name="Anthropic",
+        model=AI_CLOUD_MODEL,
+        url="https://api.anthropic.com/v1/messages",
+        headers=headers,
+        payload=payload,
+        timeout=OLLAMA_TIMEOUT,
+        parse_line=_parse_anthropic_line,
+        generating_prefix=f"Generating [{AI_CLOUD_MODEL}]...",
+        progress_callback=progress_callback,
+        prompt=prompt,
+        transcript=transcript,
+    )
 
-    if progress_callback:
-        await progress_callback({
-            "phase": "waiting_first_token",
-            "progress_label": f"Waiting for Anthropic first token ({AI_CLOUD_MODEL})",
-            "prompt_chars": len(prompt),
-            "transcript_chars": len(transcript),
-        })
-
-    async def _stream() -> None:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
-            async with client.stream(
-                "POST",
-                "https://api.anthropic.com/v1/messages",
-                json=payload,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line or not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    event_type = event.get("type")
-                    if event_type == "content_block_delta":
-                        delta = event.get("delta", {}).get("text", "")
-                        if delta:
-                            if _first_token_at[0] is None:
-                                _first_token_at[0] = round(time.monotonic() - stream_started, 3)
-                            chunks.append(delta)
-                    elif event_type == "message_start":
-                        usage = event.get("message", {}).get("usage", {})
-                        _input_tokens[0] = usage.get("input_tokens", 0)
-                    elif event_type == "message_delta":
-                        usage = event.get("usage", {})
-                        _output_tokens[0] = usage.get("output_tokens", 0)
-
-    async def _progress_ticker() -> None:
-        while True:
-            await asyncio.sleep(10)
-            if not progress_callback:
-                continue
-            elapsed = time.monotonic() - stream_started
-            label = _fmt_elapsed(elapsed)
-            if _first_token_at[0] is None:
-                await progress_callback({
-                    "phase": "waiting_first_token",
-                    "progress_label": f"Waiting for Anthropic first token ({label} elapsed)",
-                    "prompt_chars": len(prompt),
-                    "transcript_chars": len(transcript),
-                })
-            else:
-                output_chars = sum(len(c) for c in chunks)
-                await progress_callback({
-                    "phase": "generating",
-                    "progress_label": f"Generating [{AI_CLOUD_MODEL}]... ({label} elapsed, {output_chars} chars)",
-                    "first_token_seconds": _first_token_at[0],
-                    "prompt_chars": len(prompt),
-                    "transcript_chars": len(transcript),
-                })
-
-    progress_task = asyncio.create_task(_progress_ticker())
-    try:
-        await asyncio.wait_for(_stream(), timeout=OLLAMA_TIMEOUT)
-    except asyncio.TimeoutError:
-        elapsed = round(time.monotonic() - stream_started, 1)
-        raise TimeoutError(
-            f"Anthropic did not finish within {OLLAMA_TIMEOUT}s "
-            f"(elapsed: {elapsed}s, model: {AI_CLOUD_MODEL}, "
-            f"first_token: {_first_token_at[0]})"
-        )
-    finally:
-        progress_task.cancel()
-        try:
-            await progress_task
-        except asyncio.CancelledError:
-            pass
-
-    content = "".join(chunks)
-    if progress_callback:
-        await progress_callback({
-            "phase": "parsing_json",
-            "progress_label": f"Parsing Anthropic JSON response ({AI_CLOUD_MODEL})",
-            "first_token_seconds": _first_token_at[0],
-            "output_chars": len(content),
-        })
-    parse_start = time.monotonic()
-    parsed = extract_json(content)
-    parse_seconds = round(time.monotonic() - parse_start, 3)
-    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
-    metrics = {
-        "model": AI_CLOUD_MODEL,
-        "provider": "anthropic",
-        "transcript_chars": len(transcript),
-        "prompt_chars": len(prompt),
-        "output_chars": len(content),
-        "chunks": len(chunks),
-        "prompt_build_seconds": prompt_build_seconds,
-        "first_token_seconds": _first_token_at[0],
-        "json_parse_seconds": parse_seconds,
-        "total_seconds": total_seconds,
-        "prompt_eval_count": _input_tokens[0] or None,
-        "eval_count": _output_tokens[0] or None,
-    }
-    return {
-        "summary": str(parsed.get("summary", "")).strip(),
-        "topics": normalize_list(parsed.get("topics")),
-        "takeaways": normalize_list(parsed.get("takeaways")),
-        "questions": normalize_list(parsed.get("questions")),
-        "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
-        "study_guide": str(parsed.get("study_guide", "")).strip(),
-        "critique": str(parsed.get("critique", "")).strip(),
-        "_metrics": metrics,
-    }
+    return await _finish_notes(
+        provider="anthropic",
+        model=AI_CLOUD_MODEL,
+        content=content,
+        transcript=transcript,
+        prompt=prompt,
+        prompt_build_seconds=prompt_build_seconds,
+        stream_started=stream_started,
+        first_token_seconds=first_token_seconds,
+        progress_callback=progress_callback,
+        parsing_label=f"Parsing Anthropic JSON response ({AI_CLOUD_MODEL})",
+        extra_metrics={
+            "chunks": chunk_count,
+            "prompt_eval_count": usage.get("input_tokens") or None,
+            "eval_count": usage.get("output_tokens") or None,
+        },
+    )
 
 
 async def _generate_ai_notes_openai(
@@ -594,128 +634,37 @@ async def _generate_ai_notes_openai(
         "content-type": "application/json",
     }
 
-    chunks: list[str] = []
-    _first_token_at: list[Optional[float]] = [None]
-    _prompt_tokens: list[int] = [0]
-    _completion_tokens: list[int] = [0]
-    stream_started = time.monotonic()
+    content, usage, first_token_seconds, chunk_count, stream_started = await _stream_chat(
+        provider_name="OpenAI",
+        model=AI_CLOUD_MODEL,
+        url=f"{OPENAI_BASE_URL}/chat/completions",
+        headers=headers,
+        payload=payload,
+        timeout=OLLAMA_TIMEOUT,
+        parse_line=_parse_openai_line,
+        generating_prefix=f"Generating [{AI_CLOUD_MODEL}]...",
+        progress_callback=progress_callback,
+        prompt=prompt,
+        transcript=transcript,
+    )
 
-    if progress_callback:
-        await progress_callback({
-            "phase": "waiting_first_token",
-            "progress_label": f"Waiting for OpenAI first token ({AI_CLOUD_MODEL})",
-            "prompt_chars": len(prompt),
-            "transcript_chars": len(transcript),
-        })
-
-    async def _stream() -> None:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30)) as client:
-            async with client.stream(
-                "POST",
-                f"{OPENAI_BASE_URL}/chat/completions",
-                json=payload,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line or not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    for choice in event.get("choices", []):
-                        delta = choice.get("delta", {}).get("content", "")
-                        if delta:
-                            if _first_token_at[0] is None:
-                                _first_token_at[0] = round(time.monotonic() - stream_started, 3)
-                            chunks.append(delta)
-                    usage = event.get("usage") or {}
-                    if usage.get("prompt_tokens"):
-                        _prompt_tokens[0] = usage["prompt_tokens"]
-                    if usage.get("completion_tokens"):
-                        _completion_tokens[0] = usage["completion_tokens"]
-
-    async def _progress_ticker() -> None:
-        while True:
-            await asyncio.sleep(10)
-            if not progress_callback:
-                continue
-            elapsed = time.monotonic() - stream_started
-            label = _fmt_elapsed(elapsed)
-            if _first_token_at[0] is None:
-                await progress_callback({
-                    "phase": "waiting_first_token",
-                    "progress_label": f"Waiting for OpenAI first token ({label} elapsed)",
-                    "prompt_chars": len(prompt),
-                    "transcript_chars": len(transcript),
-                })
-            else:
-                output_chars = sum(len(c) for c in chunks)
-                await progress_callback({
-                    "phase": "generating",
-                    "progress_label": f"Generating [{AI_CLOUD_MODEL}]... ({label} elapsed, {output_chars} chars)",
-                    "first_token_seconds": _first_token_at[0],
-                    "prompt_chars": len(prompt),
-                    "transcript_chars": len(transcript),
-                })
-
-    progress_task = asyncio.create_task(_progress_ticker())
-    try:
-        await asyncio.wait_for(_stream(), timeout=OLLAMA_TIMEOUT)
-    except asyncio.TimeoutError:
-        elapsed = round(time.monotonic() - stream_started, 1)
-        raise TimeoutError(
-            f"OpenAI did not finish within {OLLAMA_TIMEOUT}s "
-            f"(elapsed: {elapsed}s, model: {AI_CLOUD_MODEL}, "
-            f"first_token: {_first_token_at[0]})"
-        )
-    finally:
-        progress_task.cancel()
-        try:
-            await progress_task
-        except asyncio.CancelledError:
-            pass
-
-    content = "".join(chunks)
-    if progress_callback:
-        await progress_callback({
-            "phase": "parsing_json",
-            "progress_label": f"Parsing OpenAI JSON response ({AI_CLOUD_MODEL})",
-            "first_token_seconds": _first_token_at[0],
-            "output_chars": len(content),
-        })
-    parse_start = time.monotonic()
-    parsed = extract_json(content)
-    parse_seconds = round(time.monotonic() - parse_start, 3)
-    total_seconds = round(time.monotonic() - stream_started + prompt_build_seconds, 3)
-    metrics = {
-        "model": AI_CLOUD_MODEL,
-        "provider": "openai",
-        "transcript_chars": len(transcript),
-        "prompt_chars": len(prompt),
-        "output_chars": len(content),
-        "chunks": len(chunks),
-        "prompt_build_seconds": prompt_build_seconds,
-        "first_token_seconds": _first_token_at[0],
-        "json_parse_seconds": parse_seconds,
-        "total_seconds": total_seconds,
-        "prompt_eval_count": _prompt_tokens[0] or None,
-        "eval_count": _completion_tokens[0] or None,
-    }
-    return {
-        "summary": str(parsed.get("summary", "")).strip(),
-        "topics": normalize_list(parsed.get("topics")),
-        "takeaways": normalize_list(parsed.get("takeaways")),
-        "questions": normalize_list(parsed.get("questions")),
-        "obsidian_note": str(parsed.get("obsidian_note", "")).strip(),
-        "study_guide": str(parsed.get("study_guide", "")).strip(),
-        "critique": str(parsed.get("critique", "")).strip(),
-        "_metrics": metrics,
-    }
+    return await _finish_notes(
+        provider="openai",
+        model=AI_CLOUD_MODEL,
+        content=content,
+        transcript=transcript,
+        prompt=prompt,
+        prompt_build_seconds=prompt_build_seconds,
+        stream_started=stream_started,
+        first_token_seconds=first_token_seconds,
+        progress_callback=progress_callback,
+        parsing_label=f"Parsing OpenAI JSON response ({AI_CLOUD_MODEL})",
+        extra_metrics={
+            "chunks": chunk_count,
+            "prompt_eval_count": usage.get("prompt_tokens") or None,
+            "eval_count": usage.get("completion_tokens") or None,
+        },
+    )
 
 
 async def generate_ai_notes(
@@ -727,3 +676,33 @@ async def generate_ai_notes(
     if AI_PROVIDER == "openai":
         return await _generate_ai_notes_openai(video, progress_callback)
     return await _generate_ai_notes_ollama(video, progress_callback)
+
+
+def _self_check() -> None:
+    assert _parse_ollama_line('{"message": {"content": "hi"}, "done": false}') == {"delta": "hi"}
+    assert _parse_ollama_line("not json") == {}
+    done = _parse_ollama_line('{"message": {"content": ""}, "done": true, "eval_count": 5}')
+    assert done["done"] is True and done["usage"]["final_chunk"]["eval_count"] == 5
+
+    assert _parse_anthropic_line("event: ping") == {}
+    assert _parse_anthropic_line("data: [DONE]") is None
+    assert _parse_anthropic_line(
+        'data: {"type": "content_block_delta", "delta": {"text": "hi"}}'
+    ) == {"delta": "hi"}
+    assert _parse_anthropic_line(
+        'data: {"type": "message_start", "message": {"usage": {"input_tokens": 7}}}'
+    ) == {"usage": {"input_tokens": 7}}
+
+    assert _parse_openai_line("data: [DONE]") is None
+    assert _parse_openai_line(
+        'data: {"choices": [{"delta": {"content": "hi"}}]}'
+    ) == {"delta": "hi"}
+    assert _parse_openai_line(
+        'data: {"choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 4}}'
+    ) == {"usage": {"prompt_tokens": 3, "completion_tokens": 4}}
+
+    print("ai_notes self-check OK")
+
+
+if __name__ == "__main__":
+    _self_check()

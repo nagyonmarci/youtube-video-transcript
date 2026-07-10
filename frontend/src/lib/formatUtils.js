@@ -1,7 +1,7 @@
 // Display formatting helpers for video durations and dates (UI context, not file exports)
 
-export function formatDuration(seconds) {
-  if (!seconds) return '—';
+export function formatDuration(seconds, fallback = '—') {
+  if (!seconds) return fallback;
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -9,7 +9,7 @@ export function formatDuration(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export function formatDate(iso) {
-  if (!iso) return '—';
+export function formatDate(iso, fallback = '—') {
+  if (!iso) return fallback;
   return new Date(iso).toLocaleDateString('hu-HU');
 }
