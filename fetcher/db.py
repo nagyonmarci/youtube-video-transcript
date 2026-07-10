@@ -47,6 +47,7 @@ async def ensure_database_indexes():
         "CREATE INDEX IF NOT EXISTS idx_videos_thumbnail_missing ON videos (id) WHERE thumbnail_url IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_jobs_queue_status_sort ON jobs (queue, status, sort_order, created_at)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe_active ON jobs (queue, dedupe_key) WHERE status IN ('queued', 'running', 'paused') AND dedupe_key IS NOT NULL",
+        r"UPDATE videos SET is_members_only = true WHERE is_members_only IS NOT TRUE AND title ~* '\mmembers?\M'",
     ]
     try:
         conn = await asyncpg.connect(

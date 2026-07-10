@@ -41,8 +41,8 @@ async def _backfill_metadata(existing: dict, videos: list):
             update_data["uploaded_at"] = channel_video["uploaded_at"]
         if not stored_video.get("thumbnail_url") and channel_video.get("thumbnail_url"):
             update_data["thumbnail_url"] = channel_video["thumbnail_url"]
-        if channel_video and stored_video.get("is_members_only") != channel_video.get("is_members_only"):
-            update_data["is_members_only"] = bool(channel_video.get("is_members_only"))
+        if not stored_video.get("is_members_only") and _is_members_video(channel_video, stored_video):
+            update_data["is_members_only"] = True
         if not update_data:
             continue
         try:
