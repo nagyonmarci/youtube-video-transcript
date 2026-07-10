@@ -188,16 +188,16 @@ async def ui_search(
     return {"items": data.get("data", []), "total": data.get("meta", {}).get("filter_count", 0)}
 
 
-@router.get("/ui/videos/daily")
-async def ui_daily_videos(date: str, tz: str = "Europe/Budapest"):
+@router.get("/ui/videos/range")
+async def ui_videos_range(date_from: str, date_to: str, tz: str = "Europe/Budapest"):
     try:
         local_tz = ZoneInfo(tz)
     except (ZoneInfoNotFoundError, KeyError):
         local_tz = timezone.utc
-    year, month, day = (int(x) for x in date.split("-"))
-    local_start = datetime(year, month, day, tzinfo=local_tz)
-    start = local_start.astimezone(timezone.utc)
-    end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
+    fy, fm, fd = (int(x) for x in date_from.split("-"))
+    ty, tm, td = (int(x) for x in date_to.split("-"))
+    start = datetime(fy, fm, fd, tzinfo=local_tz).astimezone(timezone.utc)
+    end = (datetime(ty, tm, td, tzinfo=local_tz) + timedelta(days=1)).astimezone(timezone.utc)
     params = {
         "filter[uploaded_at][_gte]": start.isoformat(),
         "filter[uploaded_at][_lt]": end.isoformat(),

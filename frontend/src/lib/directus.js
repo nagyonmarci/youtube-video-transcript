@@ -72,10 +72,10 @@ export async function getSearchResults(query, opts = {}) {
   return req('GET', `/ui/search?${params}`);
 }
 
-export async function getDailyVideos(dateValue, tz) {
-  const params = { date: dateValue };
+export async function getVideosInRange(dateFrom, dateTo, tz) {
+  const params = { date_from: dateFrom, date_to: dateTo };
   if (tz) params.tz = tz;
-  return req('GET', `/ui/videos/daily?${paramsFrom(params)}`);
+  return req('GET', `/ui/videos/range?${paramsFrom(params)}`);
 }
 
 export async function getTotalVideoCount() {
