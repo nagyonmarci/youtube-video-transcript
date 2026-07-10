@@ -1,5 +1,7 @@
 FROM cgr.dev/chainguard/node:latest-dev AS build
 
+USER root
+
 RUN npm install -g npm@latest
 
 WORKDIR /app
