@@ -149,7 +149,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
                   src={video.thumbnail_url}
                   alt=""
                   loading="lazy"
-                  style={{ width: '120px', height: '68px', objectFit: 'cover', borderRadius: '6px', flex: '0 0 auto', background: 'rgba(255,255,255,0.06)' }}
+                  style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '6px', background: 'rgba(255,255,255,0.06)' }}
                 />
               )}
               <div className="daily-video-main">
