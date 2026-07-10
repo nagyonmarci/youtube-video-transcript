@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { deleteAiNoteForVideo, generateAiNoteForVideo, generateQuickNoteForVideo } from '../lib/fetcher.js';
-import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.js';
-import { useT } from '../lib/i18n.jsx';
-import { formatDuration, formatDate } from '../lib/formatUtils.js';
-import { useMessage } from '../lib/useMessage.js';
-import { TOAST_TIMEOUT_MS, SEARCH_DEBOUNCE_MS } from '../lib/constants.js';
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type SyntheticEvent } from 'react';
+import { deleteAiNoteForVideo, generateAiNoteForVideo, generateQuickNoteForVideo } from '../lib/fetcher.ts';
+import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename, videosToCsv, videosToJson } from '../lib/export.ts';
+import { useT } from '../lib/i18n.tsx';
+import { formatDuration, formatDate } from '../lib/formatUtils.ts';
+import { useMessage } from '../lib/useMessage.ts';
+import { TOAST_TIMEOUT_MS, SEARCH_DEBOUNCE_MS } from '../lib/constants.ts';
+import type { Video, Channel } from '../types.ts';
 
-async function bulkGenerateAiNotes(videos) {
-  const errors = [];
+async function bulkGenerateAiNotes(videos: Video[]): Promise<(string | null)[]> {
+  const errors: (string | null)[] = [];
   for (const v of videos) {
     try { await generateAiNoteForVideo(v.id); }
     catch { errors.push(v.title || v.video_id); }
@@ -15,13 +16,37 @@ async function bulkGenerateAiNotes(videos) {
   return errors;
 }
 
-async function bulkDeleteAiNotes(videos) {
-  const errors = [];
+async function bulkDeleteAiNotes(videos: Video[]): Promise<(string | null)[]> {
+  const errors: (string | null)[] = [];
   for (const v of videos) {
     try { await deleteAiNoteForVideo(v.id); }
     catch { errors.push(v.title || v.video_id); }
   }
   return errors;
+}
+
+interface VideoTableProps {
+  videos: Video[];
+  totalCount: number;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  search: string;
+  onSearchChange: (value: string) => void;
+  sort: string;
+  onSortChange: (value: string) => void;
+  statusFilter?: string;
+  onStatusFilterChange?: (value: string) => void;
+  aiFilter?: string;
+  onAiFilterChange?: (value: string) => void;
+  membersFilter?: string;
+  onMembersFilterChange?: (value: string) => void;
+  loading: boolean;
+  onSelectVideo: (video: Video) => void;
+  onVideosChanged?: () => Promise<void> | void;
+  selectedChannel?: Channel | null;
+  emptyMessage?: string;
+  searchPlaceholder?: string;
 }
 
 export default function VideoTable({
@@ -46,19 +71,19 @@ export default function VideoTable({
   selectedChannel,
   emptyMessage,
   searchPlaceholder,
-}) {
+}: VideoTableProps) {
   const { t } = useT();
-  const searchInputRef = useRef();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [localSearch, setLocalSearch] = useState(search);
-  const [aiBusyId, setAiBusyId] = useState(null);
-  const [exportMenuId, setExportMenuId] = useState(null);
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [aiBusyId, setAiBusyId] = useState<string | null>(null);
+  const [exportMenuId, setExportMenuId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const { msg: actionMsg, showMsg: showActionMsg } = useMessage(TOAST_TIMEOUT_MS);
-  const debounceRef = useRef(null);
-  const loadMoreRef = useRef(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  const STATUS_MAP = {
+  const STATUS_MAP: Record<string, { icon: string; label: string }> = {
     done: { icon: '✅', label: t('status.done') },
     pending: { icon: '⏳', label: t('status.pending') },
     processing: { icon: '🔄', label: t('status.processing') },
@@ -66,7 +91,7 @@ export default function VideoTable({
     error: { icon: '⚠️', label: t('status.error') },
   };
 
-  const AI_STATUS_MAP = {
+  const AI_STATUS_MAP: Record<string, string> = {
     done: t('status.aiDone'),
     pending: t('status.aiRunning'),
     error: t('status.aiError'),
@@ -102,7 +127,7 @@ export default function VideoTable({
   const someSelected = selectedIds.size > 0;
   const selectedVideos = videos.filter(v => selectedIds.has(v.id));
 
-  function toggleSelect(id) {
+  function toggleSelect(id: string) {
     setSelectedIds(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -165,7 +190,7 @@ export default function VideoTable({
     setLocalSearch(search);
   }, [search]);
 
-  const handleSearchInput = useCallback((e) => {
+  const handleSearchInput = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setLocalSearch(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -177,7 +202,7 @@ export default function VideoTable({
   const sortField = sort.startsWith('-') ? sort.slice(1) : sort;
   const sortDesc = sort.startsWith('-');
 
-  function handleHeaderClick(field) {
+  function handleHeaderClick(field: string) {
     if (field === sortField) {
       onSortChange(sortDesc ? field : `-${field}`);
     } else {
@@ -185,12 +210,12 @@ export default function VideoTable({
     }
   }
 
-  function renderSortIcon(field) {
+  function renderSortIcon(field: string) {
     if (field !== sortField) return null;
     return sortDesc ? ' ↓' : ' ↑';
   }
 
-  async function handleGenerateQuickNote(e, video) {
+  async function handleGenerateQuickNote(e: SyntheticEvent, video: Video) {
     e.stopPropagation();
     setAiBusyId(video.id);
     try {
@@ -198,13 +223,13 @@ export default function VideoTable({
       showActionMsg(t('msg.aiQueued', { count: 1 }));
       await onVideosChanged?.();
     } catch (err) {
-      showActionMsg(t('msg.errAi', { error: err.message }), true);
+      showActionMsg(t('msg.errAi', { error: (err as Error).message }), true);
     } finally {
       setAiBusyId(null);
     }
   }
 
-  async function handleGenerateAiNote(e, video) {
+  async function handleGenerateAiNote(e: SyntheticEvent, video: Video) {
     e.stopPropagation();
     setAiBusyId(video.id);
     try {
@@ -212,13 +237,13 @@ export default function VideoTable({
       showActionMsg(t('msg.aiQueued', { count: 1 }));
       await onVideosChanged?.();
     } catch (err) {
-      showActionMsg(t('msg.errAi', { error: err.message }), true);
+      showActionMsg(t('msg.errAi', { error: (err as Error).message }), true);
     } finally {
       setAiBusyId(null);
     }
   }
 
-  async function handleDeleteAiNote(e, video) {
+  async function handleDeleteAiNote(e: SyntheticEvent, video: Video) {
     e.stopPropagation();
     if (!confirm(t('confirm.deleteAiNote', { title: video.title || video.video_id }))) return;
     setAiBusyId(video.id);
@@ -226,7 +251,7 @@ export default function VideoTable({
       await deleteAiNoteForVideo(video.id);
       await onVideosChanged?.();
     } catch (err) {
-      alert(t('msg.errAiDelete', { error: err.message }));
+      alert(t('msg.errAiDelete', { error: (err as Error).message }));
     } finally {
       setAiBusyId(null);
     }
@@ -333,7 +358,7 @@ export default function VideoTable({
               </thead>
               <tbody>
                 {videos.map((video, i) => {
-                  const st = STATUS_MAP[video.status] || { icon: '', label: video.status };
+                  const st = (video.status && STATUS_MAP[video.status]) || { icon: '', label: video.status };
                   const isSelected = selectedIds.has(video.id);
                   return (
                     <tr
@@ -356,7 +381,7 @@ export default function VideoTable({
                             />
                           )}
                           <a
-                            href={video.url}
+                            href={video.url ?? undefined}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="video-link"

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getVideosInRange } from '../lib/directus.js';
-import { generateAiNoteForVideo } from '../lib/fetcher.js';
-import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.js';
-import { useT } from '../lib/i18n.jsx';
-import { useMessage } from '../lib/useMessage.js';
-import { DEFAULT_TIMEZONE } from '../lib/constants.js';
+import { getVideosInRange } from '../lib/directus.ts';
+import { generateAiNoteForVideo } from '../lib/fetcher.ts';
+import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.ts';
+import { useT } from '../lib/i18n.tsx';
+import { useMessage } from '../lib/useMessage.ts';
+import { DEFAULT_TIMEZONE } from '../lib/constants.ts';
+import type { Video, SelectedVideo } from '../types.ts';
 
 const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
 
-function todayValue() {
+function todayValue(): string {
   const now = new Date();
   return [
     now.getFullYear(),
@@ -17,17 +18,17 @@ function todayValue() {
   ].join('-');
 }
 
-function shiftDate(dateStr, delta) {
+function shiftDate(dateStr: string, delta: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + delta);
   return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
 }
 
-function defaultDateFrom() {
+function defaultDateFrom(): string {
   return shiftDate(todayValue(), -6);
 }
 
-function formatDateTime(iso) {
+function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '';
   return new Date(iso).toLocaleString('hu-HU', {
     year: 'numeric',
@@ -38,11 +39,11 @@ function formatDateTime(iso) {
   });
 }
 
-function channelLabel(video) {
+function channelLabel(video: Video): string {
   return video.channel_id?.name || video.channel_id?.channel_handle || '';
 }
 
-function listPreview(items, limit = 3) {
+function listPreview(items: string[] | null | undefined, limit = 3) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <ul className="daily-list">
@@ -51,15 +52,19 @@ function listPreview(items, limit = 3) {
   );
 }
 
-export default function DailyUpdatesPage({ onSelectVideo }) {
+interface DailyUpdatesPageProps {
+  onSelectVideo: (video: SelectedVideo) => void;
+}
+
+export default function DailyUpdatesPage({ onSelectVideo }: DailyUpdatesPageProps) {
   const { t } = useT();
   const [dateFrom, setDateFrom] = useState(defaultDateFrom());
   const [dateTo, setDateTo] = useState(todayValue());
-  const [videos, setVideos] = useState([]);
+  const [videos, setVideos] = useState<Video[]>([]);
   const [filter, setFilter] = useState('all');
   const [titleSearch, setTitleSearch] = useState('');
   const [loading, setLoading] = useState(false);
-  const [busyId, setBusyId] = useState(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const { msg, showMsg } = useMessage();
 
   async function load() {
@@ -67,7 +72,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
     try {
       setVideos(await getVideosInRange(dateFrom, dateTo, LOCAL_TIMEZONE));
     } catch (e) {
-      showMsg(t('msg.errDaily', { error: e.message }), true);
+      showMsg(t('msg.errDaily', { error: (e as Error).message }), true);
     } finally {
       setLoading(false);
     }
@@ -89,14 +94,14 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
     return result;
   }, [videos, filter, titleSearch]);
 
-  async function handleGenerateAi(video) {
+  async function handleGenerateAi(video: Video) {
     setBusyId(video.id);
     try {
       await generateAiNoteForVideo(video.id);
       showMsg(t('msg.aiQueued', { count: 1 }));
       await load();
     } catch (e) {
-      showMsg(t('msg.errAi', { error: e.message }), true);
+      showMsg(t('msg.errAi', { error: (e as Error).message }), true);
     } finally {
       setBusyId(null);
     }
@@ -153,7 +158,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
                 />
               )}
               <div className="daily-video-main">
-                <a href={video.url} target="_blank" rel="noopener noreferrer" className="daily-video-title">
+                <a href={video.url ?? undefined} target="_blank" rel="noopener noreferrer" className="daily-video-title">
                   {video.title || t('state.unknownTitle')}
                 </a>
                 <div className="daily-video-meta">
@@ -169,7 +174,7 @@ export default function DailyUpdatesPage({ onSelectVideo }) {
                 ) : (
                   <p className="daily-summary daily-muted">{t('state.noAiSummary')}</p>
                 )}
-                {video.topics?.length > 0 && (
+                {video.topics && video.topics.length > 0 && (
                   <div className="topic-row">
                     {video.topics.slice(0, 6).map(topic => <span key={topic}>{topic}</span>)}
                   </div>

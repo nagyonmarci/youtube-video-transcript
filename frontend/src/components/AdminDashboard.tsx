@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { getAdminStats, getChannelCoverage, getMonthlyVideoCounts } from '../lib/directus.js';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { getAdminStats, getChannelCoverage, getMonthlyVideoCounts } from '../lib/directus.ts';
 import {
   deleteJob,
   generateAiNotes,
@@ -19,27 +19,28 @@ import {
   stopWhisper,
   updateAppSettings,
   updateSchedule,
-} from '../lib/fetcher.js';
-import ChannelAdminPanel from './ChannelAdminPanel.jsx';
-import TopActions from './TopActions.jsx';
-import ScheduleForm from './ScheduleForm.jsx';
-import SettingsForm from './SettingsForm.jsx';
-import StatisticsPanel from './StatisticsPanel.jsx';
-import CollapsibleSection from './CollapsibleSection.jsx';
-import { useT } from '../lib/i18n.jsx';
-import { keepIfSame } from '../lib/dataUtils.js';
-import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
-import { useMessage } from '../lib/useMessage.js';
-import { POLL_INTERVAL_MS, DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.js';
+} from '../lib/fetcher.ts';
+import ChannelAdminPanel from './ChannelAdminPanel.tsx';
+import TopActions from './TopActions.tsx';
+import ScheduleForm from './ScheduleForm.tsx';
+import SettingsForm from './SettingsForm.tsx';
+import StatisticsPanel from './StatisticsPanel.tsx';
+import CollapsibleSection from './CollapsibleSection.tsx';
+import { useT } from '../lib/i18n.tsx';
+import { keepIfSame } from '../lib/dataUtils.ts';
+import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.ts';
+import { useMessage } from '../lib/useMessage.ts';
+import { POLL_INTERVAL_MS, DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.ts';
+import type { Channel, Job, AppSettings, AdminStats, ChannelCoverageMaps, MonthlyVideoCount, FetcherStatus, WhisperStatus, CurrentTask, QueueCounts, JobMetrics, OllamaStatus } from '../types.ts';
 
-function formatProgress(current, total) {
+function formatProgress(current: number | null | undefined, total: number | null | undefined): string {
   const cur = Number(current || 0);
   const max = Number(total || 0);
   if (!cur || !max) return '';
   return `${cur}/${max} (${Math.round((cur / max) * 100)}%)`;
 }
 
-function normalizeSettings(settings = {}) {
+function normalizeSettings(settings: Partial<AppSettings> = {}): AppSettings {
   return {
     ollama_base_url: settings.ollama_base_url || 'http://host.docker.internal:11434',
     ollama_chat_model: settings.ollama_chat_model || 'gemma4:31b-mlx-bf16',
@@ -77,20 +78,25 @@ function normalizeSettings(settings = {}) {
 const SECTION_IDS = ['statistics', 'processing', 'schedule', 'setup', 'quickActions', 'channelAdmin'];
 const SECTION_STORAGE_KEY = 'yt_admin_sections';
 
-function loadSectionPrefs() {
+interface SectionPrefs {
+  order: string[];
+  collapsed: Record<string, boolean>;
+}
+
+function loadSectionPrefs(): SectionPrefs {
   let raw = null;
   try { raw = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || 'null'); } catch { raw = null; }
-  const savedOrder = Array.isArray(raw?.order) ? raw.order.filter(id => SECTION_IDS.includes(id)) : [];
+  const savedOrder: string[] = Array.isArray(raw?.order) ? raw.order.filter((id: string) => SECTION_IDS.includes(id)) : [];
   const order = [...savedOrder, ...SECTION_IDS.filter(id => !savedOrder.includes(id))];
   const collapsed = { ...Object.fromEntries(SECTION_IDS.map(id => [id, true])), ...(raw?.collapsed || {}) };
   return { order, collapsed };
 }
 
-function saveSectionPrefs(prefs) {
+function saveSectionPrefs(prefs: SectionPrefs): void {
   try { localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(prefs)); } catch {}
 }
 
-function formatBytes(value) {
+function formatBytes(value: number | null | undefined): string {
   const bytes = Number(value || 0);
   if (!bytes) return '-';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -98,8 +104,22 @@ function formatBytes(value) {
   return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
-  const aiQueue = fetcherStatus?.queues?.ai || {};
+interface AiStatusResult {
+  tone: string;
+  title: string;
+  detail: string;
+}
+
+interface AiStatusArgs {
+  appSettings: AppSettings;
+  fetcherStatus: FetcherStatus | null;
+  jobs: Job[];
+  missingAiNotes: number;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+}
+
+function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }: AiStatusArgs): AiStatusResult {
+  const aiQueue: Partial<QueueCounts> = fetcherStatus?.queues?.ai || {};
   const aiQueueSize = Number(aiQueue.queued ?? fetcherStatus?.ai_queue_size ?? 0);
   const actualRunning = Number(aiQueue.running ?? 0);
   const workerConcurrency = Number(fetcherStatus?.workers?.ai_concurrency ?? fetcherStatus?.resources?.ai_worker_concurrency ?? 0);
@@ -182,7 +202,18 @@ function getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t }) {
   };
 }
 
-function StatusLine({ title, queueSize, queueStats, workerCount, current, stopped, onStop, onStart }) {
+interface StatusLineProps {
+  title: string;
+  queueSize?: number;
+  queueStats?: Partial<QueueCounts>;
+  workerCount?: number;
+  current?: CurrentTask;
+  stopped?: boolean;
+  onStop?: () => void;
+  onStart?: () => void;
+}
+
+function StatusLine({ title, queueSize, queueStats, workerCount, current, stopped, onStop, onStart }: StatusLineProps) {
   const { t } = useT();
   const queued = Number(queueStats?.queued ?? queueSize ?? 0);
   const running = Number(queueStats?.running ?? (current?.type ? 1 : 0));
@@ -214,8 +245,8 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, stoppe
         {progressText && (
           <progress
             className="job-progress"
-            value={Number(current.progress_current || 0)}
-            max={Number(current.progress_total || 1)}
+            value={Number(current?.progress_current || 0)}
+            max={Number(current?.progress_total || 1)}
           />
         )}
       </div>
@@ -228,7 +259,7 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, stoppe
   );
 }
 
-function formatJobTime(value) {
+function formatJobTime(value: string | null | undefined): string {
   if (!value) return '';
   return new Date(value).toLocaleString('hu-HU', {
     month: '2-digit',
@@ -238,7 +269,7 @@ function formatJobTime(value) {
   });
 }
 
-function formatDuration(seconds) {
+function formatDuration(seconds: number | null | undefined): string {
   const total = Number(seconds || 0);
   if (!total) return '';
   const hours = Math.floor(total / 3600);
@@ -249,39 +280,45 @@ function formatDuration(seconds) {
   return `${secs}s`;
 }
 
-function jobRuntimeSeconds(job) {
+function jobRuntimeSeconds(job: Job): number {
   if (job.duration_seconds) return Number(job.duration_seconds);
   if (!job.started_at) return 0;
   const end = job.finished_at ? new Date(job.finished_at) : new Date();
   return Math.max(0, Math.round((end.getTime() - new Date(job.started_at).getTime()) / 1000));
 }
 
-function formatMetricSeconds(value) {
-  if (value === null || value === undefined || value === '') return '-';
+function formatMetricSeconds(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '-';
   const number = Number(value);
   if (!Number.isFinite(number)) return '-';
   return `${number.toFixed(number >= 10 ? 1 : 2)}s`;
 }
 
-function aiBottleneck(metrics) {
+function aiBottleneck(metrics: JobMetrics | null | undefined): { phase: string; seconds: number } | '' {
   if (!metrics) return '';
-  const phases = [
+  const phases = ([
     ['load', Number(metrics.ollama_load_seconds || 0)],
     ['firstToken', Number(metrics.first_token_seconds || 0)],
     ['prompt', Number(metrics.prompt_eval_seconds || 0)],
     ['generate', Number(metrics.eval_seconds || 0)],
     ['parse', Number(metrics.json_parse_seconds || 0)],
-  ].filter(([, value]) => value > 0);
+  ] as [string, number][]).filter(([, value]) => value > 0);
   if (!phases.length) return '';
   const [phase, seconds] = phases.sort((a, b) => b[1] - a[1])[0];
   return { phase, seconds };
 }
 
-function JobQueuePanel({ jobs, onAction, busy }) {
+interface JobQueuePanelProps {
+  jobs: Job[];
+  onAction: (action: () => Promise<unknown>) => Promise<void>;
+  busy: boolean;
+}
+
+function JobQueuePanel({ jobs, onAction, busy }: JobQueuePanelProps) {
   const { t } = useT();
   const [showCompleted, setShowCompleted] = useState(false);
 
-  const JOB_STATUS_LABELS = {
+  const JOB_STATUS_LABELS: Record<string, string> = {
     queued: t('status.queued'),
     running: t('status.running'),
     paused: t('status.paused'),
@@ -393,7 +430,7 @@ function JobQueuePanel({ jobs, onAction, busy }) {
             })}
             {visibleJobs.length === 0 && (
               <tr>
-                <td colSpan="5" className="admin-empty">{t('state.noJobs')}</td>
+                <td colSpan={5} className="admin-empty">{t('state.noJobs')}</td>
               </tr>
             )}
           </tbody>
@@ -403,6 +440,15 @@ function JobQueuePanel({ jobs, onAction, busy }) {
   );
 }
 
+interface AdminDashboardProps {
+  channels: Channel[];
+  selectedChannel: Channel | null;
+  fetcherStatus: FetcherStatus | null;
+  whisperStatus: WhisperStatus | null;
+  onChannelsChanged: () => Promise<void> | void;
+  onStatusChanged?: () => Promise<void> | void;
+}
+
 export default function AdminDashboard({
   channels,
   selectedChannel,
@@ -410,11 +456,11 @@ export default function AdminDashboard({
   whisperStatus,
   onChannelsChanged,
   onStatusChanged,
-}) {
+}: AdminDashboardProps) {
   const { t } = useT();
-  const [stats, setStats] = useState(null);
-  const [coverage, setCoverage] = useState(null);
-  const [monthlyData, setMonthlyData] = useState([]);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [coverage, setCoverage] = useState<ChannelCoverageMaps | null>(null);
+  const [monthlyData, setMonthlyData] = useState<MonthlyVideoCount[]>([]);
   const [scheduleCron, setScheduleCron] = useState(DEFAULT_CRON);
   const [scheduleTime, setScheduleTime] = useState(DEFAULT_CRON_TIME);
   const [scheduleTimezone, setScheduleTimezone] = useState(DEFAULT_TIMEZONE);
@@ -422,24 +468,24 @@ export default function AdminDashboard({
   const [settingsDraft, setSettingsDraft] = useState(() => normalizeSettings());
   const [settingsDirty, setSettingsDirty] = useState(false);
   const settingsDirtyRef = useRef(false);
-  const [jobs, setJobs] = useState([]);
-  const [resourceSnapshot, setResourceSnapshot] = useState(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [resourceSnapshot, setResourceSnapshot] = useState<FetcherStatus['resources'] | null>(null);
   const [busy, setBusy] = useState(false);
   const [sectionPrefs, setSectionPrefs] = useState(loadSectionPrefs);
-  const [draggedSectionId, setDraggedSectionId] = useState(null);
-  const [dragOverSectionId, setDragOverSectionId] = useState(null);
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
   const { msg, showMsg } = useMessage();
 
   useEffect(() => { saveSectionPrefs(sectionPrefs); }, [sectionPrefs]);
 
-  function toggleSection(id) {
+  function toggleSection(id: string) {
     setSectionPrefs(prev => ({ ...prev, collapsed: { ...prev.collapsed, [id]: !prev.collapsed[id] } }));
   }
-  function handleSectionDragStart(id) { setDraggedSectionId(id); }
+  function handleSectionDragStart(id: string) { setDraggedSectionId(id); }
   function handleSectionDragEnd() { setDraggedSectionId(null); setDragOverSectionId(null); }
-  function handleSectionDragOver(id) { setDragOverSectionId(id); }
+  function handleSectionDragOver(id: string) { setDragOverSectionId(id); }
   function handleSectionDragLeave() { setDragOverSectionId(null); }
-  function handleSectionDrop(targetId) {
+  function handleSectionDrop(targetId: string) {
     const draggedId = draggedSectionId;
     setDraggedSectionId(null);
     setDragOverSectionId(null);
@@ -475,7 +521,7 @@ export default function AdminDashboard({
       setAppSettings(normalizedSettings);
       if (!settingsDirtyRef.current) setSettingsDraft(normalizedSettings);
     } catch (e) {
-      showMsg(t('msg.errAdmin', { error: e.message }), true);
+      showMsg(t('msg.errAdmin', { error: (e as Error).message }), true);
     }
   }
 
@@ -487,8 +533,8 @@ export default function AdminDashboard({
 
   useEffect(() => {
     let alive = true;
-    let fallbackInterval = null;
-    let stream = null;
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+    let stream: EventSource | null = null;
 
     async function loadResources() {
       try {
@@ -531,24 +577,24 @@ export default function AdminDashboard({
     };
   }, []);
 
-  async function runAction(action, successText) {
+  async function runAction<T>(action: () => Promise<T>, successText: string | ((result: T) => string)) {
     setBusy(true);
     try {
       const result = await action();
       showMsg(typeof successText === 'function' ? successText(result) : successText);
       await Promise.all([loadAdminData(), onStatusChanged?.()]);
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function runJobAction(action) {
+  async function runJobAction(action: () => Promise<unknown>) {
     await runAction(action, t('msg.queueRefreshed'));
   }
 
-  async function saveSchedule(e) {
+  async function saveSchedule(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     await runAction(
       () => updateSchedule(dailyTimeToCron(scheduleTime), scheduleTimezone),
@@ -556,13 +602,13 @@ export default function AdminDashboard({
     );
   }
 
-  function updateSettingsDraft(field, value) {
+  function updateSettingsDraft(field: keyof AppSettings, value: string | number | boolean) {
     settingsDirtyRef.current = true;
     setSettingsDirty(true);
     setSettingsDraft(prev => ({ ...prev, [field]: value }));
   }
 
-  async function saveAppSettings(e) {
+  async function saveAppSettings(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     await runAction(
       () => updateAppSettings(settingsDraft),
@@ -579,21 +625,21 @@ export default function AdminDashboard({
   const aiStatus = getAiStatus({ appSettings, fetcherStatus, jobs, missingAiNotes, t });
   const aiBatchLimit = Number(appSettings.ai_notes_batch_limit || 10);
   const aiCanStart = missingAiNotes > 0;
-  const resourceStatus = resourceSnapshot || fetcherStatus?.resources || {};
-  const ollamaStatus = resourceStatus.ollama || {};
+  const resourceStatus: Partial<FetcherStatus['resources']> = resourceSnapshot || fetcherStatus?.resources || {};
+  const ollamaStatus: Partial<OllamaStatus> = resourceStatus.ollama || {};
   const ollamaModels = ollamaStatus.models || [];
   const primaryOllamaModel = ollamaModels[0];
   const processorPercent = primaryOllamaModel?.processor_percent;
   const sampledAt = ollamaStatus.sampled_at ? new Date(ollamaStatus.sampled_at).toLocaleTimeString('hu-HU') : '-';
-  const fetchQueue = fetcherStatus?.queues?.fetch || {};
-  const quickQueue = fetcherStatus?.queues?.quick || {};
-  const aiQueue = fetcherStatus?.queues?.ai || resourceStatus.ai_queue || {};
+  const fetchQueue: Partial<QueueCounts> = fetcherStatus?.queues?.fetch || {};
+  const quickQueue: Partial<QueueCounts> = fetcherStatus?.queues?.quick || {};
+  const aiQueue: Partial<QueueCounts> = fetcherStatus?.queues?.ai || resourceStatus.ai_queue || {};
   const fetchWorkers = fetcherStatus?.workers?.fetch_concurrency;
   const quickWorkers = fetcherStatus?.workers?.quick_concurrency;
   const aiWorkers = fetcherStatus?.workers?.ai_concurrency ?? resourceStatus.ai_worker_concurrency;
-  const stoppedQueues = fetcherStatus?.stopped_queues || {};
+  const stoppedQueues: Partial<{ fetch: boolean; quick: boolean; ai: boolean }> = fetcherStatus?.stopped_queues || {};
 
-  function getSectionConfig(id) {
+  function getSectionConfig(id: string): { title?: ReactNode; subtitle?: ReactNode; headerExtra?: ReactNode; body?: ReactNode } {
     switch (id) {
       case 'statistics':
         return {
@@ -615,9 +661,9 @@ export default function AdminDashboard({
                 disabled={busy}
                 onClick={() => runAction(
                   () => generateAiNotes(),
-                  result => result?.existing
-                    ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                    : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
+                  result => !result.queued
+                    ? t('msg.aiBatchRunning', { jobId: result.job_id.slice(0, 8) })
+                    : t('msg.aiQueued', { count: result.limit ?? aiBatchLimit })
                 )}
               >
                 {t('header.aiNotes')}
@@ -686,9 +732,9 @@ export default function AdminDashboard({
                       disabled={busy || !aiCanStart}
                       onClick={() => runAction(
                         () => generateAiNotes(),
-                        result => result?.existing
-                          ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                          : t('msg.aiQueued', { count: result?.limit ?? aiBatchLimit })
+                        result => !result.queued
+                          ? t('msg.aiBatchRunning', { jobId: result.job_id.slice(0, 8) })
+                          : t('msg.aiQueued', { count: result.limit ?? aiBatchLimit })
                       )}
                     >
                       {t('btn.generateMissing')}

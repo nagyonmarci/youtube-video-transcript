@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.js';
-import { updateVideoFields } from '../lib/directus.js';
-import { useT } from '../lib/i18n.jsx';
-import { formatDuration, formatDate } from '../lib/formatUtils.js';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { Markmap } from 'markmap-view';
+import { videoToTxt, videoToMd, videoToObsidianMd, obsidianFilename, videoToMarkmapMd, markmapFilename, downloadFile, sanitizeFilename } from '../lib/export.ts';
+import { updateVideoFields } from '../lib/directus.ts';
+import { useT } from '../lib/i18n.tsx';
+import { formatDuration, formatDate } from '../lib/formatUtils.ts';
+import type { SelectedVideo } from '../types.ts';
 
-function renderList(items) {
+function renderList(items: string[] | null | undefined) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <ul style={{ margin: '0.35rem 0 0.8rem', paddingLeft: '1.2rem', color: '#ddd', lineHeight: 1.55 }}>
@@ -13,44 +15,57 @@ function renderList(items) {
   );
 }
 
-export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
+interface AiEditDraft {
+  summary: string;
+  topics: string;
+  takeaways: string;
+  questions: string;
+}
+
+interface TranscriptModalProps {
+  video: SelectedVideo;
+  onClose: () => void;
+  onVideoUpdated?: () => void;
+}
+
+export default function TranscriptModal({ video, onClose, onVideoUpdated }: TranscriptModalProps) {
   const { t } = useT();
   const [showTimed, setShowTimed] = useState(false);
   const [activeTab, setActiveTab] = useState('transcript');
-  const [localVideo, setLocalVideo] = useState(video);
+  const [localVideo, setLocalVideo] = useState<SelectedVideo | null>(video);
   const [editingQuick, setEditingQuick] = useState(false);
   const [quickEdit, setQuickEdit] = useState('');
   const [quickSaving, setQuickSaving] = useState(false);
-  const [quickSaveMsg, setQuickSaveMsg] = useState(null);
+  const [quickSaveMsg, setQuickSaveMsg] = useState<string | null>(null);
   const [editingAi, setEditingAi] = useState(false);
-  const [aiEdit, setAiEdit] = useState({});
+  const [aiEdit, setAiEdit] = useState<AiEditDraft>({ summary: '', topics: '', takeaways: '', questions: '' });
   const [aiSaving, setAiSaving] = useState(false);
-  const [aiSaveMsg, setAiSaveMsg] = useState(null);
+  const [aiSaveMsg, setAiSaveMsg] = useState<string | null>(null);
   const [editingTranscript, setEditingTranscript] = useState(false);
   const [transcriptEdit, setTranscriptEdit] = useState('');
   const [transcriptSaving, setTranscriptSaving] = useState(false);
-  const svgRef = useRef(null);
-  const markmapRef = useRef(null);
-  const closeButtonRef = useRef(null);
-  const dialogRef = useRef(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const markmapRef = useRef<Markmap | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setLocalVideo(video); }, [video]);
 
   useEffect(() => {
-    const previousFocus = document.activeElement;
+    const previousFocus = document.activeElement as HTMLElement | null;
     closeButtonRef.current?.focus();
     return () => previousFocus?.focus();
   }, []);
 
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    const handler = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  function handleDialogKeyDown(e) {
+  function handleDialogKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key !== 'Tab') return;
-    const focusable = dialogRef.current?.querySelectorAll(
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
     );
     if (!focusable || focusable.length === 0) return;
@@ -64,14 +79,14 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
   }
 
   useEffect(() => {
-    if (activeTab !== 'mindmap' || !svgRef.current) return;
+    if (activeTab !== 'mindmap' || !svgRef.current || !localVideo) return;
     let cancelled = false;
     (async () => {
       const [{ Transformer }, { Markmap }] = await Promise.all([
         import('markmap-lib'),
         import('markmap-view'),
       ]);
-      if (cancelled || !svgRef.current) return;
+      if (cancelled || !svgRef.current || !localVideo) return;
       const { root } = new Transformer().transform(videoToMarkmapMd(localVideo));
       svgRef.current.innerHTML = '';
       markmapRef.current = Markmap.create(svgRef.current, { duration: 0 }, root);
@@ -80,30 +95,33 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
   }, [activeTab, video]);
 
   function startEditQuick() {
+    if (!localVideo) return;
     setQuickEdit(localVideo.quick_summary || '');
     setEditingQuick(true);
     setQuickSaveMsg(null);
   }
 
   async function handleSaveQuick() {
+    if (!localVideo) return;
     setQuickSaving(true);
     setQuickSaveMsg(null);
     try {
       const trimmed = quickEdit.trim();
       await updateVideoFields(localVideo.id, { quick_summary: trimmed });
-      setLocalVideo(prev => ({ ...prev, quick_summary: trimmed }));
+      setLocalVideo(prev => prev && { ...prev, quick_summary: trimmed });
       setEditingQuick(false);
       setQuickSaveMsg(t('msg.saved'));
       setTimeout(() => setQuickSaveMsg(null), 2500);
       onVideoUpdated?.();
     } catch (err) {
-      setQuickSaveMsg(t('msg.errGeneric', { error: err.message }));
+      setQuickSaveMsg(t('msg.errGeneric', { error: (err as Error).message }));
     } finally {
       setQuickSaving(false);
     }
   }
 
   function startEditAi() {
+    if (!localVideo) return;
     setAiEdit({
       summary: localVideo.summary || '',
       topics: Array.isArray(localVideo.topics) ? localVideo.topics.join('\n') : (localVideo.topics || ''),
@@ -115,6 +133,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
   }
 
   async function handleSaveAi() {
+    if (!localVideo) return;
     setAiSaving(true);
     setAiSaveMsg(null);
     const fields = {
@@ -125,30 +144,31 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
     };
     try {
       await updateVideoFields(localVideo.id, fields);
-      setLocalVideo(prev => ({ ...prev, ...fields }));
+      setLocalVideo(prev => prev && { ...prev, ...fields });
       setEditingAi(false);
       setAiSaveMsg(t('msg.saved'));
       setTimeout(() => setAiSaveMsg(null), 2500);
       onVideoUpdated?.();
     } catch (err) {
-      setAiSaveMsg(t('msg.errGeneric', { error: err.message }));
+      setAiSaveMsg(t('msg.errGeneric', { error: (err as Error).message }));
     } finally {
       setAiSaving(false);
     }
   }
 
   async function handleSaveTranscript() {
+    if (!localVideo) return;
     setTranscriptSaving(true);
     try {
       const fields = showTimed
         ? { transcript_timed: transcriptEdit }
         : { transcript: transcriptEdit };
       await updateVideoFields(localVideo.id, fields);
-      setLocalVideo(prev => ({ ...prev, ...fields }));
+      setLocalVideo(prev => prev && { ...prev, ...fields });
       setEditingTranscript(false);
       onVideoUpdated?.();
     } catch (err) {
-      alert(t('msg.errSave', { error: err.message }));
+      alert(t('msg.errSave', { error: (err as Error).message }));
     } finally {
       setTranscriptSaving(false);
     }
@@ -213,7 +233,7 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
               <div style={{ minWidth: 0 }}>
                 <a
                   id="transcript-modal-title"
-                  href={video.url}
+                  href={video.url ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: '#64b5f6', textDecoration: 'none', fontWeight: 700, fontSize: '1rem' }}
@@ -418,11 +438,11 @@ export default function TranscriptModal({ video, onClose, onVideoUpdated }) {
                           {localVideo.summary}
                         </p>
                       )}
-                      {localVideo.topics?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.topics')}</h4>}
+                      {(localVideo.topics?.length ?? 0) > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.topics')}</h4>}
                       {renderList(localVideo.topics)}
-                      {localVideo.takeaways?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.takeaways')}</h4>}
+                      {(localVideo.takeaways?.length ?? 0) > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.takeaways')}</h4>}
                       {renderList(localVideo.takeaways)}
-                      {localVideo.questions?.length > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.questions')}</h4>}
+                      {(localVideo.questions?.length ?? 0) > 0 && <h4 style={{ fontSize: '0.8rem', color: '#aaa' }}>{t('label.questions')}</h4>}
                       {renderList(localVideo.questions)}
                       {localVideo.study_guide && (
                         <>

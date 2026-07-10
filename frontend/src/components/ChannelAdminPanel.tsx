@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { deleteChannel, updateChannel } from '../lib/directus.js';
-import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
-import { useT } from '../lib/i18n.jsx';
-import { useMessage } from '../lib/useMessage.js';
+import { deleteChannel, updateChannel } from '../lib/directus.ts';
+import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.ts';
+import { useT } from '../lib/i18n.tsx';
+import { useMessage } from '../lib/useMessage.ts';
+import type { Channel } from '../types.ts';
 
-function editableChannel(ch) {
+interface EditableChannel {
+  name: string;
+  topic: string;
+  channel_url: string;
+  channel_handle: string;
+  status: string;
+}
+
+function editableChannel(ch: Channel): EditableChannel {
   return {
     name: ch.name || '',
     topic: ch.topic || '',
@@ -14,7 +23,12 @@ function editableChannel(ch) {
   };
 }
 
-export default function ChannelAdminPanel({ channels, onChanged }) {
+interface ChannelAdminPanelProps {
+  channels: Channel[];
+  onChanged: () => Promise<void> | void;
+}
+
+export default function ChannelAdminPanel({ channels, onChanged }: ChannelAdminPanelProps) {
   const { t } = useT();
 
   const STATUS_OPTIONS = [
@@ -25,12 +39,12 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
   ];
 
   const [search, setSearch] = useState('');
-  const [drafts, setDrafts] = useState(() => Object.fromEntries(
+  const [drafts, setDrafts] = useState<Record<string, EditableChannel>>(() => Object.fromEntries(
     channels.map(ch => [ch.id, editableChannel(ch)])
   ));
   useEffect(() => {
     setDrafts(prev => {
-      const next = {};
+      const next: Record<string, EditableChannel> = {};
       channels.forEach(ch => {
         next[ch.id] = {
           ...editableChannel(ch),
@@ -41,7 +55,7 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
     });
   }, [channels]);
 
-  const [busyId, setBusyId] = useState(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const { msg, showMsg } = useMessage();
 
   const filtered = useMemo(() => {
@@ -54,7 +68,7 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
     ));
   }, [channels, search]);
 
-  function updateDraft(id, field, value) {
+  function updateDraft(id: string, field: keyof EditableChannel, value: string) {
     setDrafts(prev => ({
       ...prev,
       [id]: {
@@ -64,7 +78,7 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
     }));
   }
 
-  async function handleSave(ch) {
+  async function handleSave(ch: Channel) {
     setBusyId(ch.id);
     try {
       const draft = {
@@ -76,44 +90,44 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
         topic: draft.topic.trim(),
         channel_url: draft.channel_url.trim(),
         channel_handle: draft.channel_handle.trim(),
-        status: draft.status,
+        status: draft.status as Channel['status'],
       });
       showMsg(t('msg.channelSaved'));
       await onChanged();
     } catch (e) {
-      showMsg(t('msg.errSave', { error: e.message }), true);
+      showMsg(t('msg.errSave', { error: (e as Error).message }), true);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function handleRefresh(ch) {
+  async function handleRefresh(ch: Channel) {
     setBusyId(ch.id);
     try {
       await refreshChannel(ch.id);
       showMsg(t('msg.refreshQueued'));
       await onChanged();
     } catch (e) {
-      showMsg(t('msg.errRefresh', { error: e.message }), true);
+      showMsg(t('msg.errRefresh', { error: (e as Error).message }), true);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function handleGenerateChannelAi(ch) {
+  async function handleGenerateChannelAi(ch: Channel) {
     setBusyId(ch.id);
     try {
       const result = await generateAiNotesForChannel(ch.id);
       showMsg(t('msg.aiQueued', { count: result.count }));
       await onChanged();
     } catch (e) {
-      showMsg(t('msg.errAi', { error: e.message }), true);
+      showMsg(t('msg.errAi', { error: (e as Error).message }), true);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function handleDelete(ch) {
+  async function handleDelete(ch: Channel) {
     if (!confirm(t('confirm.deleteChannel', { name: ch.name || ch.channel_handle || ch.channel_url }))) return;
     setBusyId(ch.id);
     try {
@@ -121,7 +135,7 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
       showMsg(t('msg.channelDeleted'));
       await onChanged();
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusyId(null);
     }
@@ -211,7 +225,7 @@ export default function ChannelAdminPanel({ channels, onChanged }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="7" className="admin-empty">{t('state.noResults')}</td>
+                <td colSpan={7} className="admin-empty">{t('state.noResults')}</td>
               </tr>
             )}
           </tbody>

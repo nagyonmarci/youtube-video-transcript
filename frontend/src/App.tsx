@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getChannels, getVideos, getAllVideos, getTotalVideoCount } from './lib/directus.js';
-import ChannelGrid from './components/ChannelGrid.jsx';
-import VideoTable from './components/VideoTable.jsx';
-import TranscriptModal from './components/TranscriptModal.jsx';
-import AppHeader from './components/AppHeader.jsx';
-import { useAppStatus } from './lib/useAppStatus.js';
-import { I18nProvider, useT } from './lib/i18n.jsx';
-import { sameData, keepIfSame } from './lib/dataUtils.js';
-import { useTheme } from './lib/useTheme.js';
-import { useToasts } from './lib/useToasts.js';
-import ToastStack from './components/ToastStack.jsx';
-import { POLL_INTERVAL_MS } from './lib/constants.js';
-import { readUrlFilters } from './lib/urlFilters.js';
+import { getChannels, getVideos, getAllVideos, getTotalVideoCount } from './lib/directus.ts';
+import ChannelGrid from './components/ChannelGrid.tsx';
+import VideoTable from './components/VideoTable.tsx';
+import TranscriptModal from './components/TranscriptModal.tsx';
+import AppHeader from './components/AppHeader.tsx';
+import { useAppStatus } from './lib/useAppStatus.ts';
+import { I18nProvider, useT } from './lib/i18n.tsx';
+import { sameData, keepIfSame } from './lib/dataUtils.ts';
+import { useTheme } from './lib/useTheme.ts';
+import { useToasts } from './lib/useToasts.ts';
+import ToastStack from './components/ToastStack.tsx';
+import { POLL_INTERVAL_MS } from './lib/constants.ts';
+import { readUrlFilters } from './lib/urlFilters.ts';
+import type { Channel, Video, SelectedVideo } from './types.ts';
 
 function AppInner() {
   const { t, lang, setLanguage } = useT();
@@ -19,9 +20,9 @@ function AppInner() {
   const tRef = useRef(t);
   tRef.current = t;
 
-  const [channels, setChannels] = useState([]);
-  const [selectedChannel, setSelectedChannel] = useState(null);
-  const [videos, setVideos] = useState([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+  const [videos, setVideos] = useState<Video[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [allVideosCount, setAllVideosCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -31,12 +32,12 @@ function AppInner() {
   const [statusFilter, setStatusFilter] = useState(initialFilters.statusFilter);
   const [aiFilter, setAiFilter] = useState(initialFilters.aiFilter);
   const [membersFilter, setMembersFilter] = useState(initialFilters.membersFilter);
-  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const { toasts, addToast, removeToast } = useToasts();
   const [showScrollTop, setShowScrollTop] = useState(false);
-  const appContentRef = useRef(null);
+  const appContentRef = useRef<HTMLDivElement>(null);
   const prevFetcherRunning = useRef(false);
   const prevWhisperRunning = useRef(false);
   const selectedChannelId = selectedChannel?.id ?? null;
@@ -134,7 +135,7 @@ function AppInner() {
     };
   }, []);
 
-  function handleSelectChannel(ch) {
+  function handleSelectChannel(ch: Channel | null) {
     setSelectedChannel(ch);
     setVideos([]);
     setTotalCount(0);
@@ -145,35 +146,35 @@ function AppInner() {
     setMembersFilter('hide');
   }
 
-  function handleSearchChange(value) {
+  function handleSearchChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setSearch(value);
     setPage(1);
   }
 
-  function handleSortChange(newSort) {
+  function handleSortChange(newSort: string) {
     setVideos([]);
     setTotalCount(0);
     setSort(newSort);
     setPage(1);
   }
 
-  function handleStatusFilterChange(value) {
+  function handleStatusFilterChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setStatusFilter(value);
     setPage(1);
   }
 
-  function handleAiFilterChange(value) {
+  function handleAiFilterChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setAiFilter(value);
     setPage(1);
   }
 
-  function handleMembersFilterChange(value) {
+  function handleMembersFilterChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setMembersFilter(value);

@@ -1,4 +1,6 @@
-export default function ToastStack({ toasts, onDismiss }) {
+import type { Toast } from '../lib/useToasts.ts';
+
+export default function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
   if (toasts.length === 0) return null;
   return (
     <div style={{ position: 'fixed', bottom: '4.75rem', right: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', zIndex: 2000 }}>

@@ -2,27 +2,31 @@
  * Client-side export utilities for generating TXT/MD files from transcript data.
  */
 
-import { formatDuration as formatDurationOrDash, formatDate as formatDateOrDash } from './formatUtils.js';
+import { formatDuration as formatDurationOrDash, formatDate as formatDateOrDash } from './formatUtils.ts';
+import type { Video, Channel, VideoChannelRef, SelectedVideo } from '../types.ts';
 
-const formatDuration = seconds => formatDurationOrDash(seconds, '');
-const formatDate = iso => formatDateOrDash(iso, '');
+const formatDuration = (seconds: number | null | undefined) => formatDurationOrDash(seconds, '');
+const formatDate = (iso: string | null | undefined) => formatDateOrDash(iso, '');
 
-function isoDate(iso) {
+type ChannelLike = string | Channel | VideoChannelRef | null | undefined;
+type ChannelGroup = { channel: Channel; videos: Video[] };
+
+function isoDate(iso: string | null | undefined): string {
   if (!iso) return '';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
   return date.toISOString().slice(0, 10);
 }
 
-function transcriptForExport(video, timed = false) {
+function transcriptForExport(video: Video, timed = false): string {
   return (timed ? video.transcript_timed : video.transcript) || video.transcript || '(nincs transzkript)';
 }
 
-function yamlString(value) {
+function yamlString(value: unknown): string {
   return `"${String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-function slug(value) {
+function slug(value: unknown): string {
   return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -32,13 +36,13 @@ function slug(value) {
     .substring(0, 60) || 'youtube';
 }
 
-function youtubeTimestampUrl(video, seconds) {
+function youtubeTimestampUrl(video: Video, seconds: number | null): string {
   if (!video.url || seconds == null) return '';
   const separator = video.url.includes('?') ? '&' : '?';
   return `${video.url}${separator}t=${seconds}s`;
 }
 
-function timeToSeconds(raw) {
+function timeToSeconds(raw: string): number | null {
   const parts = raw.split(':').map(part => Number(part.split('.')[0]));
   if (parts.some(Number.isNaN)) return null;
   if (parts.length === 2) return parts[0] * 60 + parts[1];
@@ -46,7 +50,7 @@ function timeToSeconds(raw) {
   return null;
 }
 
-function obsidianTranscript(video, timed = true) {
+function obsidianTranscript(video: Video, timed = true): string {
   const transcript = transcriptForExport(video, timed);
   if (!timed) return transcript;
 
@@ -63,28 +67,28 @@ function obsidianTranscript(video, timed = true) {
   }).join('\n');
 }
 
-function channelName(channelOrName, fallback = 'Ismeretlen csatorna') {
+function channelName(channelOrName: ChannelLike, fallback = 'Ismeretlen csatorna'): string {
   if (!channelOrName) return fallback;
   if (typeof channelOrName === 'string') return channelOrName;
   return channelOrName?.name || channelOrName?.channel_handle || fallback;
 }
 
-function videoChannelName(video, fallback = '') {
+function videoChannelName(video: SelectedVideo, fallback = ''): string {
   if (video.channel?.name || video.channel?.channel_handle) return channelName(video.channel);
   if (video.channel_id?.name || video.channel_id?.channel_handle) return channelName(video.channel_id);
   return fallback;
 }
 
-function frontmatter(lines) {
+function frontmatter(lines: (string | false | null | undefined)[]): string {
   return ['---', ...lines.filter(Boolean), '---'].join('\n');
 }
 
-function listSection(title, items) {
+function listSection(title: string, items: string[] | null | undefined): string[] {
   if (!Array.isArray(items) || items.length === 0) return [];
   return [`## ${title}`, '', ...items.map(item => `- ${item}`), ''];
 }
 
-export function videoToTxt(video, { timed = false } = {}) {
+export function videoToTxt(video: Video, { timed = false } = {}): string {
   const lines = [];
   lines.push(`Cím: ${video.title || ''}`);
   lines.push(`URL: ${video.url || ''}`);
@@ -96,7 +100,7 @@ export function videoToTxt(video, { timed = false } = {}) {
   return lines.join('\n');
 }
 
-export function videoToMd(video, { timed = false } = {}) {
+export function videoToMd(video: Video, { timed = false } = {}): string {
   const lines = [];
   lines.push(`# ${video.title || 'Ismeretlen cím'}`);
   lines.push('');
@@ -109,7 +113,7 @@ export function videoToMd(video, { timed = false } = {}) {
   return lines.join('\n');
 }
 
-export function videoToObsidianMd(video, { channel = null, timed = true } = {}) {
+export function videoToObsidianMd(video: SelectedVideo, { channel = null, timed = true }: { channel?: ChannelLike; timed?: boolean } = {}): string {
   const title = video.title || 'Ismeretlen cím';
   const channelLabel = channelName(channel, '') || videoChannelName(video);
   const uploaded = isoDate(video.uploaded_at);
@@ -171,7 +175,7 @@ export function videoToObsidianMd(video, { channel = null, timed = true } = {}) 
   return lines.filter((line, index) => line !== '' || lines[index - 1] !== '').join('\n');
 }
 
-export function videoToMarkmapMd(video) {
+export function videoToMarkmapMd(video: Video): string {
   const title = video.title || 'Ismeretlen cím';
   const fm = '---\nmarkmap:\n  colorFreezeLevel: 2\n---';
 
@@ -187,10 +191,11 @@ export function videoToMarkmapMd(video) {
       lines.push('## Summary');
       video.summary.split(/(?<=[.!?])\s+/).filter(Boolean).forEach(s => lines.push(`- ${s.trim()}`));
     }
-    ['topics', 'takeaways', 'questions'].forEach(key => {
-      if (video[key]?.length) {
+    (['topics', 'takeaways', 'questions'] as const).forEach(key => {
+      const items = video[key];
+      if (items?.length) {
         lines.push(`## ${key.charAt(0).toUpperCase() + key.slice(1)}`);
-        video[key].forEach(t => lines.push(`- ${t}`));
+        items.forEach(t => lines.push(`- ${t}`));
       }
     });
     if (video.critique) {
@@ -205,14 +210,14 @@ export function videoToMarkmapMd(video) {
   return `${fm}\n\n${body}`;
 }
 
-export function markmapFilename(video, { channel = null } = {}) {
+export function markmapFilename(video: Video, { channel = null }: { channel?: ChannelLike } = {}): string {
   const uploaded = isoDate(video.uploaded_at);
   const prefix = uploaded ? `${uploaded}_` : '';
   const channelPart = channel ? `${sanitizeFilename(channelName(channel))}_` : '';
   return `${prefix}${channelPart}${sanitizeFilename(video.title || video.video_id || 'video')}_mindmap.md`;
 }
 
-export function channelToTxt(channelName, videos, options = {}) {
+export function channelToTxt(channelName: string, videos: Video[], options: { timed?: boolean } = {}): string {
   const parts = [`Csatorna: ${channelName}`, `Videók: ${videos.length}`, '', '='.repeat(60), ''];
   for (const video of videos) {
     parts.push(videoToTxt(video, options));
@@ -221,7 +226,7 @@ export function channelToTxt(channelName, videos, options = {}) {
   return parts.join('\n');
 }
 
-export function channelToMd(channelName, videos, options = {}) {
+export function channelToMd(channelName: string, videos: Video[], options: { timed?: boolean } = {}): string {
   const parts = [`# Csatorna: ${channelName}`, '', `*${videos.length} videó*`, '', '---', ''];
   for (const video of videos) {
     parts.push(videoToMd(video, options));
@@ -230,7 +235,7 @@ export function channelToMd(channelName, videos, options = {}) {
   return parts.join('\n');
 }
 
-export function channelToObsidianMd(channel, videos, options = {}) {
+export function channelToObsidianMd(channel: ChannelLike, videos: Video[], options: { timed?: boolean } = {}): string {
   const name = channelName(channel);
   const parts = [
     frontmatter([
@@ -262,7 +267,7 @@ export function channelToObsidianMd(channel, videos, options = {}) {
   return parts.join('\n');
 }
 
-export function allChannelsToTxt(channelGroups, options = {}) {
+export function allChannelsToTxt(channelGroups: ChannelGroup[], options: { timed?: boolean } = {}): string {
   const parts = [];
   for (const { channel, videos } of channelGroups) {
     parts.push(channelToTxt(channel.name || channel.channel_handle || 'Ismeretlen', videos, options));
@@ -271,7 +276,7 @@ export function allChannelsToTxt(channelGroups, options = {}) {
   return parts.join('\n');
 }
 
-export function allChannelsToMd(channelGroups, options = {}) {
+export function allChannelsToMd(channelGroups: ChannelGroup[], options: { timed?: boolean } = {}): string {
   const parts = [];
   for (const { channel, videos } of channelGroups) {
     parts.push(channelToMd(channel.name || channel.channel_handle || 'Ismeretlen', videos, options));
@@ -279,7 +284,7 @@ export function allChannelsToMd(channelGroups, options = {}) {
   return parts.join('\n');
 }
 
-export function allChannelsToObsidianMd(channelGroups, options = {}) {
+export function allChannelsToObsidianMd(channelGroups: ChannelGroup[], options: { timed?: boolean } = {}): string {
   const totalVideos = channelGroups.reduce((sum, group) => sum + group.videos.length, 0);
   const parts = [
     frontmatter([
@@ -311,9 +316,9 @@ export function allChannelsToObsidianMd(channelGroups, options = {}) {
   return parts.join('\n');
 }
 
-export function videosToCsv(videos) {
+export function videosToCsv(videos: Video[]): string {
   const cols = ['id', 'video_id', 'title', 'url', 'channel', 'uploaded_at', 'duration_seconds', 'status', 'ai_status', 'summary'];
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = videos.map(v => [
     v.id, v.video_id, v.title, v.url,
     v.channel_id?.name || v.channel_id?.channel_handle || '',
@@ -323,7 +328,7 @@ export function videosToCsv(videos) {
   return [cols.join(','), ...rows].join('\n');
 }
 
-export function videosToJson(videos) {
+export function videosToJson(videos: Video[]): string {
   return JSON.stringify(videos.map(v => ({
     id: v.id,
     video_id: v.video_id,
@@ -341,7 +346,7 @@ export function videosToJson(videos) {
   })), null, 2);
 }
 
-export function downloadFile(content, filename) {
+export function downloadFile(content: string, filename: string): void {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -351,11 +356,11 @@ export function downloadFile(content, filename) {
   URL.revokeObjectURL(url);
 }
 
-export function sanitizeFilename(name) {
+export function sanitizeFilename(name: string | null | undefined): string {
   return (name || 'export').replace(/[^a-zA-Z0-9_\-\.]/g, '_').substring(0, 80);
 }
 
-export function obsidianFilename(video, { channel = null } = {}) {
+export function obsidianFilename(video: Video, { channel = null }: { channel?: ChannelLike } = {}): string {
   const uploaded = isoDate(video.uploaded_at);
   const prefix = uploaded ? `${uploaded}_` : '';
   const channelPart = channel ? `${sanitizeFilename(channelName(channel))}_` : '';

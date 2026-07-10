@@ -1,30 +1,39 @@
-import { useState, useRef } from 'react';
-import { deleteChannel, getAllChannelVideos } from '../lib/directus.js';
-import { fetchChannels, fetchVideo, refreshChannel } from '../lib/fetcher.js';
+import { useState, useRef, type FormEvent, type ChangeEvent } from 'react';
+import { deleteChannel, getAllChannelVideos } from '../lib/directus.ts';
+import { fetchChannels, fetchVideo, refreshChannel } from '../lib/fetcher.ts';
 import {
   channelToTxt, channelToMd, channelToObsidianMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
   downloadFile, sanitizeFilename,
-} from '../lib/export.js';
-import { useT } from '../lib/i18n.jsx';
-import { parseChannelFile } from '../lib/channelUtils.js';
-import { useMessage } from '../lib/useMessage.js';
+} from '../lib/export.ts';
+import { useT } from '../lib/i18n.tsx';
+import { parseChannelFile } from '../lib/channelUtils.ts';
+import { useMessage } from '../lib/useMessage.ts';
+import type { Channel, Video } from '../types.ts';
 
-export default function ChannelSidebar({ channels, selectedChannel, onSelect, onChannelsChanged, videos }) {
+interface ChannelSidebarProps {
+  channels: Channel[];
+  selectedChannel: Channel | null;
+  onSelect: (ch: Channel | null) => void;
+  onChannelsChanged: () => void;
+  videos: Video[];
+}
+
+export default function ChannelSidebar({ channels, selectedChannel, onSelect, onChannelsChanged, videos }: ChannelSidebarProps) {
   const { t } = useT();
   const { msg, showMsg } = useMessage();
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const fileInputRef = useRef();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const STATUS_LABEL = {
+  const STATUS_LABEL: Record<string, string> = {
     pending: t('status.pending'),
     processing: t('status.inProgress'),
     done: t('status.done'),
     error: t('status.error'),
   };
 
-  async function addChannels(urls) {
+  async function addChannels(urls: string[]) {
     if (!urls.length) return;
     setBusy(true);
     try {
@@ -32,20 +41,20 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       showMsg(t('msg.channelQueued', { count: result.count }));
       onChannelsChanged();
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleChannelSubmit(e) {
+  async function handleChannelSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const urls = channelInput.split('\n').map(l => l.trim()).filter(Boolean);
     await addChannels(urls);
     setChannelInput('');
   }
 
-  async function handleVideoSubmit(e) {
+  async function handleVideoSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const url = videoInput.trim();
     if (!url) return;
@@ -55,14 +64,14 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       showMsg(t('msg.videoQueued'));
       setVideoInput('');
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleFileUpload(e) {
-    const file = e.target.files[0];
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
     const urls = parseChannelFile(text);
@@ -70,26 +79,26 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
     await addChannels(urls);
   }
 
-  async function handleDelete(ch) {
+  async function handleDelete(ch: Channel) {
     if (!confirm(t('confirm.deleteChannel', { name: ch.name || ch.channel_handle }))) return;
     await deleteChannel(ch.id);
     if (selectedChannel?.id === ch.id) onSelect(null);
     onChannelsChanged();
   }
 
-  async function handleRefresh(ch) {
+  async function handleRefresh(ch: Channel) {
     setBusy(true);
     try {
       await refreshChannel(ch.id);
       showMsg(t('msg.refreshQueued'));
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleExportChannel(ch, fmt, timed = false) {
+  async function handleExportChannel(ch: Channel, fmt: 'txt' | 'md' | 'obsidian', timed = false) {
     try {
       const chVideos = await getAllChannelVideos(ch.id);
       const name = ch.name || ch.channel_handle || 'channel';
@@ -101,11 +110,11 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       const content = fmt === 'md' ? channelToMd(name, chVideos, options) : channelToTxt(name, chVideos, options);
       downloadFile(content, `${sanitizeFilename(name)}${timed ? '_timed' : ''}.${fmt}`);
     } catch (e) {
-      showMsg(t('msg.errExport', { error: e.message }), true);
+      showMsg(t('msg.errExport', { error: (e as Error).message }), true);
     }
   }
 
-  async function handleExportAll(fmt, timed = false) {
+  async function handleExportAll(fmt: 'txt' | 'md' | 'obsidian', timed = false) {
     try {
       const groups = await Promise.all(
         channels.map(async ch => ({
@@ -122,7 +131,7 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
       const content = fmt === 'md' ? allChannelsToMd(groups, options) : allChannelsToTxt(groups, options);
       downloadFile(content, `osszes_transkript${timed ? '_timed' : ''}.${fmt}`);
     } catch (e) {
-      showMsg(t('msg.errExport', { error: e.message }), true);
+      showMsg(t('msg.errExport', { error: (e as Error).message }), true);
     }
   }
 
@@ -142,7 +151,7 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
             <button type="submit" className="primary" disabled={busy || !channelInput.trim()} style={{ flex: 1 }}>
               {t('btn.add')}
             </button>
-            <button type="button" onClick={() => fileInputRef.current.click()} disabled={busy}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={busy}>
               {t('btn.file')}
             </button>
           </div>
@@ -223,8 +232,8 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
                   {ch.name || ch.channel_handle || t('state.unknownChannel')}
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <span className={`badge badge-${ch.status}`}>{STATUS_LABEL[ch.status] || ch.status}</span>
-                  {ch.video_count > 0 && (
+                  <span className={`badge badge-${ch.status}`}>{(ch.status && STATUS_LABEL[ch.status]) || ch.status}</span>
+                  {(ch.video_count ?? 0) > 0 && (
                     <span style={{ fontSize: '0.75rem', color: '#888' }}>{t('label.videoCount', { count: ch.video_count })}</span>
                   )}
                 </div>

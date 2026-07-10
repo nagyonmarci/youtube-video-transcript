@@ -1,11 +1,27 @@
-import QuickAddPopover from './QuickAddPopover.jsx';
-import HeaderSearch from './HeaderSearch.jsx';
+import QuickAddPopover from './QuickAddPopover.tsx';
+import HeaderSearch from './HeaderSearch.tsx';
+import type { FetcherStatus, WhisperStatus } from '../types.ts';
+
+interface AppHeaderProps {
+  fetcherStatus: FetcherStatus | null;
+  whisperStatus: WhisperStatus | null;
+  fetcherRunning: boolean;
+  whisperRunning: boolean;
+  handleStop: () => void;
+  handleWhisperStart: () => void;
+  handleWhisperStop: () => void;
+  theme: string;
+  onThemeToggle: () => void;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+  lang: string;
+  setLanguage: (lang: 'en' | 'hu') => void;
+}
 
 export default function AppHeader({
   fetcherStatus, whisperStatus, fetcherRunning, whisperRunning,
   handleStop, handleWhisperStart, handleWhisperStop,
   theme, onThemeToggle, t, lang, setLanguage,
-}) {
+}: AppHeaderProps) {
   const path = window.location.pathname;
 
   return (
@@ -23,7 +39,7 @@ export default function AppHeader({
       </nav>
 
       <div className="header-status">
-        {fetcherRunning && (
+        {fetcherRunning && fetcherStatus && (
           <span className="header-status-item">
             <span className="badge badge-processing status-chip">
               {t('label.processingBadge', { count: fetcherStatus.queue_size })}
@@ -60,7 +76,7 @@ export default function AppHeader({
         )}
 
         <span className="header-status-item">
-          {whisperRunning ? (
+          {whisperRunning && whisperStatus ? (
             <>
               <span className="badge badge-whisper">
                 {t('label.whisperBadge', { count: whisperStatus.queue_size })}

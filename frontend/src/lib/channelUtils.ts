@@ -1,4 +1,4 @@
-export function parseChannelFile(text) {
+export function parseChannelFile(text: string): string[] {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
   return lines.map(line => {
     if (line.includes(',')) {

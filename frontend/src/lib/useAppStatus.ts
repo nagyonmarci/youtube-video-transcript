@@ -1,11 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
-import { getStatus, stopProcessing, getWhisperStatus, startWhisperBatch, stopWhisper } from './fetcher.js';
-import { keepIfSame } from './dataUtils.js';
-import { POLL_INTERVAL_MS } from './constants.js';
+import { useState, useCallback, useEffect, type RefObject } from 'react';
+import { getStatus, stopProcessing, getWhisperStatus, startWhisperBatch, stopWhisper } from './fetcher.ts';
+import { keepIfSame } from './dataUtils.ts';
+import { POLL_INTERVAL_MS } from './constants.ts';
+import type { FetcherStatus, WhisperStatus } from '../types.ts';
 
-export function useAppStatus(tRef) {
-  const [fetcherStatus, setFetcherStatus] = useState(null);
-  const [whisperStatus, setWhisperStatus] = useState(null);
+type TFunc = (key: string, vars?: Record<string, unknown>) => string;
+
+export function useAppStatus(tRef: RefObject<TFunc>) {
+  const [fetcherStatus, setFetcherStatus] = useState<FetcherStatus | null>(null);
+  const [whisperStatus, setWhisperStatus] = useState<WhisperStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -28,25 +31,25 @@ export function useAppStatus(tRef) {
     return () => clearInterval(id);
   }, [loadStatus]);
 
-  const fetcherRunning = fetcherStatus && (
+  const fetcherRunning = Boolean(fetcherStatus && (
     fetcherStatus.fetch_active_size > 0
     || fetcherStatus.ai_active_size > 0
     || fetcherStatus.queue_size > 0
     || fetcherStatus.ai_queue_size > 0
     || Boolean(fetcherStatus.current_task?.type)
     || Boolean(fetcherStatus.current_ai_task?.type)
-  );
+  ));
 
-  const whisperRunning = whisperStatus && (
+  const whisperRunning = Boolean(whisperStatus && (
     whisperStatus.queue_size > 0 || whisperStatus.batch_running
-  );
+  ));
 
   const handleStop = async () => {
     try {
       await stopProcessing();
       await loadStatus();
     } catch (e) {
-      alert(tRef.current('msg.errGeneric', { error: e.message }));
+      alert(tRef.current('msg.errGeneric', { error: (e as Error).message }));
     }
   };
 
@@ -55,7 +58,7 @@ export function useAppStatus(tRef) {
       await startWhisperBatch();
       await loadStatus();
     } catch (e) {
-      alert(tRef.current('msg.errWhisper', { error: e.message }));
+      alert(tRef.current('msg.errWhisper', { error: (e as Error).message }));
     }
   };
 
@@ -64,7 +67,7 @@ export function useAppStatus(tRef) {
       await stopWhisper();
       await loadStatus();
     } catch (e) {
-      alert(tRef.current('msg.errWhisper', { error: e.message }));
+      alert(tRef.current('msg.errWhisper', { error: (e as Error).message }));
     }
   };
 

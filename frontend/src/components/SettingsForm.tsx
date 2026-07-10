@@ -1,6 +1,17 @@
-import { useT } from '../lib/i18n.jsx';
+import type { FormEvent } from 'react';
+import { useT } from '../lib/i18n.tsx';
+import type { AppSettings } from '../types.ts';
 
-export default function SettingsForm({ settingsDraft, settingsDirty, busy, onChange, onSubmit, onCancel }) {
+interface SettingsFormProps {
+  settingsDraft: AppSettings;
+  settingsDirty: boolean;
+  busy: boolean;
+  onChange: (field: keyof AppSettings, value: string | number | boolean) => void;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+}
+
+export default function SettingsForm({ settingsDraft, settingsDirty, busy, onChange, onSubmit, onCancel }: SettingsFormProps) {
   const { t } = useT();
   return (
     <form className="settings-form" onSubmit={onSubmit}>

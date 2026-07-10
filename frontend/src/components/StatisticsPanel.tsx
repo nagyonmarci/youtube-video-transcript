@@ -1,10 +1,18 @@
 import { useState } from 'react';
-import { getErrorVideos } from '../lib/directus.js';
-import { useT } from '../lib/i18n.jsx';
+import { getErrorVideos } from '../lib/directus.ts';
+import { useT } from '../lib/i18n.tsx';
+import type { AdminStats, ChannelCoverageMaps, Channel, MonthlyVideoCount, ErrorVideoSummary } from '../types.ts';
 
-export default function StatisticsPanel({ stats, coverage, channels, monthlyData }) {
+interface StatisticsPanelProps {
+  stats: AdminStats | null;
+  coverage: ChannelCoverageMaps | null;
+  channels: Channel[];
+  monthlyData: MonthlyVideoCount[];
+}
+
+export default function StatisticsPanel({ stats, coverage, channels, monthlyData }: StatisticsPanelProps) {
   const { t } = useT();
-  const [errorVideos, setErrorVideos] = useState(null);
+  const [errorVideos, setErrorVideos] = useState<ErrorVideoSummary[] | null>(null);
   const [showErrorVideos, setShowErrorVideos] = useState(false);
 
   return (
@@ -77,7 +85,7 @@ export default function StatisticsPanel({ stats, coverage, channels, monthlyData
         </div>
       )}
 
-      {(stats?.errorVideos > 0) && (
+      {stats && stats.errorVideos > 0 && (
         <div style={{ marginTop: '0.75rem' }}>
           <button
             style={{ fontSize: '0.8rem' }}
@@ -98,7 +106,7 @@ export default function StatisticsPanel({ stats, coverage, channels, monthlyData
                   <span style={{ color: 'var(--text2)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
                     {v.channel_id?.name || v.channel_id?.channel_handle || '—'}
                   </span>
-                  <a href={v.url} target="_blank" rel="noopener noreferrer" style={{ color: '#f88', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <a href={v.url ?? undefined} target="_blank" rel="noopener noreferrer" style={{ color: '#f88', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {v.title || v.video_id}
                   </a>
                 </div>

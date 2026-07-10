@@ -1,15 +1,16 @@
 import { useState, useRef } from 'react';
-import DailyUpdatesPage from './components/DailyUpdatesPage.jsx';
-import TranscriptModal from './components/TranscriptModal.jsx';
-import AppHeader from './components/AppHeader.jsx';
-import { useAppStatus } from './lib/useAppStatus.js';
-import { I18nProvider, useT } from './lib/i18n.jsx';
-import { useTheme } from './lib/useTheme.js';
+import DailyUpdatesPage from './components/DailyUpdatesPage.tsx';
+import TranscriptModal from './components/TranscriptModal.tsx';
+import AppHeader from './components/AppHeader.tsx';
+import { useAppStatus } from './lib/useAppStatus.ts';
+import { I18nProvider, useT } from './lib/i18n.tsx';
+import { useTheme } from './lib/useTheme.ts';
+import type { SelectedVideo } from './types.ts';
 
 function DailyAppInner() {
   const { t, lang, setLanguage } = useT();
   const { theme, handleThemeToggle } = useTheme();
-  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null);
   const tRef = useRef(t);
   tRef.current = t;
 

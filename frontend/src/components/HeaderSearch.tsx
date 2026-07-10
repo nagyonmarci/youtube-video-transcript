@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { useT } from '../lib/i18n.jsx';
+import { useState, type FormEvent } from 'react';
+import { useT } from '../lib/i18n.tsx';
 
 export default function HeaderSearch() {
   const { t } = useT();
   const [query, setQuery] = useState('');
 
-  function handleSubmit(e) {
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const q = query.trim();
     if (!q) return;

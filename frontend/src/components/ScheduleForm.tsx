@@ -1,6 +1,16 @@
-import { useT } from '../lib/i18n.jsx';
+import type { FormEvent } from 'react';
+import { useT } from '../lib/i18n.tsx';
 
-export default function ScheduleForm({ scheduleTime, scheduleTimezone, busy, onTimeChange, onTimezoneChange, onSubmit }) {
+interface ScheduleFormProps {
+  scheduleTime: string;
+  scheduleTimezone: string;
+  busy: boolean;
+  onTimeChange: (value: string) => void;
+  onTimezoneChange: (value: string) => void;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+}
+
+export default function ScheduleForm({ scheduleTime, scheduleTimezone, busy, onTimeChange, onTimezoneChange, onSubmit }: ScheduleFormProps) {
   const { t } = useT();
   return (
     <form className="schedule-form" onSubmit={onSubmit}>

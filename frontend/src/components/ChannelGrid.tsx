@@ -1,14 +1,28 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
-import { deleteChannel, getAllChannelVideos, updateChannel } from '../lib/directus.js';
-import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.js';
+import { useState, useMemo, useRef, useCallback, type SyntheticEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { deleteChannel, getAllChannelVideos, updateChannel } from '../lib/directus.ts';
+import { generateAiNotesForChannel, refreshChannel } from '../lib/fetcher.ts';
 import {
   channelToTxt, channelToMd, channelToObsidianMd,
   downloadFile, sanitizeFilename,
-} from '../lib/export.js';
-import { useT } from '../lib/i18n.jsx';
-import { useMessage } from '../lib/useMessage.js';
+} from '../lib/export.ts';
+import { useT } from '../lib/i18n.tsx';
+import { useMessage } from '../lib/useMessage.ts';
+import type { Channel } from '../types.ts';
 
-export default function ChannelGrid({ channels, totalVideos, selectedChannel, onSelect, onChannelsChanged }) {
+interface EditingTopic {
+  oldName: string;
+  value: string;
+}
+
+interface ChannelGridProps {
+  channels: Channel[];
+  totalVideos: number | null;
+  selectedChannel: Channel | null;
+  onSelect: (ch: Channel | null) => void;
+  onChannelsChanged: () => void;
+}
+
+export default function ChannelGrid({ channels, totalVideos, selectedChannel, onSelect, onChannelsChanged }: ChannelGridProps) {
   const { t } = useT();
   const { msg, showMsg } = useMessage();
   const [busy, setBusy] = useState(false);
@@ -17,18 +31,18 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
   const [topicFilter, setTopicFilter] = useState('all');
 
   // Drag & drop state
-  const [draggedChannelId, setDraggedChannelId] = useState(null);
-  const [dragOverTopic, setDragOverTopic] = useState(null);
+  const [draggedChannelId, setDraggedChannelId] = useState<string | null>(null);
+  const [dragOverTopic, setDragOverTopic] = useState<string | null>(null);
 
   // Inline topic rename state: { oldName, value }
-  const [editingTopic, setEditingTopic] = useState(null);
-  const topicInputRef = useRef(null);
+  const [editingTopic, setEditingTopic] = useState<EditingTopic | null>(null);
+  const topicInputRef = useRef<HTMLInputElement>(null);
 
   // New topic creation
-  const [pendingTopics, setPendingTopics] = useState([]);
+  const [pendingTopics, setPendingTopics] = useState<string[]>([]);
   const [addingTopic, setAddingTopic] = useState(false);
   const [newTopicValue, setNewTopicValue] = useState('');
-  const newTopicInputRef = useRef(null);
+  const newTopicInputRef = useRef<HTMLInputElement>(null);
 
   const SORT_OPTIONS = [
     { value: 'name_asc',   label: t('sort.nameAZ') },
@@ -37,7 +51,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     { value: 'count_asc',  label: t('sort.fewestVideos') },
   ];
 
-  const STATUS_LABEL = {
+  const STATUS_LABEL: Record<string, string> = {
     pending: t('status.pending'),
     processing: t('status.inProgress'),
     done: t('status.done'),
@@ -102,33 +116,33 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
 
   // ---- Channel action handlers ----
 
-  async function handleRefresh(e, ch) {
+  async function handleRefresh(e: SyntheticEvent, ch: Channel) {
     e.stopPropagation();
     setBusy(true);
     try {
       await refreshChannel(ch.id);
       showMsg(t('msg.refreshQueued'));
     } catch (err) {
-      showMsg(t('msg.errGeneric', { error: err.message }), true);
+      showMsg(t('msg.errGeneric', { error: (err as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleGenerateChannelAi(e, ch) {
+  async function handleGenerateChannelAi(e: SyntheticEvent, ch: Channel) {
     e.stopPropagation();
     setBusy(true);
     try {
       const result = await generateAiNotesForChannel(ch.id);
       showMsg(t('msg.aiQueued', { count: result.count }));
     } catch (err) {
-      showMsg(t('msg.errAi', { error: err.message }), true);
+      showMsg(t('msg.errAi', { error: (err as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleDelete(e, ch) {
+  async function handleDelete(e: SyntheticEvent, ch: Channel) {
     e.stopPropagation();
     if (!confirm(t('confirm.deleteChannel', { name: ch.name || ch.channel_handle }))) return;
     await deleteChannel(ch.id);
@@ -136,7 +150,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     onChannelsChanged();
   }
 
-  async function handleExport(e, ch, fmt) {
+  async function handleExport(e: SyntheticEvent, ch: Channel, fmt: 'txt' | 'md' | 'obsidian') {
     e.stopPropagation();
     try {
       const chVideos = await getAllChannelVideos(ch.id);
@@ -148,13 +162,13 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       const content = fmt === 'md' ? channelToMd(name, chVideos) : channelToTxt(name, chVideos);
       downloadFile(content, `${sanitizeFilename(name)}.${fmt}`);
     } catch (err) {
-      showMsg(t('msg.errExport', { error: err.message }), true);
+      showMsg(t('msg.errExport', { error: (err as Error).message }), true);
     }
   }
 
   // ---- Drag & drop handlers ----
 
-  const handleDragStart = useCallback((e, ch) => {
+  const handleDragStart = useCallback((e: DragEvent<HTMLDivElement>, ch: Channel) => {
     setDraggedChannelId(ch.id);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', ch.id);
@@ -165,19 +179,19 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     setDragOverTopic(null);
   }, []);
 
-  const handleDragOver = useCallback((e, topicLabel) => {
+  const handleDragOver = useCallback((e: DragEvent<HTMLElement>, topicLabel: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDragOverTopic(topicLabel);
   }, []);
 
-  const handleDragLeave = useCallback((e) => {
-    if (!e.currentTarget.contains(e.relatedTarget)) {
+  const handleDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
       setDragOverTopic(null);
     }
   }, []);
 
-  const handleDrop = useCallback(async (e, targetLabel) => {
+  const handleDrop = useCallback(async (e: DragEvent<HTMLElement>, targetLabel: string) => {
     e.preventDefault();
     const id = draggedChannelId;
     setDraggedChannelId(null);
@@ -197,13 +211,13 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       setPendingTopics(prev => prev.filter(p => p !== newTopic));
       onChannelsChanged();
     } catch (err) {
-      showMsg(t('msg.errGeneric', { error: err.message }), true);
+      showMsg(t('msg.errGeneric', { error: (err as Error).message }), true);
     }
   }, [draggedChannelId, channels, noTopicLabel, onChannelsChanged, showMsg, t]);
 
   // ---- Topic group rename ----
 
-  function startEditTopic(e, topicLabel) {
+  function startEditTopic(e: SyntheticEvent, topicLabel: string) {
     e.stopPropagation();
     setEditingTopic({ oldName: topicLabel, value: topicLabel === noTopicLabel ? '' : topicLabel });
     setTimeout(() => topicInputRef.current?.select(), 0);
@@ -234,18 +248,18 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       await Promise.all(toUpdate.map(ch => updateChannel(ch.id, { topic: newName })));
       onChannelsChanged();
     } catch (err) {
-      showMsg(t('msg.errGeneric', { error: err.message }), true);
+      showMsg(t('msg.errGeneric', { error: (err as Error).message }), true);
     }
   }
 
-  function handleTopicKeyDown(e) {
+  function handleTopicKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') { e.preventDefault(); commitTopicRename(); }
     if (e.key === 'Escape') setEditingTopic(null);
   }
 
   // ---- Topic delete ----
 
-  async function handleDeleteTopic(e, topicLabel) {
+  async function handleDeleteTopic(e: SyntheticEvent, topicLabel: string) {
     e.stopPropagation();
 
     // Pending topic has no channels — just discard it
@@ -261,7 +275,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
       await Promise.all(toUpdate.map(ch => updateChannel(ch.id, { topic: '' })));
       onChannelsChanged();
     } catch (err) {
-      showMsg(t('msg.errGeneric', { error: err.message }), true);
+      showMsg(t('msg.errGeneric', { error: (err as Error).message }), true);
     }
   }
 
@@ -276,7 +290,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
     setPendingTopics(prev => [...prev, name]);
   }
 
-  function handleNewTopicKeyDown(e) {
+  function handleNewTopicKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') { e.preventDefault(); handleAddTopic(); }
     if (e.key === 'Escape') { setAddingTopic(false); setNewTopicValue(''); }
   }
@@ -285,7 +299,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
 
   const displayedTotalVideos = totalVideos ?? channels.reduce((sum, ch) => sum + (ch.video_count || 0), 0);
 
-  function renderTopicSection(topicLabel, topicChannels, isPending = false) {
+  function renderTopicSection(topicLabel: string, topicChannels: Channel[], isPending = false) {
     const isEditing = editingTopic?.oldName === topicLabel;
     const isDropOver = dragOverTopic === topicLabel;
     const isDragging = draggedChannelId !== null;
@@ -305,7 +319,7 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
               ref={topicInputRef}
               className="channel-topic-edit-input"
               value={editingTopic.value}
-              onChange={e => setEditingTopic(et => ({ ...et, value: e.target.value }))}
+              onChange={e => setEditingTopic(et => et && { ...et, value: e.target.value })}
               onBlur={commitTopicRename}
               onKeyDown={handleTopicKeyDown}
               onClick={e => e.stopPropagation()}
@@ -347,8 +361,8 @@ export default function ChannelGrid({ channels, totalVideos, selectedChannel, on
                   {ch.name || ch.channel_handle || t('state.unknownChannel')}
                 </div>
                 <div className="channel-card-meta">
-                  <span className={`badge badge-${ch.status}`}>{STATUS_LABEL[ch.status] || ch.status}</span>
-                  {ch.video_count > 0 && (
+                  <span className={`badge badge-${ch.status}`}>{(ch.status && STATUS_LABEL[ch.status]) || ch.status}</span>
+                  {(ch.video_count ?? 0) > 0 && (
                     <span style={{ fontSize: '0.72rem', color: 'var(--text2)' }}>{t('label.videoCount', { count: ch.video_count })}</span>
                   )}
                 </div>

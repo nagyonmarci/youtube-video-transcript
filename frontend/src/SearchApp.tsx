@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getSearchResults } from './lib/directus.js';
-import VideoTable from './components/VideoTable.jsx';
-import TranscriptModal from './components/TranscriptModal.jsx';
-import AppHeader from './components/AppHeader.jsx';
-import { useAppStatus } from './lib/useAppStatus.js';
-import { I18nProvider, useT } from './lib/i18n.jsx';
-import { useTheme } from './lib/useTheme.js';
-import { readUrlFilters } from './lib/urlFilters.js';
+import { getSearchResults } from './lib/directus.ts';
+import VideoTable from './components/VideoTable.tsx';
+import TranscriptModal from './components/TranscriptModal.tsx';
+import AppHeader from './components/AppHeader.tsx';
+import { useAppStatus } from './lib/useAppStatus.ts';
+import { I18nProvider, useT } from './lib/i18n.tsx';
+import { useTheme } from './lib/useTheme.ts';
+import { readUrlFilters } from './lib/urlFilters.ts';
+import type { Video, SelectedVideo } from './types.ts';
 
 function SearchAppInner() {
   const { t, lang, setLanguage } = useT();
@@ -19,12 +20,12 @@ function SearchAppInner() {
   const [statusFilter, setStatusFilter] = useState(initialFilters.statusFilter);
   const [aiFilter, setAiFilter] = useState(initialFilters.aiFilter);
   const [membersFilter, setMembersFilter] = useState(initialFilters.membersFilter);
-  const [videos, setVideos] = useState([]);
+  const [videos, setVideos] = useState<Video[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(null);
 
   const {
     fetcherStatus, whisperStatus, fetcherRunning, whisperRunning,
@@ -59,28 +60,28 @@ function SearchAppInner() {
     loadResults({ showLoading: page === 1, targetPage: page, append: page > 1 });
   }, [loadResults, page]);
 
-  function handleSearchChange(value) {
+  function handleSearchChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setSearch(value);
     setPage(1);
   }
 
-  function handleStatusFilterChange(value) {
+  function handleStatusFilterChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setStatusFilter(value);
     setPage(1);
   }
 
-  function handleAiFilterChange(value) {
+  function handleAiFilterChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setAiFilter(value);
     setPage(1);
   }
 
-  function handleMembersFilterChange(value) {
+  function handleMembersFilterChange(value: string) {
     setVideos([]);
     setTotalCount(0);
     setMembersFilter(value);

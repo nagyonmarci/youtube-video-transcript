@@ -1,17 +1,25 @@
-import { useEffect, useState, useRef } from 'react';
-import { fetchChannels, fetchVideo, refreshDates, generateAiNotes, getSchedule, updateSchedule } from '../lib/fetcher.js';
-import { getAllChannelVideos } from '../lib/directus.js';
+import { useEffect, useState, useRef, type FormEvent, type ChangeEvent } from 'react';
+import { fetchChannels, fetchVideo, refreshDates, generateAiNotes, getSchedule, updateSchedule } from '../lib/fetcher.ts';
+import { getAllChannelVideos } from '../lib/directus.ts';
 import {
   channelToTxt, channelToMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
   downloadFile, sanitizeFilename,
-} from '../lib/export.js';
-import { useT } from '../lib/i18n.jsx';
-import { parseChannelFile } from '../lib/channelUtils.js';
-import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.js';
-import { useMessage } from '../lib/useMessage.js';
-import { DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.js';
+} from '../lib/export.ts';
+import { useT } from '../lib/i18n.tsx';
+import { parseChannelFile } from '../lib/channelUtils.ts';
+import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.ts';
+import { useMessage } from '../lib/useMessage.ts';
+import { DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.ts';
+import type { Channel } from '../types.ts';
 
-export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }) {
+interface TopActionsProps {
+  channels: Channel[];
+  selectedChannel: Channel | null;
+  onChannelsChanged: () => void;
+  showSchedule?: boolean;
+}
+
+export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }: TopActionsProps) {
   const { t } = useT();
   const { msg, showMsg } = useMessage();
   const [channelInput, setChannelInput] = useState('');
@@ -22,9 +30,9 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
   const [scheduleTime, setScheduleTime] = useState(DEFAULT_CRON_TIME);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [advancedSchedule, setAdvancedSchedule] = useState(false);
-  const fileInputRef = useRef();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function addChannels(urls) {
+  async function addChannels(urls: string[]) {
     if (!urls.length) return;
     setBusy(true);
     try {
@@ -32,7 +40,7 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       showMsg(t('msg.channelQueued', { count: result.count }));
       onChannelsChanged();
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
@@ -52,14 +60,14 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
     return () => { alive = false; };
   }, []);
 
-  async function handleChannelSubmit(e) {
+  async function handleChannelSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const urls = channelInput.split('\n').map(l => l.trim()).filter(Boolean);
     await addChannels(urls);
     setChannelInput('');
   }
 
-  async function handleVideoSubmit(e) {
+  async function handleVideoSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const url = videoInput.trim();
     if (!url) return;
@@ -69,14 +77,14 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       showMsg(t('msg.videoQueued'));
       setVideoInput('');
     } catch (e) {
-      showMsg(t('msg.errGeneric', { error: e.message }), true);
+      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleFileUpload(e) {
-    const file = e.target.files[0];
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
     const urls = parseChannelFile(text);
@@ -84,7 +92,7 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
     await addChannels(urls);
   }
 
-  async function handleExportAll(fmt, timed = false) {
+  async function handleExportAll(fmt: 'txt' | 'md' | 'obsidian', timed = false) {
     try {
       const groups = await Promise.all(
         channels.map(async ch => ({
@@ -101,11 +109,11 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       const content = fmt === 'md' ? allChannelsToMd(groups, options) : allChannelsToTxt(groups, options);
       downloadFile(content, `osszes_transkript${timed ? '_idovel' : ''}.${fmt}`);
     } catch (e) {
-      showMsg(t('msg.errExport', { error: e.message }), true);
+      showMsg(t('msg.errExport', { error: (e as Error).message }), true);
     }
   }
 
-  async function handleScheduleSubmit(e) {
+  async function handleScheduleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
     try {
@@ -117,7 +125,7 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       showMsg(t('msg.scheduleUpdated'));
       setScheduleOpen(false);
     } catch (e) {
-      showMsg(t('msg.errSchedule', { error: e.message }), true);
+      showMsg(t('msg.errSchedule', { error: (e as Error).message }), true);
     } finally {
       setBusy(false);
     }
@@ -139,7 +147,7 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
             <button type="submit" className="primary" disabled={busy || !channelInput.trim()} style={{ flex: 1 }}>
               {t('btn.add')}
             </button>
-            <button type="button" onClick={() => fileInputRef.current.click()} disabled={busy}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={busy}>
               {t('btn.file')}
             </button>
           </div>
@@ -179,10 +187,10 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
           onClick={async () => {
             setBusy(true);
             try {
-              const result = await refreshDates();
+              await refreshDates();
               showMsg(t('msg.dateRefreshQueued'));
             } catch (e) {
-              showMsg(t('msg.errGeneric', { error: e.message }), true);
+              showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
             } finally {
               setBusy(false);
             }
@@ -200,12 +208,12 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
             setBusy(true);
             try {
               const result = await generateAiNotes();
-              showMsg(result?.existing
-                ? t('msg.aiBatchRunning', { jobId: result.job_id?.slice(0, 8) })
-                : t('msg.aiBatchQueued', { limit: result?.limit ?? '' })
+              showMsg(!result.queued
+                ? t('msg.aiBatchRunning', { jobId: result.job_id.slice(0, 8) })
+                : t('msg.aiBatchQueued', { limit: result.limit })
               );
             } catch (e) {
-              showMsg(t('msg.errAi', { error: e.message }), true);
+              showMsg(t('msg.errAi', { error: (e as Error).message }), true);
             } finally {
               setBusy(false);
             }
