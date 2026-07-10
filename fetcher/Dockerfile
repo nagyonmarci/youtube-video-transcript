@@ -1,21 +1,28 @@
-FROM python:3.12-slim
+FROM cgr.dev/chainguard/wolfi-base AS build
+
+RUN apk add --no-cache python-3.12-base py3.12-pip
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+RUN python3.12 -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-RUN useradd --create-home --shell /usr/sbin/nologin appuser \
-    && chown -R appuser:appuser /app
+FROM cgr.dev/chainguard/wolfi-base
 
-USER appuser
+RUN apk add --no-cache python-3.12-base ffmpeg curl tzdata
+
+WORKDIR /app
+
+COPY --from=build --chown=nonroot:nonroot /app/venv /app/venv
+COPY --chown=nonroot:nonroot . .
+
+ENV PATH="/app/venv/bin:$PATH"
+
+USER nonroot
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3.12", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

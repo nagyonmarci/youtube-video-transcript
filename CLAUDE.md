@@ -22,9 +22,11 @@ docker compose logs --tail=120 fetcher
 # Check yt-dlp version inside container
 docker compose exec -T fetcher yt-dlp --version  # expected: 2025.12.08
 
-# Hit fetcher endpoints manually
-docker compose exec -T frontend wget -qO- --header="X-App-Token: $APP_API_TOKEN" http://fetcher:8000/status
+# Hit fetcher endpoints manually (fetcher has curl; frontend/fetcher images are minimal and have no wget)
+docker compose exec -T fetcher curl -sS -H "X-App-Token: $APP_API_TOKEN" http://localhost:8000/status
 ```
+
+`frontend` and `fetcher`/`fetch-worker`/`ai-worker` build on Chainguard's Wolfi-based images (multi-stage: a `-dev` builder stage, a minimal runtime stage). The shipped `frontend` image has a shell but no `wget`/`curl`/`npm`-as-CLI-tool network debugging; `fetcher` has `curl`/`ffmpeg` (added explicitly for app needs) but no package manager. There is no `-dev`-tagged variant of these *built* images — for deeper interactive debugging, run the relevant base image directly, e.g. `docker run --rm -it cgr.dev/chainguard/wolfi-base sh`.
 
 The app runs at **http://yt.test** (requires dnsmasq; see README).  
 The Caddy entrypoint is protected by Basic Auth. Directus is intentionally not exposed through `yt.test`; access it only from the Docker network or add a temporary local-only route when needed.
