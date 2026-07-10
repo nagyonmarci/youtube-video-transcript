@@ -1,7 +1,7 @@
 {
   "nav": {
     "home": "Home",
-    "dailyUpdates": "Daily Updates",
+    "dailyUpdates": "Updates",
     "search": "Search",
     "admin": "Admin"
   },
@@ -10,8 +10,8 @@
     "channels": "Channels ({filtered}/{total})",
     "allVideos": "All videos ({count})",
     "channelVideos": "{name} — {count} videos",
-    "daily": "Daily Updates",
-    "dailySub": "{count} videos on this day",
+    "daily": "Updates",
+    "dailySub": "{count} videos in this period",
     "admin": "Admin",
     "adminSub": "{channels} channels · {videos} videos",
     "processing": "Processing",
@@ -63,9 +63,7 @@
     "obsidianDownload": "Download Obsidian",
     "cancelSelection": "✕ Cancel",
     "scrollToTop": "Scroll to top",
-    "prevDay": "Previous day",
-    "today": "Today",
-    "nextDay": "Next day",
+    "lastWeek": "Last 7 days",
     "editTranscript": "Edit transcript",
     "quickAdd": "Quick add"
   },
@@ -140,6 +138,8 @@
     "timezone": "Timezone",
     "advancedCron": "Advanced cron",
     "title": "Title",
+    "dateFrom": "From",
+    "dateTo": "To",
     "uploadedAt": "Uploaded",
     "uploadedAtMeta": "Uploaded: {date}",
     "duration": "Duration",
@@ -329,7 +329,7 @@
     "errAiDelete": "AI note delete error: {error}",
     "errExport": "Export error: {error}",
     "errAdmin": "Admin data load error: {error}",
-    "errDaily": "Daily updates load error: {error}",
+    "errDaily": "Updates load error: {error}",
     "errSchedule": "Schedule error: {error}",
     "errWhisper": "Whisper error: {error}",
     "bulkAiErrors": "{count} AI generation failed: {titles}",

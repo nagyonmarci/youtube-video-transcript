@@ -1,7 +1,7 @@
 {
   "nav": {
     "home": "Főoldal",
-    "dailyUpdates": "Napi frissítések",
+    "dailyUpdates": "Frissítések",
     "search": "Keresés",
     "admin": "Admin"
   },
@@ -10,8 +10,8 @@
     "channels": "Csatornák ({filtered}/{total})",
     "allVideos": "Összes videó ({count})",
     "channelVideos": "{name} — {count} videó",
-    "daily": "Napi frissítések",
-    "dailySub": "{count} videó ezen a napon",
+    "daily": "Frissítések",
+    "dailySub": "{count} videó ebben az időszakban",
     "admin": "Admin",
     "adminSub": "{channels} csatorna · {videos} videó",
     "processing": "Feldolgozás",
@@ -63,9 +63,7 @@
     "obsidianDownload": "Obsidian letöltés",
     "cancelSelection": "✕ Visszavonás",
     "scrollToTop": "Ugrás a lap tetejére",
-    "prevDay": "Előző nap",
-    "today": "Ma",
-    "nextDay": "Következő nap",
+    "lastWeek": "Utolsó 7 nap",
     "editTranscript": "Transzkript szerkesztése",
     "quickAdd": "Gyors hozzáadás"
   },
@@ -140,6 +138,8 @@
     "timezone": "Időzóna",
     "advancedCron": "Haladó cron",
     "title": "Cím",
+    "dateFrom": "Ettől",
+    "dateTo": "Eddig",
     "uploadedAt": "Feltöltve",
     "uploadedAtMeta": "Feltöltve: {date}",
     "duration": "Hossz",
@@ -330,7 +330,7 @@
     "errAiDelete": "AI jegyzet törlés hiba: {error}",
     "errExport": "Export hiba: {error}",
     "errAdmin": "Admin adatok betöltési hiba: {error}",
-    "errDaily": "Napi frissítés betöltési hiba: {error}",
+    "errDaily": "Frissítések betöltési hiba: {error}",
     "errSchedule": "Időzítés hiba: {error}",
     "errWhisper": "Whisper hiba: {error}",
     "bulkAiErrors": "{count} AI generálás sikertelen: {titles}",

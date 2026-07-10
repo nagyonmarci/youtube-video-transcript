@@ -262,28 +262,6 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     width: auto;
     min-width: 150px;
   }
-  .daily-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  .daily-channel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .daily-channel-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .daily-channel-header h3 {
-    font-size: 0.95rem;
-  }
-  .daily-channel-header span {
-    color: var(--text2);
-    font-size: 0.8rem;
-  }
   .daily-video-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -291,8 +269,8 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   }
   .daily-video-card {
     display: flex;
-    justify-content: space-between;
-    gap: 0.85rem;
+    flex-direction: column;
+    gap: 0.65rem;
     background: var(--bg2);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -301,7 +279,6 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   }
   .daily-video-main {
     min-width: 0;
-    flex: 1;
   }
   .daily-video-title {
     color: #64b5f6;
@@ -352,12 +329,12 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
   }
   .daily-video-actions {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: 0.35rem;
-    min-width: 96px;
-    align-self: flex-start;
   }
   .daily-video-actions button {
+    flex: 1 1 auto;
     font-size: 0.75rem;
     padding: 0.25rem 0.45rem;
   }
@@ -1155,8 +1132,6 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     .ai-status-panel { flex-direction: column; }
     .ai-status-side { justify-content: flex-start; }
     .daily-video-list { grid-template-columns: 1fr; }
-    .daily-video-card { flex-direction: column; }
-    .daily-video-actions { flex-direction: row; flex-wrap: wrap; }
     .channel-card { min-width: 100px; max-width: 160px; }
     .video-header { flex-direction: column; align-items: flex-start; }
     .video-search { width: 100%; }
