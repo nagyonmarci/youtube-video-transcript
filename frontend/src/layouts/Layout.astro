@@ -716,6 +716,21 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     width: min(320px, calc(100vw - 2rem));
   }
 
+  .header-search input {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.82rem;
+    line-height: 1;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text);
+    border-radius: 6px;
+    width: 160px;
+  }
+  .header-search input:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+
   .status-msg {
     padding: 0.5rem 0.75rem;
     border-radius: 6px;

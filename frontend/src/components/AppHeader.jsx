@@ -1,4 +1,5 @@
 import QuickAddPopover from './QuickAddPopover.jsx';
+import HeaderSearch from './HeaderSearch.jsx';
 
 export default function AppHeader({
   fetcherStatus, whisperStatus, fetcherRunning, whisperRunning,
@@ -9,14 +10,15 @@ export default function AppHeader({
 
   return (
     <header className="app-header">
-      <span style={{ fontSize: '1.4rem' }}>▶</span>
-      <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{t('header.appTitle')}</h1>
+      <a href="/" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none', color: 'inherit' }}>
+        <span style={{ fontSize: '1.4rem' }}>▶</span>
+        <h1 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{t('header.appTitle')}</h1>
+      </a>
 
       <nav className="main-nav">
-        <a href="/" className={path === '/' ? 'active' : ''}>{t('nav.home')}</a>
         <a href="/daily" className={path === '/daily' ? 'active' : ''}>{t('nav.dailyUpdates')}</a>
-        <a href="/search" className={path === '/search' ? 'active' : ''}>{t('nav.search')}</a>
         <a href="/admin" className={path === '/admin' ? 'active' : ''}>{t('nav.admin')}</a>
+        <HeaderSearch />
         <QuickAddPopover />
       </nav>
 
