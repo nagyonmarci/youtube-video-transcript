@@ -8,11 +8,7 @@ export default function StatisticsPanel({ stats, coverage, channels, monthlyData
   const [showErrorVideos, setShowErrorVideos] = useState(false);
 
   return (
-    <section className="admin-section">
-      <div className="admin-section-header">
-        <h3>{t('header.statistics')}</h3>
-      </div>
-
+    <>
       {monthlyData.length > 0 && (() => {
         const max = Math.max(...monthlyData.map(d => d.count), 1);
         return (
@@ -112,6 +108,6 @@ export default function StatisticsPanel({ stats, coverage, channels, monthlyData
           )}
         </div>
       )}
-    </section>
+    </>
   );
 }

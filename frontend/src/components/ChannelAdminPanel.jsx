@@ -14,7 +14,7 @@ function editableChannel(ch) {
   };
 }
 
-export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
+export default function ChannelAdminPanel({ channels, onChanged }) {
   const { t } = useT();
 
   const STATUS_OPTIONS = [
@@ -128,15 +128,7 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
   }
 
   return (
-    <section className="admin-panel">
-      <div className="admin-panel-header">
-        <div>
-          <h2>{t('header.channelAdmin')}</h2>
-          <p>{t('header.channelAdminSub', { count: channels.length })}</p>
-        </div>
-        {onClose && <button onClick={onClose}>{t('btn.close')}</button>}
-      </div>
-
+    <>
       <div className="admin-toolbar">
         <input
           value={search}
@@ -225,6 +217,6 @@ export default function ChannelAdminPanel({ channels, onClose, onChanged }) {
           </tbody>
         </table>
       </div>
-    </section>
+    </>
   );
 }
