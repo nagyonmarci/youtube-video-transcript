@@ -11,16 +11,7 @@ import { useTheme } from './lib/useTheme.js';
 import { useToasts } from './lib/useToasts.js';
 import ToastStack from './components/ToastStack.jsx';
 import { POLL_INTERVAL_MS } from './lib/constants.js';
-
-function readUrlFilters() {
-  const p = new URLSearchParams(window.location.search);
-  return {
-    search: p.get('q') || '',
-    statusFilter: p.get('status') || 'all',
-    aiFilter: p.get('ai') || 'all',
-    membersFilter: p.get('members') || 'hide',
-  };
-}
+import { readUrlFilters } from './lib/urlFilters.js';
 
 function AppInner() {
   const { t, lang, setLanguage } = useT();

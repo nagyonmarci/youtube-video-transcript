@@ -6,6 +6,7 @@ import AppHeader from './components/AppHeader.jsx';
 import { useAppStatus } from './lib/useAppStatus.js';
 import { I18nProvider, useT } from './lib/i18n.jsx';
 import { useTheme } from './lib/useTheme.js';
+import { readUrlFilters } from './lib/urlFilters.js';
 
 function SearchAppInner() {
   const { t, lang, setLanguage } = useT();
@@ -13,10 +14,11 @@ function SearchAppInner() {
   const tRef = useRef(t);
   tRef.current = t;
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [aiFilter, setAiFilter] = useState('all');
-  const [membersFilter, setMembersFilter] = useState('hide');
+  const initialFilters = readUrlFilters();
+  const [search, setSearch] = useState(initialFilters.search);
+  const [statusFilter, setStatusFilter] = useState(initialFilters.statusFilter);
+  const [aiFilter, setAiFilter] = useState(initialFilters.aiFilter);
+  const [membersFilter, setMembersFilter] = useState(initialFilters.membersFilter);
   const [videos, setVideos] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
