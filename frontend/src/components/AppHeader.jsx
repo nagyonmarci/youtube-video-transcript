@@ -13,6 +13,7 @@ export default function AppHeader({
       <nav className="main-nav">
         <a href="/" className={path === '/' ? 'active' : ''}>{t('nav.home')}</a>
         <a href="/daily" className={path === '/daily' ? 'active' : ''}>{t('nav.dailyUpdates')}</a>
+        <a href="/search" className={path === '/search' ? 'active' : ''}>{t('nav.search')}</a>
         <a href="/admin" className={path === '/admin' ? 'active' : ''}>{t('nav.admin')}</a>
       </nav>
 

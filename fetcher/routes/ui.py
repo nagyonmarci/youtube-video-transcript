@@ -48,23 +48,48 @@ def directus_query(path: str, params: dict) -> str:
     return f"{path}?{urlencode(params)}"
 
 
-def apply_ui_video_filters(params: dict, search: str, status_filter: str, ai_filter: str, members_filter: str) -> None:
+def apply_ui_video_filters(
+    params: dict,
+    search: str,
+    status_filter: str,
+    ai_filter: str,
+    members_filter: str,
+    search_transcript: bool = False,
+    search_channel_ids: Optional[list] = None,
+) -> None:
+    and_index = 0
+
+    def next_and() -> str:
+        nonlocal and_index
+        idx = and_index
+        and_index += 1
+        return f"filter[_and][{idx}]"
+
     if search:
-        params["filter[title][_icontains]"] = search
+        base = next_and()
+        or_idx = 0
+        params[f"{base}[_or][{or_idx}][title][_icontains]"] = search
+        or_idx += 1
+        if search_transcript:
+            params[f"{base}[_or][{or_idx}][transcript][_icontains]"] = search
+            or_idx += 1
+        if search_channel_ids:
+            params[f"{base}[_or][{or_idx}][channel_id][_in]"] = ",".join(search_channel_ids)
     if status_filter and status_filter != "all":
-        params["filter[status][_eq]"] = status_filter
+        params[f"{next_and()}[status][_eq]"] = status_filter
     if ai_filter == "done":
-        params["filter[ai_notes_status][_eq]"] = "done"
+        params[f"{next_and()}[ai_notes_status][_eq]"] = "done"
     elif ai_filter == "missing":
-        params["filter[_and][0][transcript][_nnull]"] = "true"
-        params["filter[_and][1][summary][_null]"] = "true"
+        params[f"{next_and()}[transcript][_nnull]"] = "true"
+        params[f"{next_and()}[summary][_null]"] = "true"
     elif ai_filter == "error":
-        params["filter[ai_notes_status][_eq]"] = "error"
+        params[f"{next_and()}[ai_notes_status][_eq]"] = "error"
     if members_filter == "hide":
-        params["filter[_or][0][is_members_only][_neq]"] = "true"
-        params["filter[_or][1][is_members_only][_null]"] = "true"
+        base = next_and()
+        params[f"{base}[_or][0][is_members_only][_neq]"] = "true"
+        params[f"{base}[_or][1][is_members_only][_null]"] = "true"
     elif members_filter == "only":
-        params["filter[is_members_only][_eq]"] = "true"
+        params[f"{next_and()}[is_members_only][_eq]"] = "true"
 
 
 async def count_ui_videos(extra_params: Optional[dict] = None) -> int:
@@ -126,6 +151,39 @@ async def ui_videos(
     if channel_id:
         params["filter[channel_id][_eq]"] = channel_id
     apply_ui_video_filters(params, search, status_filter, ai_filter, members_filter)
+    data = await directus._request("GET", directus_query("/items/videos", params))
+    return {"items": data.get("data", []), "total": data.get("meta", {}).get("filter_count", 0)}
+
+
+@router.get("/ui/search")
+async def ui_search(
+    q: str = "",
+    page: int = 1,
+    status_filter: str = "all",
+    ai_filter: str = "all",
+    members_filter: str = "hide",
+):
+    q = q.strip()
+    if not q:
+        return {"items": [], "total": 0}
+    page = max(1, page)
+    channel_matches = await directus._request("GET", directus_query("/items/channels", {
+        "filter[name][_icontains]": q,
+        "fields": "id",
+        "limit": "-1",
+    }))
+    channel_ids = [c["id"] for c in channel_matches.get("data", [])]
+    params = {
+        "sort": "-uploaded_at",
+        "limit": str(UI_PAGE_SIZE),
+        "offset": str((page - 1) * UI_PAGE_SIZE),
+        "meta": "filter_count",
+        "fields": UI_VIDEO_FIELDS,
+    }
+    apply_ui_video_filters(
+        params, q, status_filter, ai_filter, members_filter,
+        search_transcript=True, search_channel_ids=channel_ids,
+    )
     data = await directus._request("GET", directus_query("/items/videos", params))
     return {"items": data.get("data", []), "total": data.get("meta", {}).get("filter_count", 0)}
 

@@ -2,6 +2,7 @@
   "nav": {
     "home": "Home",
     "dailyUpdates": "Daily Updates",
+    "search": "Search",
     "admin": "Admin"
   },
   "header": {
@@ -229,6 +230,7 @@
     "searchChannelAdmin": "Search by name, topic, handle or URL...",
     "channelTopic": "e.g. AI, history, development",
     "searchVideo": "Search by title...",
+    "searchGlobal": "Search everything...",
     "channelUrls": "URLs one per line (@handle, youtube.com/...)",
     "videoUrl": "youtube.com/watch?v=...",
     "cronExpr": "0 7 * * *"
@@ -236,6 +238,7 @@
   "state": {
     "loading": "Loading...",
     "noResults": "No results.",
+    "searchPrompt": "Type to search across titles, channel names, and transcripts.",
     "noVideos": "No videos. Add a channel above.",
     "noTranscript": "No transcript available for this video.",
     "noAiSummary": "No AI summary yet.",

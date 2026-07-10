@@ -61,6 +61,17 @@ export async function getAllVideos(opts = {}) {
   return req('GET', `/ui/videos?${query}`);
 }
 
+export async function getSearchResults(query, opts = {}) {
+  const params = paramsFrom({
+    q: query,
+    page: opts.page || 1,
+    status_filter: opts.statusFilter || 'all',
+    ai_filter: opts.aiFilter || 'all',
+    members_filter: opts.membersFilter || 'hide',
+  });
+  return req('GET', `/ui/search?${params}`);
+}
+
 export async function getDailyVideos(dateValue, tz) {
   const params = { date: dateValue };
   if (tz) params.tz = tz;

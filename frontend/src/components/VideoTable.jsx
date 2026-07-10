@@ -44,6 +44,8 @@ export default function VideoTable({
   onSelectVideo,
   onVideosChanged,
   selectedChannel,
+  emptyMessage,
+  searchPlaceholder,
 }) {
   const { t } = useT();
   const searchInputRef = useRef();
@@ -243,7 +245,7 @@ export default function VideoTable({
           <input
             ref={searchInputRef}
             className="video-search"
-            placeholder={t('placeholder.searchVideo')}
+            placeholder={searchPlaceholder ?? t('placeholder.searchVideo')}
             value={localSearch}
             onChange={handleSearchInput}
             style={{ width: '200px' }}
@@ -291,7 +293,7 @@ export default function VideoTable({
         <div className="video-empty">{t('state.loading')}</div>
       ) : totalCount === 0 ? (
         <div className="video-empty">
-          {search ? t('state.noResults') : t('state.noVideos')}
+          {emptyMessage ?? (search ? t('state.noResults') : t('state.noVideos'))}
         </div>
       ) : (
         <>

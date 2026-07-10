@@ -9,6 +9,7 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 - Add channels by URL, `@handle`, or bulk `.txt`/`.csv` upload
 - Add individual videos with automatic channel detection
 - Infinite-scroll video list with full-text search, sort, and filters (transcript status, AI notes status, members-only)
+- Dedicated Search page (`/search`) for free-text queries across video title, transcript content, and channel name at once
 - Export transcripts per-video, per-channel, or in bulk — TXT, MD, or Obsidian-compatible MD
 - Obsidian export with YAML frontmatter, clickable timestamped transcript links back to YouTube
 - AI notes per video: summary, topics, takeaways, questions, study guide, critique, and markmap-compatible Obsidian note

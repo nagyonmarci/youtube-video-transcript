@@ -2,6 +2,7 @@
   "nav": {
     "home": "Főoldal",
     "dailyUpdates": "Napi frissítések",
+    "search": "Keresés",
     "admin": "Admin"
   },
   "header": {
@@ -230,6 +231,7 @@
     "searchChannelAdmin": "Keresés név, téma, handle vagy URL alapján...",
     "channelTopic": "pl. AI, történelem, fejlesztés",
     "searchVideo": "Cím keresés...",
+    "searchGlobal": "Keresés mindenben...",
     "channelUrls": "URL-ek soronként (@handle, youtube.com/...)",
     "videoUrl": "youtube.com/watch?v=...",
     "cronExpr": "0 7 * * *"
@@ -237,6 +239,7 @@
   "state": {
     "loading": "Betöltés...",
     "noResults": "Nincs találat.",
+    "searchPrompt": "Írj be egy keresőszót címben, csatornanévben és transzkriptben kereséshez.",
     "noVideos": "Nincsenek videók. Adj hozzá egy csatornát fent.",
     "noTranscript": "Ehhez a videóhoz nincs elérhető transzkript.",
     "noAiSummary": "Még nincs AI összefoglaló.",
