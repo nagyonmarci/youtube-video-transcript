@@ -103,8 +103,8 @@ async def move_job(job_id: str, request: JobMoveRequest):
         raise HTTPException(status_code=400, detail="Running jobs cannot be reordered")
 
     jobs = [
-        item for item in await directus.list_jobs()
-        if item.get("queue") == job.get("queue") and item.get("status") in {"queued", "paused"}
+        item for item in await directus.list_jobs(statuses=["queued", "paused"])
+        if item.get("queue") == job.get("queue")
     ]
     index = next((i for i, item in enumerate(jobs) if item["id"] == job_id), -1)
     if index < 0:
