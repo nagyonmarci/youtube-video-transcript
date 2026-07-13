@@ -8,7 +8,10 @@ import config
 from api_models import FetchChannelsRequest, FetchVideoRequest
 from job_ops import enqueue_fetch_job
 from worker_state import directus
-from youtube_fetcher import parse_channel_input, extract_handle_from_url
+from youtube_fetcher import (
+    parse_channel_input, extract_handle_from_url,
+    fetch_video_info, best_thumbnail_url, youtube_thumbnail_url,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,3 +101,23 @@ async def refresh_thumbnails():
         return {"queued": False, "existing": True, "job_id": existing["id"]}
     job = await enqueue_fetch_job({"type": "refresh_thumbnails"})
     return {"queued": True, "job_id": job.get("id")}
+
+
+@router.post("/refresh-thumbnail/{video_id}")
+async def refresh_single_thumbnail(video_id: str):
+    """Immediately re-fetch one video's thumbnail, bypassing the batch job queue."""
+    video = await directus.find_video_by_yt_id(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    thumbnail_url = None
+    try:
+        thumbnail_url = best_thumbnail_url(fetch_video_info(video_id))
+    except Exception as e:
+        logger.warning(f"fetch_video_info failed for {video_id}: {e}")
+    if not thumbnail_url:
+        thumbnail_url = youtube_thumbnail_url(video_id)
+
+    if thumbnail_url:
+        await directus.update_video(video["id"], {"thumbnail_url": thumbnail_url})
+    return {"thumbnail_url": thumbnail_url}

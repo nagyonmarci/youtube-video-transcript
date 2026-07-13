@@ -32,7 +32,7 @@ export default function AppHeader({
       </a>
 
       <nav className="main-nav">
-        <a href="/daily" className={path === '/daily' ? 'active' : ''}>{t('nav.dailyUpdates')}</a>
+        <a href="/updates" className={path === '/updates' ? 'active' : ''}>{t('nav.dailyUpdates')}</a>
         <a href="/admin" className={path === '/admin' ? 'active' : ''}>{t('nav.admin')}</a>
         <HeaderSearch />
         <QuickAddPopover />
