@@ -351,28 +351,16 @@ def fetch_transcript_variants(video_id: str) -> tuple[Optional[str], Optional[st
     """
     # Primary: youtube-transcript-api
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(
-            video_id,
-            languages=["hu", "en", "a.hu", "a.en"],
-        )
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
         plain = transcript_entries_to_plain(transcript_list)
         timed = transcript_entries_to_timed(transcript_list)
         return plain or None, timed or None
-    except NoTranscriptFound:
-        pass
     except TranscriptsDisabled:
         return None, None
+    except NoTranscriptFound:
+        pass
     except Exception as e:
         logger.warning(f"youtube-transcript-api failed for {video_id}: {e}")
-
-    # Fallback: try any available language
-    try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        plain = transcript_entries_to_plain(transcript)
-        timed = transcript_entries_to_timed(transcript)
-        return plain or None, timed or None
-    except Exception:
-        pass
 
     # Fallback: yt-dlp auto-subtitles
     try:
