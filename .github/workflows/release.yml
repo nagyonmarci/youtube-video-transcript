@@ -29,35 +29,22 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Compute release tag
+      - name: Bump version and push tag
         id: version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag_prefix: v
+          release_branches: master
+
+      - name: Set release env
+        id: env_setup
         shell: bash
         run: |
           set -euo pipefail
-
-          prefix="v$(date -u +'%Y.%m.%d')"
-          latest="$(
-            git ls-remote --tags origin "refs/tags/${prefix}.*" \
-              | awk -v prefix="${prefix}" '$2 ~ "^refs/tags/" prefix "\\.[0-9]+$" {
-                  sub("^refs/tags/" prefix "\\.", "", $2)
-                  print $2
-                }' \
-              | sort -n \
-              | tail -1
-          )"
-
-          if [[ -z "${latest}" ]]; then
-            next=1
-          else
-            next=$((latest + 1))
-          fi
-
-          tag="${prefix}.${next}"
           repo_lc="${GITHUB_REPOSITORY,,}"
-
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "repo_lc=${repo_lc}" >> "$GITHUB_OUTPUT"
-          echo "RELEASE_TAG=${tag}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${{ steps.version.outputs.new_tag }}" >> "$GITHUB_ENV"
           echo "IMAGE_PREFIX=${REGISTRY}/${repo_lc}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
@@ -76,12 +63,12 @@ jobs:
           context: ./fetcher
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.version.outputs.repo_lc }}/fetcher:${{ steps.version.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ steps.version.outputs.repo_lc }}/fetcher:latest
+            ${{ env.REGISTRY }}/${{ steps.env_setup.outputs.repo_lc }}/fetcher:${{ steps.version.outputs.new_tag }}
+            ${{ env.REGISTRY }}/${{ steps.env_setup.outputs.repo_lc }}/fetcher:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.tag }}
+            org.opencontainers.image.version=${{ steps.version.outputs.new_tag }}
 
       - name: Build and publish frontend image
         uses: docker/build-push-action@v6
@@ -89,12 +76,12 @@ jobs:
           context: ./frontend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.version.outputs.repo_lc }}/frontend:${{ steps.version.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ steps.version.outputs.repo_lc }}/frontend:latest
+            ${{ env.REGISTRY }}/${{ steps.env_setup.outputs.repo_lc }}/frontend:${{ steps.version.outputs.new_tag }}
+            ${{ env.REGISTRY }}/${{ steps.env_setup.outputs.repo_lc }}/frontend:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.tag }}
+            org.opencontainers.image.version=${{ steps.version.outputs.new_tag }}
 
       - name: Build and publish whisper image
         uses: docker/build-push-action@v6
@@ -102,22 +89,12 @@ jobs:
           context: ./whisper
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.version.outputs.repo_lc }}/whisper:${{ steps.version.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ steps.version.outputs.repo_lc }}/whisper:latest
+            ${{ env.REGISTRY }}/${{ steps.env_setup.outputs.repo_lc }}/whisper:${{ steps.version.outputs.new_tag }}
+            ${{ env.REGISTRY }}/${{ steps.env_setup.outputs.repo_lc }}/whisper:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.tag }}
-
-      - name: Create git tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${RELEASE_TAG}" "${{ github.event.workflow_run.head_sha }}" \
-            -m "Release ${RELEASE_TAG}"
-          git push origin "${RELEASE_TAG}"
+            org.opencontainers.image.version=${{ steps.version.outputs.new_tag }}
 
       - name: Create GitHub release
         env:
