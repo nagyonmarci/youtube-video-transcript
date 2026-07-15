@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Awaitable, Callable, Optional
 
 import config
 import worker_state
@@ -53,40 +54,66 @@ def _init_handlers():
 _init_handlers()
 
 
-async def worker_loop(worker_name: str = "fetch-worker"):
-    """Main background worker that processes queued tasks."""
+async def _ai_on_idle(worker_name: str) -> None:
+    await worker_state.refresh_app_settings_if_due()
+    await maybe_enqueue_ai_year_backfill(source=worker_name)
+
+
+async def run_worker(
+    queue: str,
+    handlers: dict,
+    worker_name: str,
+    *,
+    label: str,
+    error_prefix: str,
+    stop_flag_attr: str,
+    job_id_attr: str,
+    task_info_attr: str,
+    enabled_check: Optional[Callable[[], bool]] = None,
+    on_idle: Optional[Callable[[str], Awaitable[None]]] = None,
+    cooldown_seconds: Optional[Callable[[], int]] = None,
+    refresh_each_iteration: bool = False,
+):
+    """Shared claim/dispatch/finish loop body for the fetch/quick/ai queue workers."""
     while True:
-        if worker_state.stop_flag or worker_state.stop_fetch_flag:
+        if worker_state.stop_flag or getattr(worker_state, stop_flag_attr):
             await asyncio.sleep(WORKER_IDLE_SLEEP)
+            continue
+        if refresh_each_iteration:
+            await worker_state.refresh_app_settings_if_due()
+        if enabled_check is not None and not enabled_check():
+            await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
         try:
             await reset_stale_running_jobs_if_due()
         except Exception as e:
-            logger.warning(f"Could not reset stale fetch jobs: {e}")
+            logger.warning(f"Could not reset stale {label} jobs: {e}")
         try:
-            job = await claim_next_job("fetch", worker_name)
+            job = await claim_next_job(queue, worker_name)
         except Exception as e:
-            logger.warning(f"Could not poll fetch jobs: {e}")
+            logger.warning(f"Could not poll {label} jobs: {e}")
             await asyncio.sleep(WORKER_POLL_BACKOFF)
             continue
 
         if not job:
+            if on_idle is not None:
+                await on_idle(worker_name)
             await asyncio.sleep(WORKER_IDLE_SLEEP)
             continue
 
         await worker_state.refresh_app_settings_if_due(force=True)
         task = job.get("payload") or {}
         task_type = task.get("type")
-        worker_state.current_job_id = job["id"]
-        worker_state.current_task_info = {}
+        setattr(worker_state, job_id_attr, job["id"])
+        setattr(worker_state, task_info_attr, {})
         job_id_token = worker_state.current_job_id_var.set(job["id"])
-        job_queue_token = worker_state.current_job_queue_var.set("fetch")
-        task_info_token = worker_state.current_task_info_var.set(worker_state.current_task_info)
+        job_queue_token = worker_state.current_job_queue_var.set(queue)
+        task_info_token = worker_state.current_task_info_var.set(getattr(worker_state, task_info_attr))
         heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
         try:
-            handler = FETCH_HANDLERS.get(task_type)
+            handler = handlers.get(task_type)
             if not handler:
-                raise ValueError(f"Unknown fetch job type: {task_type}")
+                raise ValueError(f"Unknown {label} job type: {task_type}")
             await handler(task)
             latest = await directus.get_job(job["id"])
             if latest and latest.get("status") != "cancelled":
@@ -102,7 +129,7 @@ async def worker_loop(worker_name: str = "fetch-worker"):
             await retry_or_fail_job(job, RuntimeError(STOPPED_BY_USER), stopped=True)
             raise
         except Exception as e:
-            logger.error(f"Worker error on task {task}: {e}", exc_info=True)
+            logger.error(f"{error_prefix} error on task {task}: {e}", exc_info=True)
             await retry_or_fail_job(job, e)
         finally:
             heartbeat_task.cancel()
@@ -113,145 +140,47 @@ async def worker_loop(worker_name: str = "fetch-worker"):
             worker_state.current_job_id_var.reset(job_id_token)
             worker_state.current_job_queue_var.reset(job_queue_token)
             worker_state.current_task_info_var.reset(task_info_token)
-            worker_state.current_task_info = {}
-            worker_state.current_job_id = None
+            setattr(worker_state, task_info_attr, {})
+            setattr(worker_state, job_id_attr, None)
+            if cooldown_seconds is not None:
+                secs = cooldown_seconds()
+                if secs > 0 and not worker_state.stop_flag and not getattr(worker_state, stop_flag_attr):
+                    await asyncio.sleep(secs)
+
+
+async def worker_loop(worker_name: str = "fetch-worker"):
+    """Main background worker that processes queued tasks."""
+    await run_worker(
+        "fetch", FETCH_HANDLERS, worker_name,
+        label="fetch", error_prefix="Worker",
+        stop_flag_attr="stop_fetch_flag",
+        job_id_attr="current_job_id", task_info_attr="current_task_info",
+    )
 
 
 async def ai_worker_loop(worker_name: str = "ai-worker"):
     """Background worker for AI notes so LLM calls do not block fetching."""
-    while True:
-        if worker_state.stop_flag or worker_state.stop_ai_flag:
-            await asyncio.sleep(WORKER_IDLE_SLEEP)
-            continue
-        await worker_state.refresh_app_settings_if_due()
-        if not config.AI_NOTES_WORKER_ENABLED:
-            await asyncio.sleep(WORKER_POLL_BACKOFF)
-            continue
-        try:
-            await reset_stale_running_jobs_if_due()
-        except Exception as e:
-            logger.warning(f"Could not reset stale AI jobs: {e}")
-        try:
-            job = await claim_next_job("ai", worker_name)
-        except Exception as e:
-            logger.warning(f"Could not poll AI jobs: {e}")
-            await asyncio.sleep(WORKER_POLL_BACKOFF)
-            continue
-
-        if not job:
-            await worker_state.refresh_app_settings_if_due()
-            await maybe_enqueue_ai_year_backfill(source=worker_name)
-            await asyncio.sleep(WORKER_IDLE_SLEEP)
-            continue
-
-        await worker_state.refresh_app_settings_if_due(force=True)
-        task = job.get("payload") or {}
-        task_type = task.get("type")
-        worker_state.current_ai_job_id = job["id"]
-        worker_state.current_ai_task_info = {}
-        job_id_token = worker_state.current_job_id_var.set(job["id"])
-        job_queue_token = worker_state.current_job_queue_var.set("ai")
-        task_info_token = worker_state.current_task_info_var.set(worker_state.current_ai_task_info)
-        heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
-        try:
-            handler = AI_HANDLERS.get(task_type)
-            if not handler:
-                raise ValueError(f"Unknown AI job type: {task_type}")
-            await handler(task)
-            latest = await directus.get_job(job["id"])
-            if latest and latest.get("status") != "cancelled":
-                finished = datetime.now(timezone.utc)
-                await directus.update_job(job["id"], {
-                    "status": "done",
-                    "finished_at": finished.isoformat(),
-                    "duration_seconds": job_duration_seconds(job, finished),
-                    "locked_at": None,
-                    "locked_by": None,
-                })
-        except asyncio.CancelledError:
-            await retry_or_fail_job(job, RuntimeError(STOPPED_BY_USER), stopped=True)
-            raise
-        except Exception as e:
-            logger.error(f"AI worker error on task {task}: {e}", exc_info=True)
-            await retry_or_fail_job(job, e)
-        finally:
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            worker_state.current_job_id_var.reset(job_id_token)
-            worker_state.current_job_queue_var.reset(job_queue_token)
-            worker_state.current_task_info_var.reset(task_info_token)
-            worker_state.current_ai_task_info = {}
-            worker_state.current_ai_job_id = None
-            if config.AI_NOTES_JOB_COOLDOWN_SECONDS > 0 and not worker_state.stop_flag and not worker_state.stop_ai_flag:
-                await asyncio.sleep(config.AI_NOTES_JOB_COOLDOWN_SECONDS)
+    await run_worker(
+        "ai", AI_HANDLERS, worker_name,
+        label="AI", error_prefix="AI worker",
+        stop_flag_attr="stop_ai_flag",
+        job_id_attr="current_ai_job_id", task_info_attr="current_ai_task_info",
+        enabled_check=lambda: config.AI_NOTES_WORKER_ENABLED,
+        on_idle=_ai_on_idle,
+        cooldown_seconds=lambda: config.AI_NOTES_JOB_COOLDOWN_SECONDS,
+        refresh_each_iteration=True,
+    )
 
 
 async def quick_worker_loop(worker_name: str = "quick-worker"):
     """Background worker for quick summaries — runs before the full AI notes worker."""
-    while True:
-        if worker_state.stop_flag or worker_state.stop_quick_flag:
-            await asyncio.sleep(WORKER_IDLE_SLEEP)
-            continue
-        await worker_state.refresh_app_settings_if_due()
-        try:
-            await reset_stale_running_jobs_if_due()
-        except Exception as e:
-            logger.warning(f"Could not reset stale quick jobs: {e}")
-        try:
-            job = await claim_next_job(QUEUE_QUICK, worker_name)
-        except Exception as e:
-            logger.warning(f"Could not poll quick jobs: {e}")
-            await asyncio.sleep(WORKER_POLL_BACKOFF)
-            continue
-
-        if not job:
-            await asyncio.sleep(WORKER_IDLE_SLEEP)
-            continue
-
-        await worker_state.refresh_app_settings_if_due(force=True)
-        task = job.get("payload") or {}
-        task_type = task.get("type")
-        worker_state.current_quick_job_id = job["id"]
-        worker_state.current_quick_task_info = {}
-        job_id_token = worker_state.current_job_id_var.set(job["id"])
-        job_queue_token = worker_state.current_job_queue_var.set(QUEUE_QUICK)
-        task_info_token = worker_state.current_task_info_var.set(worker_state.current_quick_task_info)
-        heartbeat_task = asyncio.create_task(heartbeat_job(job["id"]))
-        try:
-            handler = QUICK_HANDLERS.get(task_type)
-            if not handler:
-                raise ValueError(f"Unknown quick job type: {task_type}")
-            await handler(task)
-            latest = await directus.get_job(job["id"])
-            if latest and latest.get("status") != "cancelled":
-                finished = datetime.now(timezone.utc)
-                await directus.update_job(job["id"], {
-                    "status": "done",
-                    "finished_at": finished.isoformat(),
-                    "duration_seconds": job_duration_seconds(job, finished),
-                    "locked_at": None,
-                    "locked_by": None,
-                })
-        except asyncio.CancelledError:
-            await retry_or_fail_job(job, RuntimeError(STOPPED_BY_USER), stopped=True)
-            raise
-        except Exception as e:
-            logger.error(f"Quick worker error on task {task}: {e}", exc_info=True)
-            await retry_or_fail_job(job, e)
-        finally:
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            worker_state.current_job_id_var.reset(job_id_token)
-            worker_state.current_job_queue_var.reset(job_queue_token)
-            worker_state.current_task_info_var.reset(task_info_token)
-            worker_state.current_quick_task_info = {}
-            worker_state.current_quick_job_id = None
+    await run_worker(
+        QUEUE_QUICK, QUICK_HANDLERS, worker_name,
+        label="quick", error_prefix="Quick worker",
+        stop_flag_attr="stop_quick_flag",
+        job_id_attr="current_quick_job_id", task_info_attr="current_quick_task_info",
+        refresh_each_iteration=True,
+    )
 
 
 async def restart_ai_worker():
