@@ -29,6 +29,7 @@ export default function ChannelSidebar({ channels, selectedChannel, onSelect, on
   const STATUS_LABEL: Record<string, string> = {
     pending: t('status.pending'),
     processing: t('status.inProgress'),
+    backlog: t('status.backlog'),
     done: t('status.done'),
     error: t('status.error'),
   };

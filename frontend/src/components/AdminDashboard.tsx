@@ -72,6 +72,10 @@ function normalizeSettings(settings: Partial<AppSettings> = {}): AppSettings {
     ai_night_window_enabled: Boolean(settings.ai_night_window_enabled),
     ai_night_window_start_hour: Number(settings.ai_night_window_start_hour ?? 17),
     ai_night_window_stop_hour: Number(settings.ai_night_window_stop_hour ?? 7),
+    channel_job_video_cap: Number(settings.channel_job_video_cap ?? 100),
+    channel_backlog_window_enabled: Boolean(settings.channel_backlog_window_enabled ?? true),
+    channel_backlog_start_hour: Number(settings.channel_backlog_start_hour ?? 19),
+    channel_backlog_stop_hour: Number(settings.channel_backlog_stop_hour ?? 7),
   };
 }
 

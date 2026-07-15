@@ -106,6 +106,10 @@ QUICK_WORKER_CONCURRENCY = max(0, int(os.environ.get("QUICK_WORKER_CONCURRENCY",
 AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
 STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
 JOB_CLEANUP_DAYS = int(os.environ.get("JOB_CLEANUP_DAYS", "7"))
+CHANNEL_JOB_VIDEO_CAP = max(1, int(os.environ.get("CHANNEL_JOB_VIDEO_CAP", "100")))
+CHANNEL_BACKLOG_WINDOW_ENABLED = os.environ.get("CHANNEL_BACKLOG_WINDOW_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+CHANNEL_BACKLOG_START_HOUR = max(0, min(23, int(os.environ.get("CHANNEL_BACKLOG_START_HOUR", "19"))))
+CHANNEL_BACKLOG_STOP_HOUR = max(0, min(23, int(os.environ.get("CHANNEL_BACKLOG_STOP_HOUR", "7"))))
 AI_NIGHT_WINDOW_ENABLED = False
 AI_NIGHT_WINDOW_START_HOUR = 17
 AI_NIGHT_WINDOW_STOP_HOUR = 7
@@ -156,6 +160,10 @@ def current_app_settings() -> dict:
         "ai_night_window_enabled": AI_NIGHT_WINDOW_ENABLED,
         "ai_night_window_start_hour": AI_NIGHT_WINDOW_START_HOUR,
         "ai_night_window_stop_hour": AI_NIGHT_WINDOW_STOP_HOUR,
+        "channel_job_video_cap": CHANNEL_JOB_VIDEO_CAP,
+        "channel_backlog_window_enabled": CHANNEL_BACKLOG_WINDOW_ENABLED,
+        "channel_backlog_start_hour": CHANNEL_BACKLOG_START_HOUR,
+        "channel_backlog_stop_hour": CHANNEL_BACKLOG_STOP_HOUR,
     }
 
 
@@ -170,6 +178,8 @@ def apply_app_settings(settings: dict) -> None:
     global OLLAMA_NUM_CTX, OLLAMA_QUICK_NUM_CTX, OLLAMA_TEMPERATURE, OLLAMA_NUM_PREDICT
     global AI_PROVIDER, AI_CLOUD_MODEL, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL
     global AI_NIGHT_WINDOW_ENABLED, AI_NIGHT_WINDOW_START_HOUR, AI_NIGHT_WINDOW_STOP_HOUR
+    global CHANNEL_JOB_VIDEO_CAP, CHANNEL_BACKLOG_WINDOW_ENABLED
+    global CHANNEL_BACKLOG_START_HOUR, CHANNEL_BACKLOG_STOP_HOUR
 
     OLLAMA_BASE_URL = str(settings.get("ollama_base_url") or OLLAMA_BASE_URL).strip().rstrip("/")
     OLLAMA_CHAT_MODEL = str(settings.get("ollama_chat_model") or OLLAMA_CHAT_MODEL).strip()
@@ -208,6 +218,10 @@ def apply_app_settings(settings: dict) -> None:
     AI_NIGHT_WINDOW_ENABLED = bool_setting(settings.get("ai_night_window_enabled", AI_NIGHT_WINDOW_ENABLED))
     AI_NIGHT_WINDOW_START_HOUR = max(0, min(23, int_setting(settings.get("ai_night_window_start_hour"), AI_NIGHT_WINDOW_START_HOUR, 0)))
     AI_NIGHT_WINDOW_STOP_HOUR = max(0, min(23, int_setting(settings.get("ai_night_window_stop_hour"), AI_NIGHT_WINDOW_STOP_HOUR, 0)))
+    CHANNEL_JOB_VIDEO_CAP = int_setting(settings.get("channel_job_video_cap"), CHANNEL_JOB_VIDEO_CAP, 1)
+    CHANNEL_BACKLOG_WINDOW_ENABLED = bool_setting(settings.get("channel_backlog_window_enabled", CHANNEL_BACKLOG_WINDOW_ENABLED))
+    CHANNEL_BACKLOG_START_HOUR = max(0, min(23, int_setting(settings.get("channel_backlog_start_hour"), CHANNEL_BACKLOG_START_HOUR, 0)))
+    CHANNEL_BACKLOG_STOP_HOUR = max(0, min(23, int_setting(settings.get("channel_backlog_stop_hour"), CHANNEL_BACKLOG_STOP_HOUR, 0)))
     configure_ai_notes(
         base_url=OLLAMA_BASE_URL,
         model=OLLAMA_CHAT_MODEL,

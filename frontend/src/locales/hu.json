@@ -94,6 +94,7 @@
     "processing": "Feldolgozás",
     "pending": "Várakozik",
     "inProgress": "Folyamatban",
+    "backlog": "Hátralék",
     "noTranscript": "Nincs transzkript",
     "none": "Nincs",
     "aiDone": "AI kész",
@@ -215,7 +216,11 @@
     "openaiBaseUrl": "OpenAI Base URL",
     "aiNightWindowEnabled": "Éjszakai ablak (teli GPU terhelés)",
     "aiNightWindowStart": "Kezdő óra (0–23)",
-    "aiNightWindowStop": "Záró óra (0–23)"
+    "aiNightWindowStop": "Záró óra (0–23)",
+    "channelJobVideoCap": "Videók job-futásonként csatornánként",
+    "channelBacklogWindowEnabled": "Esti ablak nagy csatorna-hátralékokhoz",
+    "channelBacklogStart": "Hátralék kezdő óra (0–23)",
+    "channelBacklogStop": "Hátralék záró óra (0–23)"
   },
   "tooltip": {
     "timedTranscript": "Időbélyeges transzkript",

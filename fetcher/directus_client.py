@@ -132,7 +132,7 @@ class DirectusClient:
                 {"field": "channel_url", "type": "string", "meta": {"interface": "input", "width": "full"}, "schema": {"max_length": 512, "is_nullable": True}},
                 {"field": "channel_handle", "type": "string", "meta": {"interface": "input", "width": "half"}, "schema": {"max_length": 255, "is_nullable": True}},
                 {"field": "added_at", "type": "timestamp", "meta": {"special": ["date-created"], "interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True, "default_value": "now()"}},
-                {"field": "status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Processing", "value": "processing"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True, "default_value": "pending"}},
+                {"field": "status", "type": "string", "meta": {"interface": "select-dropdown", "width": "half", "options": {"choices": [{"text": "Pending", "value": "pending"}, {"text": "Processing", "value": "processing"}, {"text": "Backlog", "value": "backlog"}, {"text": "Done", "value": "done"}, {"text": "Error", "value": "error"}]}}, "schema": {"max_length": 50, "is_nullable": True, "default_value": "pending"}},
                 {"field": "video_count", "type": "integer", "meta": {"interface": "input", "readonly": True, "width": "half"}, "schema": {"is_nullable": True, "default_value": 0}},
                 {"field": "error_message", "type": "text", "meta": {"interface": "input-multiline", "readonly": True, "width": "full"}, "schema": {"is_nullable": True}},
                 {"field": "last_refreshed", "type": "timestamp", "meta": {"interface": "datetime", "readonly": True, "width": "half"}, "schema": {"is_nullable": True}},
@@ -523,6 +523,11 @@ class DirectusClient:
 
     async def get_all_channels(self) -> list:
         result = await self._request("GET", "/items/channels?limit=-1")
+        return result.get("data", [])
+
+    async def get_channels_by_status(self, status: str) -> list:
+        params = f'?filter[status][_eq]={status}&limit=-1'
+        result = await self._request("GET", f"/items/channels{params}")
         return result.get("data", [])
 
     async def update_channel(self, channel_id: str, data: dict) -> dict:

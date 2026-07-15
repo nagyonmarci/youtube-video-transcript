@@ -110,8 +110,14 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `AI_NIGHT_WINDOW_ENABLED` | Enable automatic full-speed AI window | `true` |
 | `AI_NIGHT_WINDOW_START_HOUR` | Hour to enable full-speed AI (0–23) | `17` |
 | `AI_NIGHT_WINDOW_STOP_HOUR` | Hour to restore day settings (0–23) | `7` |
+| `CHANNEL_JOB_VIDEO_CAP` | Max videos processed per `channel`/`refresh` job run | `100` |
+| `CHANNEL_BACKLOG_WINDOW_ENABLED` | Defer large channel backlogs to an evening window | `true` |
+| `CHANNEL_BACKLOG_START_HOUR` | Hour to start processing channel backlogs (0–23) | `19` |
+| `CHANNEL_BACKLOG_STOP_HOUR` | Hour to stop processing channel backlogs (0–23) | `7` |
 
 At `AI_NIGHT_WINDOW_START_HOUR` (default 17:00) the scheduler writes `ai_notes_auto=true`, `cooldown=0`, `ai_notes_year_backfill_enabled=true` to Directus and reloads config. At `AI_NIGHT_WINDOW_STOP_HOUR` (default 07:00) the pre-night snapshot is restored. Day settings come from **Admin → Setup** and are not affected.
+
+A `channel`/`refresh` job processes at most `CHANNEL_JOB_VIDEO_CAP` videos per run (newest first, since a channel's video list is already newest-first) instead of working through a channel's entire history in one multi-hour run. Channels with more videos left afterward are marked `status=backlog` and picked up again by an evening sweep (checked every 5 minutes, active between `CHANNEL_BACKLOG_START_HOUR` and `CHANNEL_BACKLOG_STOP_HOUR`) instead of the 07:00 daily refresh, so a large backlog doesn't block same-day channel adds or refreshes. Set `CHANNEL_BACKLOG_WINDOW_ENABLED=false` to let the daily refresh pick up backlog channels too, any time of day.
 
 AI settings are configured in **Admin → Setup** instead of `.env`: Ollama URL/model, context window (`ollama_num_ctx`, default 32 768 tokens), quick-summary context window (`ollama_quick_num_ctx`, default 4 096 tokens), temperature (default 0.1), max output tokens (`ollama_num_predict`, default 8 192), AI provider (Ollama / Anthropic / OpenAI), cloud model name, API keys, quick-summary model/timeout, AI batch limits, transcript character limit, automatic AI-after-transcript, yearly AI backfill, AI worker enable/disable, and cooldown between AI jobs. The defaults keep AI manual-only to avoid continuous GPU load.
 

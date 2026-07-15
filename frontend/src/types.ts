@@ -9,7 +9,7 @@ export interface Channel {
   channel_url: string | null;
   channel_handle: string | null;
   added_at: string | null;
-  status: 'pending' | 'processing' | 'done' | 'error' | null;
+  status: 'pending' | 'processing' | 'backlog' | 'done' | 'error' | null;
   video_count: number | null;
   error_message: string | null;
   last_refreshed: string | null;
@@ -243,6 +243,10 @@ export interface AppSettings {
   ai_night_window_enabled: boolean;
   ai_night_window_start_hour: number;
   ai_night_window_stop_hour: number;
+  channel_job_video_cap: number;
+  channel_backlog_window_enabled: boolean;
+  channel_backlog_start_hour: number;
+  channel_backlog_stop_hour: number;
 }
 
 export interface WhisperStatus {

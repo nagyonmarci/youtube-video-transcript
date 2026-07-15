@@ -295,6 +295,47 @@ export default function SettingsForm({ settingsDraft, settingsDirty, busy, onCha
             </label>
           </>
         )}
+        <label>
+          {t('label.channelJobVideoCap')}
+          <input
+            type="number"
+            min="1"
+            value={settingsDraft.channel_job_video_cap}
+            onChange={e => onChange('channel_job_video_cap', Number(e.target.value))}
+          />
+        </label>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={settingsDraft.channel_backlog_window_enabled}
+            onChange={e => onChange('channel_backlog_window_enabled', e.target.checked)}
+          />
+          {t('label.channelBacklogWindowEnabled')}
+        </label>
+        {settingsDraft.channel_backlog_window_enabled && (
+          <>
+            <label>
+              {t('label.channelBacklogStart')}
+              <input
+                type="number"
+                min="0"
+                max="23"
+                value={settingsDraft.channel_backlog_start_hour}
+                onChange={e => onChange('channel_backlog_start_hour', Number(e.target.value))}
+              />
+            </label>
+            <label>
+              {t('label.channelBacklogStop')}
+              <input
+                type="number"
+                min="0"
+                max="23"
+                value={settingsDraft.channel_backlog_stop_hour}
+                onChange={e => onChange('channel_backlog_stop_hour', Number(e.target.value))}
+              />
+            </label>
+          </>
+        )}
         <div className="settings-actions">
           <button type="submit" disabled={busy || !settingsDirty}>{t('btn.save')}</button>
           <button type="button" disabled={busy || !settingsDirty} onClick={onCancel}>{t('btn.cancel')}</button>

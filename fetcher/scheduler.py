@@ -35,11 +35,45 @@ async def daily_refresh():
     logger.info("Starting daily channel refresh")
     channels = await directus.get_all_channels()
     for channel in channels:
-        if channel.get("status") == "processing":
+        status = channel.get("status")
+        if status == "processing":
+            continue
+        if status == "backlog" and config.CHANNEL_BACKLOG_WINDOW_ENABLED:
+            # Large channels still working through their backlog are left to the evening sweep.
             continue
         await enqueue_fetch_job({"type": "refresh", "channel_id": channel["id"]})
         await rate_limited_sleep_channel()
     logger.info(f"Queued {len(channels)} channels for daily refresh")
+
+
+async def sweep_channel_backlog():
+    """Enqueue refresh jobs for channels still working through a large video backlog."""
+    channels = await directus.get_channels_by_status("backlog")
+    for channel in channels:
+        await enqueue_fetch_job({"type": "refresh", "channel_id": channel["id"]})
+        await rate_limited_sleep_channel()
+    if channels:
+        logger.info(f"Queued {len(channels)} backlog channels for evening catch-up")
+
+
+async def check_channel_backlog_window():
+    """Runs every 5 minutes; sweeps backlog channels while inside the configured evening window."""
+    if not config.CHANNEL_BACKLOG_WINDOW_ENABLED:
+        return
+
+    tz = config.get_scheduler_timezone()
+    now_hour = datetime.now(tz).hour
+    start_h = config.CHANNEL_BACKLOG_START_HOUR
+    stop_h = config.CHANNEL_BACKLOG_STOP_HOUR
+
+    # Overnight window (e.g. 19–07): in window if hour >= start OR hour < stop
+    if start_h > stop_h:
+        in_window = now_hour >= start_h or now_hour < stop_h
+    else:
+        in_window = start_h <= now_hour < stop_h
+
+    if in_window:
+        await sweep_channel_backlog()
 
 
 async def ai_night_window_start():
@@ -148,6 +182,14 @@ def start_refresh_scheduler():
         replace_existing=True,
         next_run_time=datetime.now(config.get_scheduler_timezone()),
     )
+    scheduler.add_job(
+        check_channel_backlog_window,
+        "interval",
+        minutes=5,
+        id="check_channel_backlog_window",
+        replace_existing=True,
+        next_run_time=datetime.now(config.get_scheduler_timezone()),
+    )
     scheduler.start()
     logger.info(f"Daily refresh scheduled: {config.REFRESH_CRON} ({config.SCHEDULER_TIMEZONE})")
     if config.AI_NOTES_AUTO and config.AI_NOTES_YEAR_BACKFILL_ENABLED:
@@ -157,4 +199,11 @@ def start_refresh_scheduler():
             config.AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS,
             config.AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE,
             config.AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT,
+        )
+    if config.CHANNEL_BACKLOG_WINDOW_ENABLED:
+        logger.info(
+            "Channel backlog window active: %02d:00-%02d:00, cap=%s videos/run",
+            config.CHANNEL_BACKLOG_START_HOUR,
+            config.CHANNEL_BACKLOG_STOP_HOUR,
+            config.CHANNEL_JOB_VIDEO_CAP,
         )

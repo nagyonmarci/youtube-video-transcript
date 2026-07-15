@@ -34,6 +34,7 @@ export default function ChannelAdminPanel({ channels, onChanged }: ChannelAdminP
   const STATUS_OPTIONS = [
     { value: 'pending', label: t('status.pending') },
     { value: 'processing', label: t('status.inProgress') },
+    { value: 'backlog', label: t('status.backlog') },
     { value: 'done', label: t('status.done') },
     { value: 'error', label: t('status.error') },
   ];

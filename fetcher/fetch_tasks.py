@@ -186,17 +186,21 @@ async def process_channel_task(task: dict):
             if v["video_id"] not in existing
             or (existing.get(v["video_id"], {}).get("status") or "pending") != "done"
         ]
-        transcript_videos = [
+        transcript_videos_all = [
             v for v in transcript_candidates
             if not _is_members_video(v, existing.get(v["video_id"]))
         ]
-        skipped_members = len(transcript_candidates) - len(transcript_videos)
+        # Newest-first listing order means capping here also prioritizes recent videos for free.
+        transcript_videos = transcript_videos_all[:config.CHANNEL_JOB_VIDEO_CAP]
+        has_more_backlog = len(transcript_videos_all) > len(transcript_videos)
+        skipped_members = len(transcript_candidates) - len(transcript_videos_all)
         transcript_new = sum(1 for v in transcript_videos if v["video_id"] not in existing)
         transcript_retries = len(transcript_videos) - transcript_new
         logger.info(
             f"Channel {channel_url}: {len(videos)} total, {len(new_videos)} new, "
             f"{transcript_new} transcript new, {transcript_retries} transcript retries, "
-            f"{skipped_members} members-only skipped"
+            f"{skipped_members} members-only skipped, "
+            f"{len(transcript_videos_all) - len(transcript_videos)} deferred to backlog"
         )
 
         if channel_id:
@@ -209,7 +213,7 @@ async def process_channel_task(task: dict):
 
         if channel_id:
             await directus.update_channel(channel_id, {
-                "status": "done",
+                "status": "backlog" if has_more_backlog else "done",
                 "last_refreshed": now_iso(),
             })
 

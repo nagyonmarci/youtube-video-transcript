@@ -50,6 +50,10 @@ class AppSettingsRequest(BaseModel):
     ai_night_window_enabled: Optional[bool] = None
     ai_night_window_start_hour: Optional[int] = None
     ai_night_window_stop_hour: Optional[int] = None
+    channel_job_video_cap: Optional[int] = None
+    channel_backlog_window_enabled: Optional[bool] = None
+    channel_backlog_start_hour: Optional[int] = None
+    channel_backlog_stop_hour: Optional[int] = None
 
 
 class AiNotesRequest(BaseModel):

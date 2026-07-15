@@ -94,6 +94,7 @@
     "processing": "Processing",
     "pending": "Pending",
     "inProgress": "In Progress",
+    "backlog": "Backlog",
     "noTranscript": "No transcript",
     "none": "None",
     "aiDone": "AI done",
@@ -214,7 +215,11 @@
     "openaiBaseUrl": "OpenAI Base URL",
     "aiNightWindowEnabled": "Night window (full GPU load)",
     "aiNightWindowStart": "Start hour (0–23)",
-    "aiNightWindowStop": "Stop hour (0–23)"
+    "aiNightWindowStop": "Stop hour (0–23)",
+    "channelJobVideoCap": "Videos per channel job run",
+    "channelBacklogWindowEnabled": "Evening window for large channel backlogs",
+    "channelBacklogStart": "Backlog start hour (0–23)",
+    "channelBacklogStop": "Backlog stop hour (0–23)"
   },
   "tooltip": {
     "timedTranscript": "Timed transcript",
