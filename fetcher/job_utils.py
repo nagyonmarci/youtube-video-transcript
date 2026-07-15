@@ -138,13 +138,7 @@ def normalize_claimed_job(row) -> Optional[dict]:
         return None
     job = dict(row)
     job["id"] = str(job["id"])
-    payload = job.get("payload")
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
-            payload = {}
-    job["payload"] = payload or {}
+    job["payload"] = job.get("payload") or {}
     for key in ("created_at", "started_at", "finished_at", "locked_at"):
         if job.get(key) is not None:
             job[key] = job[key].isoformat()

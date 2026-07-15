@@ -1,13 +1,13 @@
-import { useState, useRef, type FormEvent, type ChangeEvent } from 'react';
-import { fetchChannels, fetchVideo, refreshDates, generateAiNotes } from '../lib/fetcher.ts';
+import { useState } from 'react';
+import { refreshDates, generateAiNotes } from '../lib/fetcher.ts';
 import { getAllChannelVideos } from '../lib/directus.ts';
 import {
   channelToTxt, channelToMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
   downloadFile, sanitizeFilename,
 } from '../lib/export.ts';
 import { useT } from '../lib/i18n.tsx';
-import { parseChannelFile } from '../lib/channelUtils.ts';
 import { useMessage } from '../lib/useMessage.ts';
+import { useQuickAdd } from '../lib/useQuickAdd.ts';
 import type { Channel } from '../types.ts';
 
 interface TopActionsProps {
@@ -19,56 +19,11 @@ interface TopActionsProps {
 export default function TopActions({ channels, selectedChannel, onChannelsChanged }: TopActionsProps) {
   const { t } = useT();
   const { msg, showMsg } = useMessage();
-  const [channelInput, setChannelInput] = useState('');
-  const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  async function addChannels(urls: string[]) {
-    if (!urls.length) return;
-    setBusy(true);
-    try {
-      const result = await fetchChannels(urls);
-      showMsg(t('msg.channelQueued', { count: result.count }));
-      onChannelsChanged();
-    } catch (e) {
-      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleChannelSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const urls = channelInput.split('\n').map(l => l.trim()).filter(Boolean);
-    await addChannels(urls);
-    setChannelInput('');
-  }
-
-  async function handleVideoSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const url = videoInput.trim();
-    if (!url) return;
-    setBusy(true);
-    try {
-      await fetchVideo(url, selectedChannel?.id ?? null);
-      showMsg(t('msg.videoQueued'));
-      setVideoInput('');
-    } catch (e) {
-      showMsg(t('msg.errGeneric', { error: (e as Error).message }), true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const urls = parseChannelFile(text);
-    e.target.value = '';
-    await addChannels(urls);
-  }
+  const {
+    channelInput, setChannelInput, videoInput, setVideoInput,
+    fileInputRef, handleChannelSubmit, handleVideoSubmit, handleFileUpload,
+  } = useQuickAdd({ showMsg, busy, setBusy, videoChannelId: selectedChannel?.id ?? null, onChannelsAdded: onChannelsChanged });
 
   async function handleExportAll(fmt: 'txt' | 'md' | 'obsidian', timed = false) {
     try {

@@ -1,23 +1,9 @@
 import type { FetcherStatus, WhisperStatus, Job, Schedule, AppSettings } from '../types.ts';
+import { createRequester } from './httpClient.ts';
 
 const FETCHER_URL = '/api';
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${FETCHER_URL}${path}`, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    let detail = '';
-    try {
-      const data = await res.json();
-      detail = data.detail ? `: ${data.detail}` : '';
-    } catch {}
-    throw new Error(`${method} ${path} → ${res.status}${detail}`);
-  }
-  return res.status === 204 ? (null as T) : res.json();
-}
+const req = createRequester(FETCHER_URL);
 
 interface FetchChannelsResult {
   queued: { url: string; action: 'refresh' | 'fetch'; id: string }[];
