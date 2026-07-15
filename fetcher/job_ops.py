@@ -43,11 +43,6 @@ async def apply_ai_worker_queue_gate(enabled: bool) -> int:
         return 0
 
 
-async def enqueue_quick_job(task: dict, label: Optional[str] = None):
-    """Create a persistent quick-summary job."""
-    return await directus.create_job(QUEUE_QUICK, task, label=label, dedupe_key=job_dedupe_key(QUEUE_QUICK, task))
-
-
 async def enqueue_ai_note(video_id: str):
     """Mark a video as queued for AI notes and route it to the first pipeline step."""
     await update_video_ai_status(video_id, "pending")

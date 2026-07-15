@@ -8,7 +8,7 @@ import config
 import worker_state
 from ai_tasks import process_ai_notes_task, process_single_ai_note_task, process_quick_note_task
 from constants import (
-    QUEUE_FETCH, QUEUE_QUICK, QUEUE_AI,
+    QUEUE_QUICK, QUEUE_AI,
     JOB_QUICK_NOTE_VIDEO, JOB_AI_NOTE_VIDEO,
     WORKER_IDLE_SLEEP, WORKER_POLL_BACKOFF, IDLE_SLEEP,
     STOPPED_BY_USER, BOOTSTRAP_CHECK_INTERVAL,

@@ -22,7 +22,6 @@ import {
 } from '../lib/fetcher.ts';
 import ChannelAdminPanel from './ChannelAdminPanel.tsx';
 import TopActions from './TopActions.tsx';
-import ScheduleForm from './ScheduleForm.tsx';
 import SettingsForm from './SettingsForm.tsx';
 import StatisticsPanel from './StatisticsPanel.tsx';
 import CollapsibleSection from './CollapsibleSection.tsx';
@@ -792,14 +791,23 @@ export default function AdminDashboard({
           title: t('header.schedule'),
           subtitle: `${scheduleCron} · ${scheduleTimezone}`,
           body: (
-            <ScheduleForm
-              scheduleTime={scheduleTime}
-              scheduleTimezone={scheduleTimezone}
-              busy={busy}
-              onTimeChange={setScheduleTime}
-              onTimezoneChange={setScheduleTimezone}
-              onSubmit={saveSchedule}
-            />
+            <form className="schedule-form" onSubmit={saveSchedule}>
+              <label>
+                {t('label.dailyRefresh')}
+                <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} />
+              </label>
+              <label>
+                {t('label.timezone')}
+                <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
+                  <option value="Europe/Budapest">Europe/Budapest</option>
+                  <option value="UTC">UTC</option>
+                  <option value="Europe/London">Europe/London</option>
+                  <option value="Europe/Berlin">Europe/Berlin</option>
+                  <option value="America/New_York">America/New_York</option>
+                </select>
+              </label>
+              <button type="submit" disabled={busy}>{t('btn.save')}</button>
+            </form>
           ),
         };
       case 'setup':
