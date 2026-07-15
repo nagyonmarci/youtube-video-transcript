@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getVideosInRange } from '../lib/directus.ts';
-import { generateAiNoteForVideo } from '../lib/fetcher.ts';
+import { generateAiNoteForVideo, refreshVideoThumbnail } from '../lib/fetcher.ts';
 import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObsidianMd, videoToMarkmapMd, markmapFilename } from '../lib/export.ts';
 import { useT } from '../lib/i18n.tsx';
 import { useMessage } from '../lib/useMessage.ts';
@@ -49,6 +49,35 @@ function listPreview(items: string[] | null | undefined, limit = 3) {
     <ul className="daily-list">
       {items.slice(0, limit).map((item, index) => <li key={index}>{item}</li>)}
     </ul>
+  );
+}
+
+function DailyThumbnail({ video }: { video: Video }) {
+  const fallback = video.video_id ? `https://i.ytimg.com/vi/${video.video_id}/hqdefault.jpg` : null;
+  const [src, setSrc] = useState(video.thumbnail_url || fallback);
+  const attempted = useRef(false);
+
+  if (!src) return null;
+
+  const handleError = () => {
+    if (attempted.current || !video.video_id) {
+      setSrc(null);
+      return;
+    }
+    attempted.current = true;
+    refreshVideoThumbnail(video.video_id)
+      .then(res => setSrc(res.thumbnail_url || null))
+      .catch(() => setSrc(null));
+  };
+
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '6px', background: 'rgba(255,255,255,0.06)' }}
+      onError={handleError}
+    />
   );
 }
 
@@ -149,14 +178,7 @@ export default function DailyUpdatesPage({ onSelectVideo }: DailyUpdatesPageProp
         <div className="daily-video-list">
           {filteredVideos.map(video => (
             <article key={video.id} className="daily-video-card">
-              {video.thumbnail_url && (
-                <img
-                  src={video.thumbnail_url}
-                  alt=""
-                  loading="lazy"
-                  style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '6px', background: 'rgba(255,255,255,0.06)' }}
-                />
-              )}
+              <DailyThumbnail video={video} />
               <div className="daily-video-main">
                 <a href={video.url ?? undefined} target="_blank" rel="noopener noreferrer" className="daily-video-title">
                   {video.title || t('state.unknownTitle')}

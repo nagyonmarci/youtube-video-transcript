@@ -92,6 +92,10 @@ export function refreshThumbnails(): Promise<unknown> {
   return req('POST', '/refresh-thumbnails');
 }
 
+export function refreshVideoThumbnail(videoId: string): Promise<{ thumbnail_url: string | null }> {
+  return req('POST', `/refresh-thumbnail/${videoId}`);
+}
+
 type GenerateAiNotesResult =
   | { queued: false; existing: true; job_id: string }
   | { queued: true; limit: number; job_id: string };
