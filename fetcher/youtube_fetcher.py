@@ -294,26 +294,6 @@ def fetch_channel_videos(channel_url: str) -> list[dict]:
     return videos
 
 
-def fetch_channel_name(channel_url: str) -> str:
-    """Fetch the channel display name via yt-dlp."""
-    cmd = [
-        "yt-dlp",
-        "--flat-playlist",
-        "--dump-single-json",
-        "--no-warnings",
-        "--playlist-end", "1",
-        normalize_to_videos_url(channel_url),
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.stdout:
-            info = json.loads(result.stdout)
-            return info.get("channel") or info.get("uploader") or info.get("title") or ""
-    except Exception:
-        pass
-    return ""
-
-
 def format_transcript_timestamp(seconds: float) -> str:
     """Format transcript seconds as H:MM:SS or M:SS."""
     total = max(0, int(seconds))
@@ -387,16 +367,6 @@ def fetch_transcript_variants(video_id: str) -> tuple[Optional[str], Optional[st
         logger.warning(f"yt-dlp subtitle fallback failed for {video_id}: {e}")
 
     return None, None
-
-
-def fetch_transcript(video_id: str) -> Optional[str]:
-    """
-    Try to fetch transcript using youtube-transcript-api.
-    Falls back to yt-dlp auto-subtitles.
-    Returns plain text or None.
-    """
-    plain, _timed = fetch_transcript_variants(video_id)
-    return plain
 
 
 def _parse_vtt(vtt_content: str) -> str:

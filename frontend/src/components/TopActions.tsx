@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, type FormEvent, type ChangeEvent } from 'react';
-import { fetchChannels, fetchVideo, refreshDates, generateAiNotes, getSchedule, updateSchedule } from '../lib/fetcher.ts';
+import { useState, useRef, type FormEvent, type ChangeEvent } from 'react';
+import { fetchChannels, fetchVideo, refreshDates, generateAiNotes } from '../lib/fetcher.ts';
 import { getAllChannelVideos } from '../lib/directus.ts';
 import {
   channelToTxt, channelToMd, allChannelsToTxt, allChannelsToMd, allChannelsToObsidianMd,
@@ -7,29 +7,21 @@ import {
 } from '../lib/export.ts';
 import { useT } from '../lib/i18n.tsx';
 import { parseChannelFile } from '../lib/channelUtils.ts';
-import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.ts';
 import { useMessage } from '../lib/useMessage.ts';
-import { DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.ts';
 import type { Channel } from '../types.ts';
 
 interface TopActionsProps {
   channels: Channel[];
   selectedChannel: Channel | null;
   onChannelsChanged: () => void;
-  showSchedule?: boolean;
 }
 
-export default function TopActions({ channels, selectedChannel, onChannelsChanged, showSchedule = false }: TopActionsProps) {
+export default function TopActions({ channels, selectedChannel, onChannelsChanged }: TopActionsProps) {
   const { t } = useT();
   const { msg, showMsg } = useMessage();
   const [channelInput, setChannelInput] = useState('');
   const [videoInput, setVideoInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [scheduleCron, setScheduleCron] = useState(DEFAULT_CRON);
-  const [scheduleTimezone, setScheduleTimezone] = useState(DEFAULT_TIMEZONE);
-  const [scheduleTime, setScheduleTime] = useState(DEFAULT_CRON_TIME);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [advancedSchedule, setAdvancedSchedule] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function addChannels(urls: string[]) {
@@ -45,20 +37,6 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       setBusy(false);
     }
   }
-
-  useEffect(() => {
-    let alive = true;
-    getSchedule()
-      .then(schedule => {
-        if (!alive) return;
-        const cron = schedule.cron || '0 7 * * *';
-        setScheduleCron(cron);
-        setScheduleTime(cronToDailyTime(cron));
-        setScheduleTimezone(schedule.timezone || 'Europe/Budapest');
-      })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
 
   async function handleChannelSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -110,24 +88,6 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
       downloadFile(content, `osszes_transkript${timed ? '_idovel' : ''}.${fmt}`);
     } catch (e) {
       showMsg(t('msg.errExport', { error: (e as Error).message }), true);
-    }
-  }
-
-  async function handleScheduleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const nextCron = advancedSchedule ? scheduleCron : dailyTimeToCron(scheduleTime);
-      const schedule = await updateSchedule(nextCron, scheduleTimezone);
-      setScheduleCron(schedule.cron);
-      setScheduleTime(cronToDailyTime(schedule.cron));
-      setScheduleTimezone(schedule.timezone);
-      showMsg(t('msg.scheduleUpdated'));
-      setScheduleOpen(false);
-    } catch (e) {
-      showMsg(t('msg.errSchedule', { error: (e as Error).message }), true);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -222,66 +182,6 @@ export default function TopActions({ channels, selectedChannel, onChannelsChange
           {t('btn.generateMissing')}
         </button>
       </div>
-
-      {showSchedule && (
-        <div className="card top-action-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-            <div>
-              <h3 className="card-title" style={{ marginBottom: '0.15rem' }}>{t('header.autoRefresh')}</h3>
-              <div style={{ fontSize: '0.78rem', color: '#aaa' }}>{scheduleCron} · {scheduleTimezone}</div>
-            </div>
-            <button type="button" onClick={() => setScheduleOpen(v => !v)} style={{ whiteSpace: 'nowrap' }}>
-              {scheduleOpen ? t('btn.close') : t('btn.settings')}
-            </button>
-          </div>
-
-          {scheduleOpen && (
-            <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
-                {t('label.dailyRefreshTime')}
-                <input
-                  type="time"
-                  value={scheduleTime}
-                  onChange={e => {
-                    setScheduleTime(e.target.value);
-                    if (!advancedSchedule) setScheduleCron(dailyTimeToCron(e.target.value));
-                  }}
-                />
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.78rem', color: '#aaa' }}>
-                {t('label.timezone')}
-                <select value={scheduleTimezone} onChange={e => setScheduleTimezone(e.target.value)}>
-                  <option value="Europe/Budapest">Europe/Budapest</option>
-                  <option value="UTC">UTC</option>
-                  <option value="Europe/London">Europe/London</option>
-                  <option value="Europe/Berlin">Europe/Berlin</option>
-                  <option value="America/New_York">America/New_York</option>
-                </select>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: '#aaa' }}>
-                <input
-                  type="checkbox"
-                  checked={advancedSchedule}
-                  onChange={e => setAdvancedSchedule(e.target.checked)}
-                />
-                {t('label.advancedCron')}
-              </label>
-              {advancedSchedule && (
-                <input
-                  value={scheduleCron}
-                  onChange={e => setScheduleCron(e.target.value)}
-                  placeholder={t('placeholder.cronExpr')}
-                  spellCheck={false}
-                  style={{ fontFamily: 'monospace' }}
-                />
-              )}
-              <button type="submit" disabled={busy || !scheduleTimezone.trim() || (advancedSchedule ? !scheduleCron.trim() : !scheduleTime)}>
-                {t('btn.save')}
-              </button>
-            </form>
-          )}
-        </div>
-      )}
 
       {msg && (
         <div className={`status-msg ${msg.isError ? 'status-error' : 'status-success'}`}>

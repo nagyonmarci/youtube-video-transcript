@@ -7,26 +7,8 @@ IDLE_SLEEP = 3600
 
 STOPPED_BY_USER = "Stopped by user"
 
-QUEUE_FETCH = "fetch"
 QUEUE_QUICK = "quick"
 QUEUE_AI = "ai"
 
-JOB_CHANNEL = "channel"
-JOB_VIDEO = "video"
-JOB_REFRESH = "refresh"
-JOB_REFRESH_DATES = "refresh_dates"
-JOB_REFRESH_THUMBNAILS = "refresh_thumbnails"
-JOB_AI_NOTES = "ai_notes"
 JOB_AI_NOTE_VIDEO = "ai_note_video"
 JOB_QUICK_NOTE_VIDEO = "quick_note_video"
-
-STATUS_QUEUED = "queued"
-STATUS_RUNNING = "running"
-STATUS_PAUSED = "paused"
-STATUS_DONE = "done"
-STATUS_ERROR = "error"
-STATUS_CANCELLED = "cancelled"
-
-AI_STATUS_PENDING = "pending"
-AI_STATUS_DONE = "done"
-AI_STATUS_ERROR = "error"
