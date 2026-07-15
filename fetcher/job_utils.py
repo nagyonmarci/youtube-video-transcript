@@ -158,7 +158,7 @@ def parse_datetime(value) -> Optional[datetime]:
         return value
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return datetime.fromisoformat(value)
         except ValueError:
             return None
     return None

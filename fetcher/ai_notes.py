@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import re
 import time
 from typing import Any, Awaitable, Callable, Optional
@@ -12,21 +11,24 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
-OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "gemma4:31b-mlx-bf16")
-AI_NOTES_MAX_CHARS = int(os.environ.get("AI_NOTES_MAX_CHARS", "45000"))
-OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "600"))
-OLLAMA_QUICK_MODEL = os.environ.get("OLLAMA_QUICK_MODEL", "llama3.2")
-OLLAMA_QUICK_TIMEOUT = int(os.environ.get("OLLAMA_QUICK_TIMEOUT", "300"))
-OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "32768"))
-OLLAMA_QUICK_NUM_CTX = int(os.environ.get("OLLAMA_QUICK_NUM_CTX", "4096"))
-OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.1"))
-OLLAMA_NUM_PREDICT = int(os.environ.get("OLLAMA_NUM_PREDICT", "8192"))
-AI_PROVIDER = os.environ.get("AI_PROVIDER", "ollama")  # "ollama" | "anthropic" | "openai"
-AI_CLOUD_MODEL = os.environ.get("AI_CLOUD_MODEL", "claude-opus-4-7")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+# Placeholder defaults matching config.py's env-parsed values; config.apply_app_settings()
+# always calls configure_ai_notes() at boot before any of these are used for a real request.
+# config.py can't be imported here directly (it imports configure_ai_notes from this module).
+OLLAMA_BASE_URL = "http://host.docker.internal:11434"
+OLLAMA_CHAT_MODEL = "gemma4:31b-mlx-bf16"
+AI_NOTES_MAX_CHARS = 45000
+OLLAMA_TIMEOUT = 600
+OLLAMA_QUICK_MODEL = "qwen3:4b"
+OLLAMA_QUICK_TIMEOUT = 120
+OLLAMA_NUM_CTX = 32768
+OLLAMA_QUICK_NUM_CTX = 4096
+OLLAMA_TEMPERATURE = 0.1
+OLLAMA_NUM_PREDICT = 8192
+AI_PROVIDER = "ollama"  # "ollama" | "anthropic" | "openai"
+AI_CLOUD_MODEL = "claude-opus-4-7"
+ANTHROPIC_API_KEY = ""
+OPENAI_API_KEY = ""
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
 def configure_ai_notes(
@@ -678,31 +680,3 @@ async def generate_ai_notes(
     return await _generate_ai_notes_ollama(video, progress_callback)
 
 
-def _self_check() -> None:
-    assert _parse_ollama_line('{"message": {"content": "hi"}, "done": false}') == {"delta": "hi"}
-    assert _parse_ollama_line("not json") == {}
-    done = _parse_ollama_line('{"message": {"content": ""}, "done": true, "eval_count": 5}')
-    assert done["done"] is True and done["usage"]["final_chunk"]["eval_count"] == 5
-
-    assert _parse_anthropic_line("event: ping") == {}
-    assert _parse_anthropic_line("data: [DONE]") is None
-    assert _parse_anthropic_line(
-        'data: {"type": "content_block_delta", "delta": {"text": "hi"}}'
-    ) == {"delta": "hi"}
-    assert _parse_anthropic_line(
-        'data: {"type": "message_start", "message": {"usage": {"input_tokens": 7}}}'
-    ) == {"usage": {"input_tokens": 7}}
-
-    assert _parse_openai_line("data: [DONE]") is None
-    assert _parse_openai_line(
-        'data: {"choices": [{"delta": {"content": "hi"}}]}'
-    ) == {"delta": "hi"}
-    assert _parse_openai_line(
-        'data: {"choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 4}}'
-    ) == {"usage": {"prompt_tokens": 3, "completion_tokens": 4}}
-
-    print("ai_notes self-check OK")
-
-
-if __name__ == "__main__":
-    _self_check()

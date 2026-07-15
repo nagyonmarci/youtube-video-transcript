@@ -30,6 +30,13 @@ _NIGHT_SNAPSHOT_KEYS = {
 }
 
 
+def in_hour_window(start_h: int, stop_h: int, now_hour: int) -> bool:
+    """Overnight-aware hour window check (e.g. 19-07: in window if hour >= 19 or hour < 7)."""
+    if start_h > stop_h:
+        return now_hour >= start_h or now_hour < stop_h
+    return start_h <= now_hour < stop_h
+
+
 async def daily_refresh():
     """Automatically refresh all channels once a day."""
     logger.info("Starting daily channel refresh")
@@ -63,16 +70,7 @@ async def check_channel_backlog_window():
 
     tz = config.get_scheduler_timezone()
     now_hour = datetime.now(tz).hour
-    start_h = config.CHANNEL_BACKLOG_START_HOUR
-    stop_h = config.CHANNEL_BACKLOG_STOP_HOUR
-
-    # Overnight window (e.g. 19–07): in window if hour >= start OR hour < stop
-    if start_h > stop_h:
-        in_window = now_hour >= start_h or now_hour < stop_h
-    else:
-        in_window = start_h <= now_hour < stop_h
-
-    if in_window:
+    if in_hour_window(config.CHANNEL_BACKLOG_START_HOUR, config.CHANNEL_BACKLOG_STOP_HOUR, now_hour):
         await sweep_channel_backlog()
 
 
@@ -123,14 +121,7 @@ async def check_night_window():
 
     tz = config.get_scheduler_timezone()
     now_hour = datetime.now(tz).hour
-    start_h = config.AI_NIGHT_WINDOW_START_HOUR
-    stop_h = config.AI_NIGHT_WINDOW_STOP_HOUR
-
-    # Overnight window (e.g. 17–07): in window if hour >= start OR hour < stop
-    if start_h > stop_h:
-        in_window = now_hour >= start_h or now_hour < stop_h
-    else:
-        in_window = start_h <= now_hour < stop_h
+    in_window = in_hour_window(config.AI_NIGHT_WINDOW_START_HOUR, config.AI_NIGHT_WINDOW_STOP_HOUR, now_hour)
 
     if in_window and not _night_mode_active:
         await ai_night_window_start()
