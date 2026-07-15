@@ -1,5 +1,6 @@
 """PostgreSQL connection pool and schema index bootstrap."""
 
+import json
 import logging
 from typing import Optional
 
@@ -10,6 +11,10 @@ import config
 logger = logging.getLogger(__name__)
 
 pg_pool: Optional[asyncpg.Pool] = None
+
+
+async def _init_connection(conn: asyncpg.Connection) -> None:
+    await conn.set_type_codec("json", schema="pg_catalog", encoder=json.dumps, decoder=json.loads)
 
 
 async def get_pg_pool() -> asyncpg.Pool:
@@ -24,6 +29,7 @@ async def get_pg_pool() -> asyncpg.Pool:
         password=config.POSTGRES_PASSWORD,
         min_size=1,
         max_size=max(4, config.FETCH_WORKER_CONCURRENCY + config.AI_WORKER_CONCURRENCY + 2),
+        init=_init_connection,
     )
     return pg_pool
 

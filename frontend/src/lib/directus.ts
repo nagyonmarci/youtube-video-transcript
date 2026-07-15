@@ -7,18 +7,11 @@ import type {
   MonthlyVideoCount,
   ChannelCoverageMaps,
 } from '../types.ts';
+import { createRequester } from './httpClient.ts';
 
 const API_URL = '/api';
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}`);
-  return res.status === 204 ? (null as T) : res.json();
-}
+const req = createRequester(API_URL);
 
 function paramsFrom(values: Record<string, unknown>): string {
   const params = new URLSearchParams();
