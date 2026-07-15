@@ -162,7 +162,7 @@ To reduce AI load from the UI:
 
 Changes merged to `master` first pass the existing **CI / DevSecOps** workflow. After a successful CI run on `master`, the `Release` workflow automatically:
 
-1. creates the next calendar tag, for example `v2026.05.12.1`
+1. computes the next semantic version tag from Conventional Commits since the last release (`fix:` → patch, `feat:` → minor, `BREAKING CHANGE`/`!` → major), for example `v1.4.0`
 2. builds and publishes Docker images to GitHub Container Registry
 3. creates a GitHub Release with the exact image tags
 
@@ -177,14 +177,14 @@ ghcr.io/nagyonmarci/youtube-video-transcript/whisper:<tag>
 For production-like deployments, use the normal compose file plus `docker-compose.prod.yml`. This keeps infrastructure, volumes, and environment variables from `docker-compose.yml`, but replaces local `build:` instructions with pinned release images.
 
 ```bash
-RELEASE_VERSION=v2026.05.12.1 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-RELEASE_VERSION=v2026.05.12.1 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+RELEASE_VERSION=v1.4.0 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+RELEASE_VERSION=v1.4.0 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 Rollback is the same command with the previous release tag:
 
 ```bash
-RELEASE_VERSION=v2026.05.11.1 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+RELEASE_VERSION=v1.3.0 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 If a release contains Directus schema changes, deploy during a quiet window and restart the dependent app services together:
