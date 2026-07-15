@@ -5,6 +5,7 @@ import { downloadFile, obsidianFilename, sanitizeFilename, videoToMd, videoToObs
 import { useT } from '../lib/i18n.tsx';
 import { useMessage } from '../lib/useMessage.ts';
 import { DEFAULT_TIMEZONE } from '../lib/constants.ts';
+import { formatDateTime } from '../lib/formatUtils.ts';
 import type { Video, SelectedVideo } from '../types.ts';
 
 const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
@@ -26,17 +27,6 @@ function shiftDate(dateStr: string, delta: number): string {
 
 function defaultDateFrom(): string {
   return shiftDate(todayValue(), -6);
-}
-
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleString('hu-HU', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function channelLabel(video: Video): string {

@@ -30,6 +30,7 @@ import { keepIfSame } from '../lib/dataUtils.ts';
 import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.ts';
 import { useMessage } from '../lib/useMessage.ts';
 import { POLL_INTERVAL_MS, DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.ts';
+import { formatJobTime, formatDurationWords } from '../lib/formatUtils.ts';
 import type { Channel, Job, AppSettings, AdminStats, ChannelCoverageMaps, MonthlyVideoCount, FetcherStatus, WhisperStatus, CurrentTask, QueueCounts, JobMetrics, OllamaStatus } from '../types.ts';
 
 function formatProgress(current: number | null | undefined, total: number | null | undefined): string {
@@ -223,7 +224,7 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, stoppe
   const paused = Number(queueStats?.paused ?? 0);
   const active = queued > 0 || running > 0 || Boolean(current?.type);
   const progressText = formatProgress(current?.progress_current, current?.progress_total);
-  const runtimeText = formatDuration(current?.duration_seconds);
+  const runtimeText = formatDurationWords(current?.duration_seconds);
   const badgeClass = stopped ? 'badge-paused' : active ? 'badge-processing' : 'badge-done';
   const badgeLabel = stopped ? t('status.stopped') : active ? t('status.running') : t('status.empty');
   return (
@@ -260,27 +261,6 @@ function StatusLine({ title, queueSize, queueStats, workerCount, current, stoppe
       </div>
     </div>
   );
-}
-
-function formatJobTime(value: string | null | undefined): string {
-  if (!value) return '';
-  return new Date(value).toLocaleString('hu-HU', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatDuration(seconds: number | null | undefined): string {
-  const total = Number(seconds || 0);
-  if (!total) return '';
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-  if (hours) return `${hours}h ${minutes}m ${secs}s`;
-  if (minutes) return `${minutes}m ${secs}s`;
-  return `${secs}s`;
 }
 
 function jobRuntimeSeconds(job: Job): number {
@@ -360,7 +340,7 @@ function JobQueuePanel({ jobs, onAction, busy }: JobQueuePanelProps) {
               const paused = job.status === 'paused';
               const reorderable = ['queued', 'paused'].includes(job.status);
               const progressText = formatProgress(job.progress_current, job.progress_total);
-              const runtimeText = formatDuration(jobRuntimeSeconds(job));
+              const runtimeText = formatDurationWords(jobRuntimeSeconds(job));
               const bottleneck = job.queue === 'ai' ? aiBottleneck(job.metrics) : null;
               return (
                 <tr key={job.id}>

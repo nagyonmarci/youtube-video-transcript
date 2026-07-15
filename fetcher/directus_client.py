@@ -12,6 +12,15 @@ logger = logging.getLogger(__name__)
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
+def _active_status_filter(idx: int) -> str:
+    """Filter clause matching queued/running/paused (i.e. not done/error/cancelled) at the given _and index."""
+    return (
+        f"&filter[_and][{idx}][_or][0][status][_eq]=queued"
+        f"&filter[_and][{idx}][_or][1][status][_eq]=running"
+        f"&filter[_and][{idx}][_or][2][status][_eq]=paused"
+    )
+
 AI_NOTE_FIELDS = [
     {"field": "summary", "type": "text", "meta": {"interface": "input-multiline", "width": "full"}, "schema": {"is_nullable": True}},
     {"field": "topics", "type": "json", "meta": {"interface": "list", "width": "full"}, "schema": {"is_nullable": True}},
@@ -425,9 +434,7 @@ class DirectusClient:
         params = (
             "?filter[_and][0][queue][_eq]=ai"
             "&filter[_and][1][type][_eq]=ai_note_video"
-            "&filter[_and][2][_or][0][status][_eq]=queued"
-            "&filter[_and][2][_or][1][status][_eq]=running"
-            "&filter[_and][2][_or][2][status][_eq]=paused"
+            f"{_active_status_filter(2)}"
             "&limit=-1"
             "&fields=payload"
         )
@@ -443,9 +450,7 @@ class DirectusClient:
         params = (
             f"?filter[_and][0][queue][_eq]={quote(queue)}"
             f"&filter[_and][1][type][_eq]={quote(job_type)}"
-            "&filter[_and][2][_or][0][status][_eq]=queued"
-            "&filter[_and][2][_or][1][status][_eq]=running"
-            "&filter[_and][2][_or][2][status][_eq]=paused"
+            f"{_active_status_filter(2)}"
             "&sort=created_at"
             "&limit=1"
             f"&fields={JOB_LIST_FIELDS}"
@@ -458,9 +463,7 @@ class DirectusClient:
         params = (
             f"?filter[_and][0][queue][_eq]={quote(queue)}"
             f"&filter[_and][1][dedupe_key][_eq]={quote(dedupe_key, safe='')}"
-            "&filter[_and][2][_or][0][status][_eq]=queued"
-            "&filter[_and][2][_or][1][status][_eq]=running"
-            "&filter[_and][2][_or][2][status][_eq]=paused"
+            f"{_active_status_filter(2)}"
             "&sort=created_at"
             "&limit=1"
             f"&fields={JOB_LIST_FIELDS}"
