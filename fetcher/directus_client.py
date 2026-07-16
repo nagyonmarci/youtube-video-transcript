@@ -589,7 +589,7 @@ class DirectusClient:
 
     def _missing_ai_notes_filter_params(self, year: Optional[int] = None) -> str:
         params = (
-            "?filter[_and][0][transcript][_nnull]=true"
+            "?filter[_and][0][transcript][_nempty]=true"
             "&filter[_and][1][_or][0][summary][_null]=true"
             "&filter[_and][1][_or][1][critique][_null]=true"
             "&filter[_and][1][_or][2][ai_notes_status][_eq]=error"
@@ -621,7 +621,7 @@ class DirectusClient:
     async def get_channel_videos_missing_ai_notes(self, channel_id: str, limit: int = 500) -> list:
         params = (
             f"?filter[_and][0][channel_id][_eq]={channel_id}"
-            "&filter[_and][1][transcript][_nnull]=true"
+            "&filter[_and][1][transcript][_nempty]=true"
             "&filter[_and][2][_or][0][summary][_null]=true"
             "&filter[_and][2][_or][1][critique][_null]=true"
             "&filter[_and][2][_or][2][ai_notes_status][_eq]=error"

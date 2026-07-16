@@ -80,7 +80,7 @@ def apply_ui_video_filters(
     if ai_filter == "done":
         params[f"{next_and()}[ai_notes_status][_eq]"] = "done"
     elif ai_filter == "missing":
-        params[f"{next_and()}[transcript][_nnull]"] = "true"
+        params[f"{next_and()}[transcript][_nempty]"] = "true"
         params[f"{next_and()}[summary][_null]"] = "true"
     elif ai_filter == "error":
         params[f"{next_and()}[ai_notes_status][_eq]"] = "error"
@@ -236,7 +236,7 @@ async def ui_admin_stats():
             "filter[_and][1][_or][1][is_members_only][_null]": "true",
         }),
         count_ui_videos({
-            "filter[_and][0][transcript][_nnull]": "true",
+            "filter[_and][0][transcript][_nempty]": "true",
             "filter[_and][1][_or][0][summary][_null]": "true",
             "filter[_and][1][_or][1][critique][_null]": "true",
             "filter[_and][2][_or][0][is_members_only][_neq]": "true",
