@@ -27,7 +27,7 @@ async def ai_notes(request: AiNotesRequest):
     existing = await directus.get_active_job_by_type("ai", "ai_notes")
     if existing:
         return {"queued": False, "existing": True, "job_id": existing["id"]}
-    limit = max(1, min(request.limit, config.AI_NOTES_MAX_BATCH_LIMIT))
+    limit = max(1, min(request.limit or config.AI_NOTES_BATCH_LIMIT, config.AI_NOTES_MAX_BATCH_LIMIT))
     job = await enqueue_ai_job({"type": "ai_notes", "limit": limit})
     return {"queued": True, "limit": limit, "job_id": job.get("id")}
 
