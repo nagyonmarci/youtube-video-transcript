@@ -9,7 +9,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import config
 import worker_state
 from job_ops import cleanup_old_jobs, enqueue_fetch_job, maybe_enqueue_ai_year_backfill
-from log_store import cleanup_old_logs
 from worker_state import directus
 from youtube_fetcher import rate_limited_sleep_channel
 
@@ -154,13 +153,6 @@ def start_refresh_scheduler():
         "interval",
         hours=24,
         id="cleanup_old_jobs",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        cleanup_old_logs,
-        "interval",
-        hours=24,
-        id="cleanup_old_logs",
         replace_existing=True,
     )
     # Backfill job always runs; maybe_enqueue_ai_year_backfill guards with config flags at runtime

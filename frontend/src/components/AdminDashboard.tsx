@@ -5,7 +5,6 @@ import {
   generateAiNotes,
   getAppSettings,
   getJobs,
-  getLogs,
   getResources,
   getSchedule,
   openResourceStream,
@@ -32,7 +31,7 @@ import { cronToDailyTime, dailyTimeToCron } from '../lib/scheduleUtils.ts';
 import { useMessage } from '../lib/useMessage.ts';
 import { POLL_INTERVAL_MS, DEFAULT_CRON, DEFAULT_CRON_TIME, DEFAULT_TIMEZONE } from '../lib/constants.ts';
 import { formatJobTime, formatDurationWords } from '../lib/formatUtils.ts';
-import type { Channel, Job, AppSettings, AdminStats, ChannelCoverageMaps, MonthlyVideoCount, FetcherStatus, WhisperStatus, CurrentTask, QueueCounts, JobMetrics, OllamaStatus, LogEntry } from '../types.ts';
+import type { Channel, Job, AppSettings, AdminStats, ChannelCoverageMaps, MonthlyVideoCount, FetcherStatus, WhisperStatus, CurrentTask, QueueCounts, JobMetrics, OllamaStatus } from '../types.ts';
 
 function formatProgress(current: number | null | undefined, total: number | null | undefined): string {
   const cur = Number(current || 0);
@@ -80,7 +79,7 @@ function normalizeSettings(settings: Partial<AppSettings> = {}): AppSettings {
   };
 }
 
-const SECTION_IDS = ['statistics', 'processing', 'schedule', 'setup', 'quickActions', 'channelAdmin', 'logs'];
+const SECTION_IDS = ['statistics', 'processing', 'schedule', 'setup', 'quickActions', 'channelAdmin'];
 const SECTION_STORAGE_KEY = 'yt_admin_sections';
 
 interface SectionPrefs {
@@ -454,7 +453,6 @@ export default function AdminDashboard({
   const settingsDirtyRef = useRef(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [resourceSnapshot, setResourceSnapshot] = useState<FetcherStatus['resources'] | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [sectionPrefs, setSectionPrefs] = useState(loadSectionPrefs);
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
@@ -513,20 +511,6 @@ export default function AdminDashboard({
   useEffect(() => {
     loadAdminData();
     const interval = setInterval(loadAdminData, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    async function loadLogs() {
-      try {
-        const { logs: entries } = await getLogs();
-        setLogs(entries);
-      } catch {
-        // best-effort; keep showing the last successfully loaded logs
-      }
-    }
-    loadLogs();
-    const interval = setInterval(loadLogs, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -849,23 +833,6 @@ export default function AdminDashboard({
                 await loadAdminData();
               }}
             />
-          ),
-        };
-      case 'logs':
-        return {
-          title: t('header.logs'),
-          subtitle: t('header.logsSub', { count: logs.length }),
-          body: (
-            <div className="log-panel">
-              {logs.length === 0 && <p className="log-empty">{t('label.noLogs')}</p>}
-              {logs.map((entry, index) => (
-                <div key={index} className={`log-line log-level-${entry.level?.toLowerCase()}`}>
-                  <span className="log-ts">{new Date(entry.ts).toLocaleTimeString('hu-HU')}</span>
-                  <span className="log-source">{entry.source}</span>
-                  <span className="log-message">{entry.message}</span>
-                </div>
-              ))}
-            </div>
           ),
         };
       default:

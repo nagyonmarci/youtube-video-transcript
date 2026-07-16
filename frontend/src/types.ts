@@ -210,14 +210,6 @@ export interface FetcherStatus {
   };
 }
 
-export interface LogEntry {
-  ts: string;
-  source: string;
-  level: string;
-  logger: string;
-  message: string;
-}
-
 // Normalized shape produced by AdminDashboard's normalizeSettings(); mirrors
 // fetcher/config.py::current_app_settings().
 export interface AppSettings {

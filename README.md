@@ -103,7 +103,6 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `AI_WORKER_CONCURRENCY` | Parallel AI-worker threads | `1` |
 | `STALE_JOB_MINUTES` | Re-queue jobs stuck in `running` after N minutes | `30` |
 | `JOB_CLEANUP_DAYS` | Auto-delete completed/cancelled jobs after N days | `7` |
-| `LOG_RETENTION_DAYS` | Auto-delete buffered app logs after N days | `3` |
 | `WHISPER_THREADS` | CPU threads for Whisper | `4` |
 | `WHISPER_LANGUAGE` | Recognition language (`auto` detects) | `auto` |
 | `WHISPER_BATCH_CRON` | Nightly Whisper batch schedule | `0 3 * * *` |
@@ -152,8 +151,6 @@ docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .en
 AI/Ollama runtime settings can be changed in **Admin → Setup**. Fetch and AI workers reload these settings before work, so changing the model, Ollama URL, AI batch size, or manual/automatic AI mode does not require a container restart.
 
 The Admin processing screen includes a lightweight resource monitor. It uses `/api/resources/stream` for live server-sent updates and falls back to `/api/resources` polling if the stream drops. It displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, worker concurrency, queued/running/paused AI job counts, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
-
-The Admin **Logs** section shows the most recent log lines from all three fetcher processes (`api`, `fetch-worker`, `ai-worker`) in one place, polled from `/api/logs`. Each process batches its own log records into a shared `app_logs` Postgres table every few seconds; there is no external log aggregator, so this only covers `docker compose logs` for these three containers, not Directus/Postgres/Caddy/Whisper. Old entries are pruned daily after `LOG_RETENTION_DAYS`.
 
 To reduce AI load from the UI:
 

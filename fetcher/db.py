@@ -54,8 +54,6 @@ async def ensure_database_indexes():
         "CREATE INDEX IF NOT EXISTS idx_jobs_queue_status_sort ON jobs (queue, status, sort_order, created_at)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe_active ON jobs (queue, dedupe_key) WHERE status IN ('queued', 'running', 'paused') AND dedupe_key IS NOT NULL",
         r"UPDATE videos SET is_members_only = true WHERE is_members_only IS NOT TRUE AND title ~* '\mmembers?\M'",
-        "CREATE TABLE IF NOT EXISTS app_logs (id SERIAL PRIMARY KEY, ts TIMESTAMPTZ NOT NULL DEFAULT now(), source TEXT, level TEXT, logger TEXT, message TEXT)",
-        "CREATE INDEX IF NOT EXISTS idx_app_logs_ts ON app_logs (ts DESC)",
     ]
     try:
         conn = await asyncpg.connect(

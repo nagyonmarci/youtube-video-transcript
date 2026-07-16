@@ -15,7 +15,6 @@ from constants import (
     STOPPED_BY_USER, BOOTSTRAP_CHECK_INTERVAL,
 )
 from db import ensure_database_indexes, close_pg_pool
-from log_store import install_log_handler
 from fetch_tasks import (
     process_channel_task, process_single_video_task, process_refresh_task,
     process_refresh_dates_task, process_refresh_thumbnails_task,
@@ -196,7 +195,6 @@ async def restart_ai_worker():
 
 
 async def bootstrap_runtime(cleanup_pending: bool = True):
-    install_log_handler()
     logger.info("Waiting for Directus...")
     for _ in range(40):
         if await directus.health_check():

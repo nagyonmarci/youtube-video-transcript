@@ -23,8 +23,6 @@
     "coverage": "Coverage by channel",
     "channelAdmin": "Channel admin",
     "channelAdminSub": "Manage {count} channels",
-    "logs": "Logs",
-    "logsSub": "{count} recent lines",
     "addChannel": "Add channel",
     "addVideo": "Add video",
     "allExport": "Export all",
@@ -121,7 +119,6 @@
     "allTopics": "All topics"
   },
   "label": {
-    "noLogs": "No logs yet.",
     "channel": "Channel",
     "topic": "Topic",
     "noTopic": "No topic",
