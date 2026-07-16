@@ -148,15 +148,13 @@ async def process_single_ai_note_task(task: dict):
     if worker_state.current_ai_job_id:
         await directus.update_job(worker_state.current_ai_job_id, {"progress_label": "AI generation started"})
     fields = task.get("fields")
-    ok = await generate_and_store_ai_notes(video_id, video, fields if isinstance(fields, list) else None)
+    await generate_and_store_ai_notes(video_id, video, fields if isinstance(fields, list) else None)
     elapsed = job_duration_seconds({"started_at": worker_state.current_ai_task_info.get("started_at")})
     worker_state.current_ai_task_info["duration_seconds"] = elapsed
     if worker_state.current_ai_job_id and elapsed is not None:
         await directus.update_job(worker_state.current_ai_job_id, {
             "progress_label": f"AI generation finished in {elapsed}s",
         })
-    if not ok:
-        raise RuntimeError("AI notes generation failed; see ai_notes_error on the video")
 
 
 async def process_quick_note_task(task: dict):
