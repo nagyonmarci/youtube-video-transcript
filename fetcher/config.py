@@ -106,6 +106,7 @@ QUICK_WORKER_CONCURRENCY = max(0, int(os.environ.get("QUICK_WORKER_CONCURRENCY",
 AI_WORKER_CONCURRENCY = max(0, int(os.environ.get("AI_WORKER_CONCURRENCY", "1")))
 STALE_JOB_MINUTES = max(5, int(os.environ.get("STALE_JOB_MINUTES", "30")))
 JOB_CLEANUP_DAYS = int(os.environ.get("JOB_CLEANUP_DAYS", "7"))
+LOG_RETENTION_DAYS = int(os.environ.get("LOG_RETENTION_DAYS", "3"))
 CHANNEL_JOB_VIDEO_CAP = max(1, int(os.environ.get("CHANNEL_JOB_VIDEO_CAP", "100")))
 CHANNEL_BACKLOG_WINDOW_ENABLED = os.environ.get("CHANNEL_BACKLOG_WINDOW_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 CHANNEL_BACKLOG_START_HOUR = max(0, min(23, int(os.environ.get("CHANNEL_BACKLOG_START_HOUR", "19"))))

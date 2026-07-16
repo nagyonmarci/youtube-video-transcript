@@ -23,6 +23,8 @@
     "coverage": "Lefedettség csatornánként",
     "channelAdmin": "Csatorna admin",
     "channelAdminSub": "{count} csatorna kezelése",
+    "logs": "Logok",
+    "logsSub": "{count} legutóbbi sor",
     "addChannel": "Csatorna hozzáadása",
     "addVideo": "Videó hozzáadása",
     "allExport": "Összes export",
@@ -119,6 +121,7 @@
     "allTopics": "Minden téma"
   },
   "label": {
+    "noLogs": "Még nincs log.",
     "channel": "Csatorna",
     "topic": "Téma",
     "noTopic": "Téma nélkül",

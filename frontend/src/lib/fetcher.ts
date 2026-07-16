@@ -1,4 +1,4 @@
-import type { FetcherStatus, WhisperStatus, Job, Schedule, AppSettings } from '../types.ts';
+import type { FetcherStatus, WhisperStatus, Job, Schedule, AppSettings, LogEntry } from '../types.ts';
 import { createRequester } from './httpClient.ts';
 
 const FETCHER_URL = '/api';
@@ -36,6 +36,10 @@ export function getStatus(): Promise<FetcherStatus> {
 
 export function getResources(): Promise<FetcherStatus['resources']> {
   return req('GET', '/resources');
+}
+
+export function getLogs(limit = 200): Promise<{ logs: LogEntry[] }> {
+  return req('GET', `/logs?limit=${limit}`);
 }
 
 export function openResourceStream(): EventSource {
