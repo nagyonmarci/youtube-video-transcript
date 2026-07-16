@@ -13,6 +13,7 @@ import config
 import worker_state
 from api_models import ScheduleRequest, AppSettingsRequest
 from constants import STREAM_UPDATE_INTERVAL, QUEUE_QUICK
+from db import get_pg_pool
 from directus_client import now_iso
 from job_ops import apply_ai_worker_queue_gate, current_job_snapshot
 from job_utils import job_status_counts
@@ -195,6 +196,17 @@ async def resource_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/logs")
+async def get_logs(limit: int = 200):
+    limit = max(1, min(limit, 1000))
+    pool = await get_pg_pool()
+    rows = await pool.fetch(
+        "SELECT ts, source, level, logger, message FROM app_logs ORDER BY ts DESC LIMIT $1",
+        limit,
+    )
+    return {"logs": [dict(row) for row in rows]}
 
 
 @router.get("/schedule")

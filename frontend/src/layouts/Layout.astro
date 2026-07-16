@@ -569,6 +569,37 @@ const { title = 'YouTube Transcript Downloader' } = Astro.props;
     line-height: 1.35;
     margin-top: 0.35rem;
   }
+  .log-panel {
+    max-height: 24rem;
+    overflow-y: auto;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-family: monospace;
+    font-size: 0.78rem;
+  }
+  .log-empty {
+    color: var(--text2);
+    padding: 0.5rem 0;
+  }
+  .log-line {
+    display: flex;
+    gap: 0.6rem;
+    padding: 0.15rem 0;
+    border-bottom: 1px solid var(--border);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .log-line:last-child { border-bottom: none; }
+  .log-ts, .log-source {
+    flex-shrink: 0;
+    color: var(--text2);
+  }
+  .log-source { min-width: 6rem; }
+  .log-level-error .log-message,
+  .log-level-critical .log-message { color: #f88; }
+  .log-level-warning .log-message { color: #ffb74d; }
   .schedule-form {
     display: flex;
     align-items: flex-end;
