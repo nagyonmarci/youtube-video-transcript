@@ -124,7 +124,6 @@ services:
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
       BATCH_CRON: ${WHISPER_BATCH_CRON:-0 3 * * *}
       BATCH_LIMIT: ${WHISPER_BATCH_LIMIT:-50}
-      WHISPER_MAX_ATTEMPTS: ${WHISPER_MAX_ATTEMPTS:-3}
     volumes:
       - whisper_models:/app/models
 

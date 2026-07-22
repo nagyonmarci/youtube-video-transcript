@@ -197,7 +197,7 @@
     "aiMaxChars": "Max transcript chars",
     "aiBatchLimit": "AI batch limit",
     "aiMaxBatchLimit": "AI max batch limit",
-    "aiBackfillYear": "Backfill year (0 = all years)",
+    "aiBackfillYear": "Backfill year",
     "aiBackfillBatch": "Backfill batch",
     "aiBackfillTarget": "Backfill active-job target",
     "aiBackfillInterval": "Backfill interval (sec)",

@@ -43,7 +43,6 @@ WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "4"))
 WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "auto")
 BATCH_CRON = os.environ.get("BATCH_CRON", "0 3 * * *")
 BATCH_LIMIT = int(os.environ.get("BATCH_LIMIT", "50"))
-WHISPER_MAX_ATTEMPTS = int(os.environ.get("WHISPER_MAX_ATTEMPTS", "3"))
 
 # Rate limiting between audio downloads (same as fetcher)
 DOWNLOAD_DELAY_MIN = 45
@@ -138,13 +137,11 @@ async def process_transcription_task(task: dict):
         })
         logger.info(f"Whisper done: {video_id} ({len(transcript)} chars)")
     else:
-        attempts = int(video.get("whisper_attempts") or 0) + 1
         await pg_client.update_video(directus_id, {
             "whisper_status": "error",
-            "whisper_attempts": attempts,
             "processed_at": now,
         })
-        logger.warning(f"Whisper failed: {video_id} (attempt {attempts}/{WHISPER_MAX_ATTEMPTS})")
+        logger.warning(f"Whisper failed: {video_id}")
 
 
 async def run_batch(limit: int = BATCH_LIMIT, language: str = WHISPER_LANGUAGE):
@@ -156,7 +153,7 @@ async def run_batch(limit: int = BATCH_LIMIT, language: str = WHISPER_LANGUAGE):
 
     batch_running = True
     try:
-        videos = await pg_client.get_no_transcript_videos(limit=limit, max_attempts=WHISPER_MAX_ATTEMPTS)
+        videos = await pg_client.get_no_transcript_videos(limit=limit)
         if not videos:
             logger.info("No videos to transcribe")
             return 0
