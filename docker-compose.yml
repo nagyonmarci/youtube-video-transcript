@@ -16,32 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  directus:
-    image: directus/directus:11
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - app-network
-    environment:
-      SECRET: ${DIRECTUS_SECRET:?DIRECTUS_SECRET must be set}
-      DB_CLIENT: pg
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: directus
-      DB_USER: directus
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
-      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:?DIRECTUS_ADMIN_PASSWORD must be set}
-      ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
-      PUBLIC_URL: http://directus:8055
-      CORS_ENABLED: "false"
-      WEBSOCKETS_ENABLED: "false"
-    volumes:
-      - directus_uploads:/directus/uploads
-      - directus_extensions:/directus/extensions
-
   fetcher:
     build: ./fetcher
     restart: unless-stopped
@@ -50,12 +24,11 @@ services:
     cap_drop:
       - ALL
     depends_on:
-      - directus
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
     environment:
-      DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
       APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
       APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       POSTGRES_HOST: postgres
@@ -78,12 +51,11 @@ services:
       - ALL
     command: ["python", "worker.py"]
     depends_on:
-      - directus
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
     environment:
-      DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
       APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
       APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       POSTGRES_HOST: postgres
@@ -107,12 +79,11 @@ services:
       - ALL
     command: ["python", "worker.py"]
     depends_on:
-      - directus
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
     environment:
-      DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
       APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
       APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
       POSTGRES_HOST: postgres
@@ -136,14 +107,18 @@ services:
     cap_drop:
       - ALL
     depends_on:
-      - directus
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
     environment:
-      DIRECTUS_URL: http://directus:8055
-      DIRECTUS_TOKEN: ${DIRECTUS_ADMIN_TOKEN:?DIRECTUS_ADMIN_TOKEN must be set}
       APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
       APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://yt.test,http://localhost:4321}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: directus
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       WHISPER_MODEL_PATH: /app/models/ggml-large-v3.bin
       WHISPER_THREADS: ${WHISPER_THREADS:-4}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
@@ -160,12 +135,10 @@ services:
     cap_drop:
       - ALL
     depends_on:
-      - directus
       - fetcher
     networks:
       - app-network
     environment:
-      DIRECTUS_HOST: directus
       FETCHER_HOST: fetcher
       WHISPER_HOST: whisper
       APP_API_TOKEN: ${APP_API_TOKEN:?APP_API_TOKEN must be set}
@@ -196,8 +169,6 @@ networks:
 
 volumes:
   postgres_data:
-  directus_uploads:
-  directus_extensions:
   whisper_models:
   caddy_data:
   caddy_config:

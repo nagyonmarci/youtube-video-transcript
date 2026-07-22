@@ -52,8 +52,12 @@ def normalize_to_videos_url(url: str) -> str:
     return url
 
 
-def parse_uploaded_at(info: dict) -> Optional[str]:
-    """Return an ISO timestamp from the date fields yt-dlp may expose."""
+def parse_uploaded_at(info: dict) -> Optional[datetime]:
+    """Return a native UTC datetime from the date fields yt-dlp may expose.
+
+    Native datetime (not an ISO string) because this value is bound directly to a
+    timestamptz column via asyncpg, which requires a datetime.date/datetime instance.
+    """
     for field in ("upload_date", "release_date"):
         value = info.get(field)
         if isinstance(value, int):
@@ -65,7 +69,7 @@ def parse_uploaded_at(info: dict) -> Optional[str]:
                     int(value[4:6]),
                     int(value[6:8]),
                     tzinfo=timezone.utc,
-                ).isoformat()
+                )
             except ValueError:
                 pass
 
@@ -75,7 +79,7 @@ def parse_uploaded_at(info: dict) -> Optional[str]:
             value = int(value)
         if isinstance(value, (int, float)):
             try:
-                return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+                return datetime.fromtimestamp(value, tz=timezone.utc)
             except (OSError, OverflowError, ValueError):
                 pass
 

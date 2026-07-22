@@ -14,7 +14,7 @@ import worker_state
 from api_models import ScheduleRequest, AppSettingsRequest
 from constants import STREAM_UPDATE_INTERVAL, QUEUE_QUICK
 from db import get_pg_pool
-from directus_client import now_iso
+from pg_client import utcnow
 from job_ops import apply_ai_worker_queue_gate, current_job_snapshot
 from job_utils import job_status_counts
 from scheduler import start_refresh_scheduler
@@ -30,7 +30,7 @@ async def get_ollama_resource_status() -> dict:
         "base_url": config.OLLAMA_BASE_URL,
         "configured_model": config.OLLAMA_CHAT_MODEL,
         "models": [],
-        "sampled_at": now_iso(),
+        "sampled_at": utcnow(),
         "error": None,
     }
     try:
@@ -168,7 +168,7 @@ async def resource_stream():
         while True:
             try:
                 payload = await current_resource_status()
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(payload, ensure_ascii=False, default=lambda o: o.isoformat())}\n\n"
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -180,11 +180,11 @@ async def resource_stream():
                         "base_url": config.OLLAMA_BASE_URL,
                         "configured_model": config.OLLAMA_CHAT_MODEL,
                         "models": [],
-                        "sampled_at": now_iso(),
+                        "sampled_at": utcnow(),
                         "error": str(e)[:300],
                     },
                 }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(payload, ensure_ascii=False, default=lambda o: o.isoformat())}\n\n"
             await asyncio.sleep(STREAM_UPDATE_INTERVAL)
 
     return StreamingResponse(

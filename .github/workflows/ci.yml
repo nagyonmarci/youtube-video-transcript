@@ -16,10 +16,6 @@ env:
   POSTGRES_PORT: "5432"
   POSTGRES_DB: directus
   POSTGRES_USER: directus
-  DIRECTUS_SECRET: ci-placeholder
-  DIRECTUS_ADMIN_EMAIL: admin@example.com
-  DIRECTUS_ADMIN_PASSWORD: ci-placeholder
-  DIRECTUS_ADMIN_TOKEN: ci-placeholder
   APP_API_TOKEN: ci-placeholder
   APP_CORS_ORIGINS: http://localhost:4321
   APP_BASIC_AUTH_USER: ci
@@ -78,13 +74,14 @@ jobs:
         run: |
           python -m py_compile \
             fetcher/main.py \
-            fetcher/directus_client.py \
+            fetcher/pg_client.py \
+            fetcher/schema.py \
             fetcher/youtube_fetcher.py \
             fetcher/ai_notes.py \
             fetcher/worker.py
 
       - name: Syntax check – whisper
-        run: python -m py_compile whisper/main.py whisper/transcriber.py whisper/directus_client.py
+        run: python -m py_compile whisper/main.py whisper/transcriber.py whisper/pg_client.py
 
       - name: pip-audit – fetcher
         run: pip-audit -r fetcher/requirements.txt

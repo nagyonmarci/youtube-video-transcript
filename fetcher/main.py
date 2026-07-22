@@ -18,7 +18,6 @@ from routes.jobs import router as jobs_router
 from routes.status import router as status_router
 from routes.ui import router as ui_router
 from scheduler import start_refresh_scheduler
-from worker_state import directus
 from workers import bootstrap_runtime, create_worker_tasks, run_worker_service  # noqa: F401 run_worker_service used by worker.py
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -50,7 +49,6 @@ async def lifespan(app: FastAPI):
     if scheduler_module.scheduler:
         scheduler_module.scheduler.shutdown(wait=False)
     await close_pg_pool()
-    await directus.close()
 
 
 app = FastAPI(title="YouTube Transcript Fetcher", lifespan=lifespan)

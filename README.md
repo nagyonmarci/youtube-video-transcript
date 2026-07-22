@@ -29,17 +29,13 @@ A self-hosted tool for downloading, searching, and AI-annotating YouTube channel
 http://yt.test
       │
    Caddy ──► Basic Auth ──► Frontend (Astro+React preview :4321)
-                  ├─ /api     ──► Fetcher   :8000  (X-App-Token injected by Caddy)
-                  └─ /whisper ──► Whisper   :8001  (X-App-Token injected by Caddy)
-
-Directus :8055 ──► PostgreSQL
-     ▲
-     └── internal service-token traffic only
+                  ├─ /api     ──► Fetcher   :8000  (X-App-Token injected by Caddy) ──► PostgreSQL
+                  └─ /whisper ──► Whisper   :8001  (X-App-Token injected by Caddy) ──► PostgreSQL
 
 Fetcher API ──► jobs table ──► fetch-worker / ai-worker
 ```
 
-**Eight Docker services:** `postgres`, `directus`, `fetcher` (API only), `fetch-worker`, `ai-worker`, `whisper`, `frontend`, `caddy`. Workers are separated so LLM calls never block transcript fetching. Caddy also proxies `suliweb.test` via the shared external `web` Docker network.
+**Seven Docker services:** `postgres`, `fetcher` (API only), `fetch-worker`, `ai-worker`, `whisper`, `frontend`, `caddy`. Workers are separated so LLM calls never block transcript fetching. Caddy also proxies `suliweb.test` via the shared external `web` Docker network.
 
 ## Quick Start
 
@@ -77,21 +73,17 @@ docker compose up -d
 
 App: **http://yt.test**
 
-The app is protected by Caddy Basic Auth. Use `APP_BASIC_AUTH_USER` and the plaintext password you generated before hashing it. Directus is intentionally not exposed through `yt.test`; access it only from the Docker network or add a temporary local-only admin route when needed.
+The app is protected by Caddy Basic Auth. Use `APP_BASIC_AUTH_USER` and the plaintext password you generated before hashing it. Postgres itself is not exposed through `yt.test`; access it only from the Docker network (`docker compose exec postgres psql -U directus`) when needed.
 
 > First start: Whisper downloads `ggml-large-v3.bin` (~3 GB) to a Docker volume. This happens once.
 
 ## Configuration
 
-Bootstrap, secret, and container-level configuration lives in `.env` (git-ignored). Copy `.env.example` and set every value marked as required. Runtime AI/Ollama settings live in **Admin → Setup** and are stored in Directus, so they can be changed without editing `.env`.
+Bootstrap, secret, and container-level configuration lives in `.env` (git-ignored). Copy `.env.example` and set every value marked as required. Runtime AI/Ollama settings live in **Admin → Setup** and are stored in Postgres, so they can be changed without editing `.env`.
 
 | Variable | Description | Default |
 |---|---|---|
 | `POSTGRES_PASSWORD` | PostgreSQL password | `directus` (**change**) |
-| `DIRECTUS_SECRET` | Directus JWT signing secret | `change-me-random-string` (**change**) |
-| `DIRECTUS_ADMIN_EMAIL` | Directus admin login email | `admin@example.com` |
-| `DIRECTUS_ADMIN_PASSWORD` | Directus admin UI password | `admin` (**change**) |
-| `DIRECTUS_ADMIN_TOKEN` | Static API token for internal Directus calls | random value required |
 | `APP_API_TOKEN` | Internal Caddy-to-FastAPI/Whisper service token | required |
 | `APP_CORS_ORIGINS` | Allowed browser origins for FastAPI services | `http://yt.test,http://localhost:4321` |
 | `APP_BASIC_AUTH_USER` | Username for the Caddy gate in front of the app | required |
@@ -116,7 +108,7 @@ Bootstrap, secret, and container-level configuration lives in `.env` (git-ignore
 | `CHANNEL_BACKLOG_START_HOUR` | Hour to start processing channel backlogs (0–23) | `19` |
 | `CHANNEL_BACKLOG_STOP_HOUR` | Hour to stop processing channel backlogs (0–23) | `7` |
 
-At `AI_NIGHT_WINDOW_START_HOUR` (default 17:00) the scheduler writes `ai_notes_auto=true`, `cooldown=0`, `ai_notes_year_backfill_enabled=true` to Directus and reloads config. At `AI_NIGHT_WINDOW_STOP_HOUR` (default 07:00) the pre-night snapshot is restored. Day settings come from **Admin → Setup** and are not affected.
+At `AI_NIGHT_WINDOW_START_HOUR` (default 17:00) the scheduler writes `ai_notes_auto=true`, `cooldown=0`, `ai_notes_year_backfill_enabled=true` to the `app_settings` table and reloads config. At `AI_NIGHT_WINDOW_STOP_HOUR` (default 07:00) the pre-night snapshot is restored. Day settings come from **Admin → Setup** and are not affected.
 
 A `channel`/`refresh` job processes at most `CHANNEL_JOB_VIDEO_CAP` videos per run (newest first, since a channel's video list is already newest-first) instead of working through a channel's entire history in one multi-hour run. Channels with more videos left afterward are marked `status=backlog` and picked up again by an evening sweep (checked every 5 minutes, active between `CHANNEL_BACKLOG_START_HOUR` and `CHANNEL_BACKLOG_STOP_HOUR`) instead of the 07:00 daily refresh, so a large backlog doesn't block same-day channel adds or refreshes. Set `CHANNEL_BACKLOG_WINDOW_ENABLED=false` to let the daily refresh pick up backlog channels too, any time of day. Only `pending`/`error` videos are retried on the next refresh — `no_transcript` is treated as final for the refresh loop (YouTube has no caption track) and is instead handed off to the Whisper fallback.
 
@@ -147,13 +139,13 @@ docker compose exec -T fetcher curl -s http://localhost:8000/health
 docker compose exec -T fetcher curl -s -H "x-app-token: $(grep APP_API_TOKEN .env | cut -d= -f2)" http://localhost:8000/status
 ```
 
-> **Schema changes:** After touching `directus_client.py`, new fields only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
+> **Schema changes:** After touching `fetcher/schema.py`, new columns only appear once the fetcher restarts (`docker compose up -d fetcher`) — schema bootstrap runs at startup.
 
 AI/Ollama runtime settings can be changed in **Admin → Setup**. Fetch and AI workers reload these settings before work, so changing the model, Ollama URL, AI batch size, or manual/automatic AI mode does not require a container restart.
 
 The Admin processing screen includes a lightweight resource monitor. It uses `/api/resources/stream` for live server-sent updates and falls back to `/api/resources` polling if the stream drops. It displays Ollama reachability, the loaded model, GPU/VRAM placement, the AI worker state, worker concurrency, queued/running/paused AI job counts, and the cooldown between AI jobs. The GPU percentage comes from Ollama's model placement data (`size_vram / size`), so it tells you whether the model is resident on GPU/VRAM; it is not a native macOS compute-utilization meter.
 
-The Admin **Logs** section shows the most recent log lines from all three fetcher processes (`api`, `fetch-worker`, `ai-worker`) in one place, polled from `/api/logs`. Each process batches its own log records into a shared `app_logs` Postgres table every few seconds; there is no external log aggregator, so this only covers `docker compose logs` for these three containers, not Directus/Postgres/Caddy/Whisper. Old entries are pruned daily after `LOG_RETENTION_DAYS`.
+The Admin **Logs** section shows the most recent log lines from all three fetcher processes (`api`, `fetch-worker`, `ai-worker`) in one place, polled from `/api/logs`. Each process batches its own log records into a shared `app_logs` Postgres table every few seconds; there is no external log aggregator, so this only covers `docker compose logs` for these three containers, not Postgres/Caddy/Whisper. Old entries are pruned daily after `LOG_RETENTION_DAYS`.
 
 To reduce AI load from the UI:
 
@@ -190,7 +182,7 @@ Rollback is the same command with the previous release tag:
 RELEASE_VERSION=v1.3.0 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-If a release contains Directus schema changes, deploy during a quiet window and restart the dependent app services together:
+If a release contains schema changes (`fetcher/schema.py`), deploy during a quiet window and restart the dependent app services together:
 
 ```bash
 RELEASE_VERSION=<tag> docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d fetcher fetch-worker ai-worker frontend
@@ -198,7 +190,7 @@ RELEASE_VERSION=<tag> docker compose -f docker-compose.yml -f docker-compose.pro
 
 ## Job Queue
 
-The `jobs` Directus collection is the shared work queue. Three separate queues are processed by two workers:
+The `jobs` Postgres table is the shared work queue. Three separate queues are processed by two workers:
 
 - `fetch-worker` — `fetch` queue: channel refresh, video fetch, metadata backfill, date backfill
 - `ai-worker` — `quick` queue: fast one-paragraph summary (small model, Phase 1); then enqueues to `ai` queue
@@ -228,10 +220,9 @@ This tool is designed for **single-user, local-network or loopback-only** deploy
 | YouTube auth cookies | `cookie.txt` is git-ignored |
 | Internal network isolation | All services communicate on the internal `app-network`; no service ports are bound to the host except Caddy (80, 443) |
 | Single ingress | Caddy is the only externally reachable entry point |
-| Browser cannot see Directus admin token | Frontend calls `/api/ui/*`; fetcher talks to Directus server-side |
-| Directus admin not publicly proxied | `/admin` is no longer routed through Caddy/frontend |
+| Browser cannot see database credentials | Frontend calls `/api/ui/*`; fetcher/whisper talk to Postgres server-side |
 | Fetcher/Whisper API token | `/api/*` and `/whisper/*` require `X-App-Token`; Caddy injects it |
-| CORS restricted | FastAPI services use `APP_CORS_ORIGINS`; Directus CORS is disabled |
+| CORS restricted | FastAPI services use `APP_CORS_ORIGINS` |
 | Non-root app containers | Fetcher, workers, Whisper, and frontend run as unprivileged users |
 | Reduced Linux capabilities | App containers use `cap_drop: ALL` and `no-new-privileges:true` |
 | Dependency audit | `npm audit --omit=dev` and `pip-audit` should be run periodically |
@@ -254,7 +245,6 @@ APP_BASIC_AUTH_HASH='$2a$14$...'
 
 | Finding | Notes |
 |---|---|
-| Directus internal services still use the admin token | Good enough for a personal stack, but split into least-privilege Directus roles for multi-user/public deployments |
 | Caddy Basic Auth is coarse-grained | Replace with proper SSO/JWT sessions if multiple users need different permissions |
 | Whisper model is downloaded at runtime | Pin and verify checksum for stricter supply-chain control |
 | Whisper.cpp is cloned during image build | Pin a commit SHA and/or vendor a verified release artifact for stricter reproducibility |
@@ -262,12 +252,11 @@ APP_BASIC_AUTH_HASH='$2a$14$...'
 
 ### Hardening checklist (for public or multi-user deployments)
 
-- [ ] **Rotate all credentials** — generate random `POSTGRES_PASSWORD`, `DIRECTUS_SECRET`, `DIRECTUS_ADMIN_PASSWORD`, `DIRECTUS_ADMIN_TOKEN`, `APP_API_TOKEN`, and Basic Auth password before first start
-- [ ] **Create least-privilege Directus tokens** — separate schema bootstrap/admin operations from read/write runtime operations
+- [ ] **Rotate all credentials** — generate random `POSTGRES_PASSWORD`, `APP_API_TOKEN`, and Basic Auth password before first start
 - [ ] **Pin Python dependency versions** — keep `fetcher/requirements.txt` and `whisper/requirements.txt` exact and scan with `pip-audit` or Trivy
 - [ ] **Scan images** — add `trivy image` or `grype` to a CI step before deployment
 - [ ] **Set up real TLS** — replace mkcert certs with Let's Encrypt (Caddy handles this automatically with a public domain)
-- [ ] **Add a firewall rule** — block direct access to ports 8000, 8055, 5432 from outside the host; all traffic should flow through Caddy
+- [ ] **Add a firewall rule** — block direct access to ports 8000, 5432 from outside the host; all traffic should flow through Caddy
 
 ### Secrets never to commit
 

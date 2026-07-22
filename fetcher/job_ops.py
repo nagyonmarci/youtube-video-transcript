@@ -8,7 +8,7 @@ import config
 import worker_state
 from constants import QUEUE_QUICK, QUEUE_AI, JOB_QUICK_NOTE_VIDEO, JOB_AI_NOTE_VIDEO
 from db import get_pg_pool
-from directus_client import now_iso
+from pg_client import utcnow
 from job_utils import job_dedupe_key, update_video_ai_status, job_duration_seconds
 from worker_state import directus
 
@@ -177,7 +177,7 @@ async def cancel_jobs(queue: Optional[str] = None, predicate=None, include_runni
             continue
         await directus.update_job(job["id"], {
             "status": "cancelled",
-            "finished_at": now_iso(),
+            "finished_at": utcnow(),
             "error_message": "Cancelled by user",
         })
         removed += 1

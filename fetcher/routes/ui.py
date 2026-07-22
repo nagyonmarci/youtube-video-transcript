@@ -1,28 +1,22 @@
 """UI data endpoints — channel list, video list, admin stats."""
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, HTTPException
 
 import config
+from db import get_pg_pool
+from pg_client import _normalize_row, _normalize_rows
 from worker_state import directus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 UI_PAGE_SIZE = 100
-UI_VIDEO_FIELDS = ",".join([
-    "id,video_id,title,url,thumbnail_url,uploaded_at,duration_seconds,status,is_members_only,transcript,transcript_timed,whisper_status",
-    "quick_summary,quick_summary_model,quick_summary_generated_at",
-    "summary,topics,takeaways,questions,obsidian_note,study_guide,critique,ai_notes_status,ai_notes_generated_at,ai_notes_error",
-    "channel_id.id,channel_id.name,channel_id.channel_handle",
-])
 UI_CHANNEL_UPDATE_FIELDS = {"name", "topic", "channel_url", "channel_handle", "status", "video_count", "error_message", "last_refreshed"}
 UI_VIDEO_UPDATE_FIELDS = {
     "quick_summary",
@@ -38,82 +32,85 @@ UI_VIDEO_UPDATE_FIELDS = {
     "ai_notes_status",
     "ai_notes_error",
 }
-NOT_MEMBERS_ONLY = {
-    "filter[_or][0][is_members_only][_neq]": "true",
-    "filter[_or][1][is_members_only][_null]": "true",
-}
+NOT_MEMBERS_ONLY = "is_members_only IS NOT TRUE"
+
+_SORT_COLUMNS = {"title", "uploaded_at", "duration_seconds", "status"}  # matches VideoTable.tsx's handleHeaderClick fields
+
+_VIDEO_SELECT_COLUMNS = """
+    v.id, v.video_id, v.title, v.url, v.thumbnail_url, v.uploaded_at, v.duration_seconds,
+    v.status, v.is_members_only, v.transcript, v.transcript_timed, v.whisper_status,
+    v.quick_summary, v.quick_summary_model, v.quick_summary_generated_at,
+    v.summary, v.topics, v.takeaways, v.questions, v.obsidian_note, v.study_guide, v.critique,
+    v.ai_notes_status, v.ai_notes_generated_at, v.ai_notes_error,
+    CASE WHEN c.id IS NULL THEN NULL ELSE
+      json_build_object('id', c.id, 'name', c.name, 'channel_handle', c.channel_handle)
+    END AS channel_id
+"""
+_VIDEO_FROM = "FROM videos v LEFT JOIN channels c ON v.channel_id = c.id"
 
 
-def directus_query(path: str, params: dict) -> str:
-    return f"{path}?{urlencode(params)}"
-
-
-def apply_ui_video_filters(
-    params: dict,
+def build_video_where(
     search: str,
     status_filter: str,
     ai_filter: str,
     members_filter: str,
     search_transcript: bool = False,
     search_channel_ids: Optional[list] = None,
-) -> None:
-    and_index = 0
+) -> tuple:
+    """Parameterized WHERE-clause builder — replaces the old Directus filter[_and]/[_or] DSL."""
+    clauses: list = []
+    params: list = []
 
-    def next_and() -> str:
-        nonlocal and_index
-        idx = and_index
-        and_index += 1
-        return f"filter[_and][{idx}]"
+    def bind(value) -> str:
+        params.append(value)
+        return f"${len(params)}"
 
     if search:
-        base = next_and()
-        or_idx = 0
-        params[f"{base}[_or][{or_idx}][title][_icontains]"] = search
-        or_idx += 1
+        or_parts = [f"v.title ILIKE {bind(f'%{search}%')}"]
         if search_transcript:
-            params[f"{base}[_or][{or_idx}][transcript][_icontains]"] = search
-            or_idx += 1
+            or_parts.append(f"v.transcript ILIKE {bind(f'%{search}%')}")
         if search_channel_ids:
-            params[f"{base}[_or][{or_idx}][channel_id][_in]"] = ",".join(search_channel_ids)
+            or_parts.append(f"v.channel_id = ANY({bind(search_channel_ids)}::uuid[])")
+        clauses.append("(" + " OR ".join(or_parts) + ")")
     if status_filter and status_filter != "all":
-        params[f"{next_and()}[status][_eq]"] = status_filter
+        clauses.append(f"v.status = {bind(status_filter)}")
     if ai_filter == "done":
-        params[f"{next_and()}[ai_notes_status][_eq]"] = "done"
+        clauses.append(f"v.ai_notes_status = {bind('done')}")
     elif ai_filter == "missing":
-        params[f"{next_and()}[transcript][_nempty]"] = "true"
-        params[f"{next_and()}[summary][_null]"] = "true"
+        clauses.append("v.transcript IS NOT NULL AND v.transcript <> ''")
+        clauses.append("v.summary IS NULL")
     elif ai_filter == "error":
-        params[f"{next_and()}[ai_notes_status][_eq]"] = "error"
+        clauses.append(f"v.ai_notes_status = {bind('error')}")
     if members_filter == "hide":
-        base = next_and()
-        params[f"{base}[_or][0][is_members_only][_neq]"] = "true"
-        params[f"{base}[_or][1][is_members_only][_null]"] = "true"
+        clauses.append("v.is_members_only IS NOT TRUE")
     elif members_filter == "only":
-        params[f"{next_and()}[is_members_only][_eq]"] = "true"
+        clauses.append("v.is_members_only IS TRUE")
+
+    return (" AND ".join(clauses) if clauses else "TRUE"), params
 
 
-async def count_ui_videos(extra_params: Optional[dict] = None) -> int:
-    params = {"limit": "1", "meta": "filter_count", "fields": "id"}
-    if extra_params:
-        params.update(extra_params)
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    return data.get("meta", {}).get("filter_count", 0)
+def build_sort(sort: str) -> str:
+    sort = (sort or "").strip()
+    desc = sort.startswith("-")
+    column = sort.lstrip("-") or "uploaded_at"
+    if column not in _SORT_COLUMNS:
+        column, desc = "uploaded_at", True
+    return f"v.{column} {'DESC' if desc else 'ASC'}"
 
 
 @router.get("/ui/channels")
 async def ui_channels():
-    data = await directus._request("GET", "/items/channels?sort[]=-added_at&limit=-1")
-    count_params = {"aggregate[count]": "id", "groupBy[]": "channel_id", "limit": "-1", **NOT_MEMBERS_ONLY}
-    count_data = await directus._request("GET", directus_query("/items/videos", count_params))
-    counts = {
-        row.get("channel_id"): int((row.get("count") or {}).get("id") or 0)
-        for row in count_data.get("data", [])
-        if row.get("channel_id")
-    }
-    return [
-        {**channel, "video_count": counts.get(channel.get("id"), 0)}
-        for channel in data.get("data", [])
-    ]
+    pool = await get_pg_pool()
+    channels = _normalize_rows(await pool.fetch(
+        "SELECT id, name, topic, channel_url, channel_handle, added_at, status, "
+        "video_count, error_message, last_refreshed FROM channels ORDER BY added_at DESC"
+    ))
+    count_rows = await pool.fetch(
+        f"SELECT channel_id, COUNT(*) AS count FROM videos "
+        f"WHERE channel_id IS NOT NULL AND {NOT_MEMBERS_ONLY} GROUP BY channel_id"
+    )
+    counts = {str(row["channel_id"]): row["count"] for row in count_rows}
+    return [{**ch, "video_count": counts.get(ch["id"], 0)} for ch in channels]
 
 
 @router.patch("/ui/channels/{channel_id}")
@@ -126,7 +123,7 @@ async def ui_update_channel(channel_id: str, data: dict):
 
 @router.delete("/ui/channels/{channel_id}")
 async def ui_delete_channel(channel_id: str):
-    await directus._request("DELETE", f"/items/channels/{channel_id}")
+    await directus.delete_channel(channel_id)
     return {"deleted": True, "id": channel_id}
 
 
@@ -141,18 +138,22 @@ async def ui_videos(
     members_filter: str = "hide",
 ):
     page = max(1, page)
-    params = {
-        "sort": sort,
-        "limit": str(UI_PAGE_SIZE),
-        "offset": str((page - 1) * UI_PAGE_SIZE),
-        "meta": "filter_count",
-        "fields": UI_VIDEO_FIELDS,
-    }
+    where, params = build_video_where(search, status_filter, ai_filter, members_filter)
     if channel_id:
-        params["filter[channel_id][_eq]"] = channel_id
-    apply_ui_video_filters(params, search, status_filter, ai_filter, members_filter)
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    return {"items": data.get("data", []), "total": data.get("meta", {}).get("filter_count", 0)}
+        where += f" AND v.channel_id = ${len(params) + 1}"
+        params.append(channel_id)
+    pool = await get_pg_pool()
+    total = await pool.fetchval(f"SELECT COUNT(*) FROM videos v WHERE {where}", *params)
+    rows = await pool.fetch(
+        f"""
+        SELECT {_VIDEO_SELECT_COLUMNS} {_VIDEO_FROM}
+        WHERE {where}
+        ORDER BY {build_sort(sort)}
+        LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+        """,
+        *params, UI_PAGE_SIZE, (page - 1) * UI_PAGE_SIZE,
+    )
+    return {"items": _normalize_rows(rows), "total": total}
 
 
 @router.get("/ui/search")
@@ -167,25 +168,24 @@ async def ui_search(
     if not q:
         return {"items": [], "total": 0}
     page = max(1, page)
-    channel_matches = await directus._request("GET", directus_query("/items/channels", {
-        "filter[name][_icontains]": q,
-        "fields": "id",
-        "limit": "-1",
-    }))
-    channel_ids = [c["id"] for c in channel_matches.get("data", [])]
-    params = {
-        "sort": "-uploaded_at",
-        "limit": str(UI_PAGE_SIZE),
-        "offset": str((page - 1) * UI_PAGE_SIZE),
-        "meta": "filter_count",
-        "fields": UI_VIDEO_FIELDS,
-    }
-    apply_ui_video_filters(
-        params, q, status_filter, ai_filter, members_filter,
+    pool = await get_pg_pool()
+    channel_id_rows = await pool.fetch("SELECT id FROM channels WHERE name ILIKE $1", f"%{q}%")
+    channel_ids = [str(r["id"]) for r in channel_id_rows]
+    where, params = build_video_where(
+        q, status_filter, ai_filter, members_filter,
         search_transcript=True, search_channel_ids=channel_ids,
     )
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    return {"items": data.get("data", []), "total": data.get("meta", {}).get("filter_count", 0)}
+    total = await pool.fetchval(f"SELECT COUNT(*) FROM videos v WHERE {where}", *params)
+    rows = await pool.fetch(
+        f"""
+        SELECT {_VIDEO_SELECT_COLUMNS} {_VIDEO_FROM}
+        WHERE {where}
+        ORDER BY v.uploaded_at DESC
+        LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+        """,
+        *params, UI_PAGE_SIZE, (page - 1) * UI_PAGE_SIZE,
+    )
+    return {"items": _normalize_rows(rows), "total": total}
 
 
 @router.get("/ui/videos/range")
@@ -198,21 +198,23 @@ async def ui_videos_range(date_from: str, date_to: str, tz: str = "Europe/Budape
     ty, tm, td = (int(x) for x in date_to.split("-"))
     start = datetime(fy, fm, fd, tzinfo=local_tz).astimezone(timezone.utc)
     end = (datetime(ty, tm, td, tzinfo=local_tz) + timedelta(days=1)).astimezone(timezone.utc)
-    params = {
-        "filter[uploaded_at][_gte]": start.isoformat(),
-        "filter[uploaded_at][_lt]": end.isoformat(),
-        "sort": "-uploaded_at",
-        "limit": "-1",
-        "fields": UI_VIDEO_FIELDS,
-        **NOT_MEMBERS_ONLY,
-    }
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    return data.get("data", [])
+    pool = await get_pg_pool()
+    rows = await pool.fetch(
+        f"""
+        SELECT {_VIDEO_SELECT_COLUMNS} {_VIDEO_FROM}
+        WHERE v.uploaded_at >= $1 AND v.uploaded_at < $2 AND {NOT_MEMBERS_ONLY}
+        ORDER BY v.uploaded_at DESC
+        """,
+        start, end,
+    )
+    return _normalize_rows(rows)
 
 
 @router.get("/ui/videos/count")
 async def ui_video_count():
-    return {"count": await count_ui_videos(NOT_MEMBERS_ONLY)}
+    pool = await get_pg_pool()
+    count = await pool.fetchval(f"SELECT COUNT(*) FROM videos WHERE {NOT_MEMBERS_ONLY}")
+    return {"count": count}
 
 
 @router.get("/ui/admin-stats")
@@ -221,49 +223,45 @@ async def ui_admin_stats():
     local_start = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
     start = local_start.astimezone(timezone.utc)
     end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
-    total, today_count, errors, missing_transcripts, missing_ai = await asyncio.gather(
-        count_ui_videos(NOT_MEMBERS_ONLY),
-        count_ui_videos({
-            "filter[uploaded_at][_gte]": start.isoformat(),
-            "filter[uploaded_at][_lt]": end.isoformat(),
-            **NOT_MEMBERS_ONLY,
-        }),
-        count_ui_videos({"filter[status][_eq]": "error", **NOT_MEMBERS_ONLY}),
-        count_ui_videos({
-            "filter[_and][0][_or][0][transcript][_null]": "true",
-            "filter[_and][0][_or][1][status][_in]": "pending,no_transcript,error",
-            "filter[_and][1][_or][0][is_members_only][_neq]": "true",
-            "filter[_and][1][_or][1][is_members_only][_null]": "true",
-        }),
-        count_ui_videos({
-            "filter[_and][0][transcript][_nempty]": "true",
-            "filter[_and][1][_or][0][summary][_null]": "true",
-            "filter[_and][1][_or][1][critique][_null]": "true",
-            "filter[_and][2][_or][0][is_members_only][_neq]": "true",
-            "filter[_and][2][_or][1][is_members_only][_null]": "true",
-        }),
+    pool = await get_pg_pool()
+    row = await pool.fetchrow(
+        f"""
+        SELECT
+          COUNT(*) FILTER (WHERE {NOT_MEMBERS_ONLY}) AS total,
+          COUNT(*) FILTER (WHERE {NOT_MEMBERS_ONLY} AND uploaded_at >= $1 AND uploaded_at < $2) AS today,
+          COUNT(*) FILTER (WHERE {NOT_MEMBERS_ONLY} AND status = 'error') AS errors,
+          COUNT(*) FILTER (WHERE {NOT_MEMBERS_ONLY} AND (transcript IS NULL OR status IN ('pending', 'no_transcript', 'error'))) AS missing_transcripts,
+          COUNT(*) FILTER (WHERE {NOT_MEMBERS_ONLY} AND transcript IS NOT NULL AND transcript <> '' AND (summary IS NULL OR critique IS NULL)) AS missing_ai
+        FROM videos
+        """,
+        start, end,
     )
     return {
-        "totalVideos": total,
-        "todayVideos": today_count,
-        "errorVideos": errors,
-        "missingTranscripts": missing_transcripts,
-        "missingAiNotes": missing_ai,
+        "totalVideos": row["total"],
+        "todayVideos": row["today"],
+        "errorVideos": row["errors"],
+        "missingTranscripts": row["missing_transcripts"],
+        "missingAiNotes": row["missing_ai"],
     }
 
 
 @router.get("/ui/channel-coverage")
 async def ui_channel_coverage():
-    base_params = {"aggregate[count]": "id", "groupBy[]": "channel_id", "limit": "-1"}
+    pool = await get_pg_pool()
+    base = f"SELECT channel_id, COUNT(*) AS count FROM videos WHERE channel_id IS NOT NULL AND {NOT_MEMBERS_ONLY}"
     total, transcript_done, ai_done = await asyncio.gather(
-        directus._request("GET", directus_query("/items/videos", {**base_params, **NOT_MEMBERS_ONLY})),
-        directus._request("GET", directus_query("/items/videos", {**base_params, "filter[status][_eq]": "done", **NOT_MEMBERS_ONLY})),
-        directus._request("GET", directus_query("/items/videos", {**base_params, "filter[ai_notes_status][_eq]": "done", **NOT_MEMBERS_ONLY})),
+        pool.fetch(f"{base} GROUP BY channel_id"),
+        pool.fetch(f"{base} AND status = 'done' GROUP BY channel_id"),
+        pool.fetch(f"{base} AND ai_notes_status = 'done' GROUP BY channel_id"),
     )
+
+    def as_directus_shape(rows):
+        return [{"channel_id": str(row["channel_id"]), "count": {"id": row["count"]}} for row in rows]
+
     return {
-        "total": total.get("data", []),
-        "transcriptDone": transcript_done.get("data", []),
-        "aiDone": ai_done.get("data", []),
+        "total": as_directus_shape(total),
+        "transcriptDone": as_directus_shape(transcript_done),
+        "aiDone": as_directus_shape(ai_done),
     }
 
 
@@ -276,14 +274,16 @@ async def ui_monthly_video_counts():
         month += 12
         year -= 1
     cutoff = cutoff.replace(year=year, month=month)
-    params = {"filter[uploaded_at][_gte]": cutoff.isoformat(), "fields": "uploaded_at", "limit": "-1", **NOT_MEMBERS_ONLY}
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    counts: dict[str, int] = {}
-    for video in data.get("data", []):
-        uploaded = video.get("uploaded_at")
-        if uploaded:
-            key = uploaded[:7]
-            counts[key] = counts.get(key, 0) + 1
+    pool = await get_pg_pool()
+    rows = await pool.fetch(
+        f"""
+        SELECT to_char(date_trunc('month', uploaded_at), 'YYYY-MM') AS month, COUNT(*) AS count
+        FROM videos WHERE uploaded_at >= $1 AND {NOT_MEMBERS_ONLY}
+        GROUP BY 1
+        """,
+        cutoff,
+    )
+    counts = {row["month"]: row["count"] for row in rows}
     result = []
     year, month = cutoff.year, cutoff.month
     for _ in range(12):
@@ -298,14 +298,20 @@ async def ui_monthly_video_counts():
 
 @router.get("/ui/error-videos")
 async def ui_error_videos():
-    params = {
-        "filter[status][_eq]": "error",
-        "fields": "id,video_id,title,url,channel_id.name,channel_id.channel_handle",
-        "sort": "-processed_at",
-        "limit": "50",
-    }
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    return data.get("data", [])
+    pool = await get_pg_pool()
+    rows = await pool.fetch(
+        """
+        SELECT v.id, v.video_id, v.title, v.url,
+          CASE WHEN c.id IS NULL THEN NULL ELSE
+            json_build_object('name', c.name, 'channel_handle', c.channel_handle)
+          END AS channel_id
+        FROM videos v LEFT JOIN channels c ON v.channel_id = c.id
+        WHERE v.status = 'error'
+        ORDER BY v.processed_at DESC
+        LIMIT 50
+        """
+    )
+    return _normalize_rows(rows)
 
 
 @router.patch("/ui/videos/{video_id}")
@@ -318,11 +324,13 @@ async def ui_update_video(video_id: str, data: dict):
 
 @router.get("/ui/channels/{channel_id}/videos")
 async def ui_channel_videos(channel_id: str, sort: str = "-uploaded_at"):
-    params = {
-        "filter[channel_id][_eq]": channel_id,
-        "sort": sort,
-        "limit": "-1",
-        "fields": UI_VIDEO_FIELDS,
-    }
-    data = await directus._request("GET", directus_query("/items/videos", params))
-    return data.get("data", [])
+    pool = await get_pg_pool()
+    rows = await pool.fetch(
+        f"""
+        SELECT {_VIDEO_SELECT_COLUMNS} {_VIDEO_FROM}
+        WHERE v.channel_id = $1
+        ORDER BY {build_sort(sort)}
+        """,
+        channel_id,
+    )
+    return _normalize_rows(rows)

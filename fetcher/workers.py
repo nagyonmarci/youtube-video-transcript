@@ -14,7 +14,8 @@ from constants import (
     WORKER_IDLE_SLEEP, WORKER_POLL_BACKOFF, IDLE_SLEEP,
     STOPPED_BY_USER, BOOTSTRAP_CHECK_INTERVAL,
 )
-from db import ensure_database_indexes, close_pg_pool
+from db import ensure_database_indexes, close_pg_pool, get_pg_pool
+from schema import ensure_schema
 from log_store import install_log_handler
 from fetch_tasks import (
     process_channel_task, process_single_video_task, process_refresh_task,
@@ -121,7 +122,7 @@ async def run_worker(
                 finished = datetime.now(timezone.utc)
                 await directus.update_job(job["id"], {
                     "status": "done",
-                    "finished_at": finished.isoformat(),
+                    "finished_at": finished,
                     "duration_seconds": job_duration_seconds(job, finished),
                     "locked_at": None,
                     "locked_by": None,
@@ -197,16 +198,19 @@ async def restart_ai_worker():
 
 async def bootstrap_runtime(cleanup_pending: bool = True):
     install_log_handler()
-    logger.info("Waiting for Directus...")
+    logger.info("Waiting for Postgres...")
     for _ in range(40):
-        if await directus.health_check():
+        try:
+            pool = await get_pg_pool()
+            await pool.fetchval("SELECT 1")
             break
-        await asyncio.sleep(BOOTSTRAP_CHECK_INTERVAL)
+        except Exception:
+            await asyncio.sleep(BOOTSTRAP_CHECK_INTERVAL)
     else:
-        logger.warning("Directus not responding, continuing anyway")
+        logger.warning("Postgres not responding, continuing anyway")
 
     try:
-        await directus.ensure_schema()
+        await ensure_schema()
         await ensure_database_indexes()
         stale = await reset_stale_running_jobs()
         if stale:
