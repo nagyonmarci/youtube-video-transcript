@@ -215,6 +215,13 @@ class DirectusClient:
                     "meta": {"interface": "input-multiline", "width": "full"},
                     "schema": {"is_nullable": True},
                 })
+            if "for_whisper" not in existing:
+                await create_field_if_missing({
+                    "field": "for_whisper",
+                    "type": "boolean",
+                    "meta": {"interface": "boolean", "width": "half"},
+                    "schema": {"is_nullable": True, "default_value": False},
+                })
             for field in AI_NOTE_FIELDS:
                 if field["field"] not in existing:
                     await create_field_if_missing(field)

@@ -64,18 +64,25 @@ class DirectusClient:
                     "schema": {"is_nullable": True},
                 })
                 logger.info("Added 'transcript_timed' field to videos collection")
+            if "for_whisper" not in existing:
+                await self._request("POST", "/fields/videos", json={
+                    "field": "for_whisper",
+                    "type": "boolean",
+                    "meta": {"interface": "boolean", "width": "half"},
+                    "schema": {"is_nullable": True, "default_value": False},
+                })
+                logger.info("Added 'for_whisper' field to videos collection")
         except Exception as e:
             logger.warning(f"Could not ensure whisper fields: {e}")
 
     # ---- Video queries ----
 
     async def get_no_transcript_videos(self, limit: int = 50) -> list:
-        """Fetch videos with status 'no_transcript' and no whisper processing yet.
-        Excludes videos with 'MEMBERS' in the title (members-only content)."""
+        """Fetch videos flagged for whisper transcription that haven't been processed yet."""
         params = (
             "?filter[status][_eq]=no_transcript"
             "&filter[whisper_status][_null]=true"
-            "&filter[title][_ncontains]=MEMBERS"
+            "&filter[for_whisper][_eq]=true"
             "&sort=processed_at"
             f"&limit={limit}"
             "&fields=id,video_id,title,url,duration_seconds"
