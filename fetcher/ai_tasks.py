@@ -8,7 +8,7 @@ import config
 import worker_state
 from ai_notes import generate_ai_notes, generate_quick_summary
 from constants import STOPPED_BY_USER, QUEUE_QUICK, JOB_QUICK_NOTE_VIDEO, JOB_AI_NOTE_VIDEO
-from directus_client import now_iso
+from pg_client import utcnow
 from job_ops import enqueue_ai_job
 from job_utils import (
     update_video_ai_status, update_job_progress, update_current_job_phase,
@@ -58,7 +58,7 @@ async def generate_and_store_ai_notes(directus_video_id: str, video: dict, field
             **notes,
             "ai_notes_status": "done",
             "ai_notes_error": None,
-            "ai_notes_generated_at": now_iso(),
+            "ai_notes_generated_at": utcnow(),
         })
         vid = video.get("video_id") or directus_video_id
         if metrics:
@@ -143,7 +143,7 @@ async def process_single_ai_note_task(task: dict):
         "phase": "generating",
         "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
-        "started_at": now_iso(),
+        "started_at": utcnow(),
     }
     if worker_state.current_ai_job_id:
         await directus.update_job(worker_state.current_ai_job_id, {"progress_label": "AI generation started"})
@@ -175,7 +175,7 @@ async def process_quick_note_task(task: dict):
         "phase": "quick_summary",
         "video_id": video_id,
         "video": video.get("title") or video.get("video_id"),
-        "started_at": now_iso(),
+        "started_at": utcnow(),
     }
 
     async def quick_progress(progress: dict) -> None:
@@ -191,7 +191,7 @@ async def process_quick_note_task(task: dict):
             await directus.update_video(video["id"], {
                 "quick_summary": quick,
                 "quick_summary_model": config.OLLAMA_QUICK_MODEL,
-                "quick_summary_generated_at": now_iso(),
+                "quick_summary_generated_at": utcnow(),
             })
             logger.info(f"Quick summary stored for {video.get('video_id') or video_id}")
     except asyncio.CancelledError:

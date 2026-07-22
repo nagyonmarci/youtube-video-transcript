@@ -1,4 +1,4 @@
-"""Shared mutable worker state: DirectusClient instance, stop flags, task tracking, ContextVars."""
+"""Shared mutable worker state: PostgresClient instance, stop flags, task tracking, ContextVars."""
 
 import logging
 import time
@@ -8,12 +8,13 @@ from typing import Optional
 import asyncio
 
 import config
-from directus_client import DirectusClient
+from pg_client import PostgresClient
 
 logger = logging.getLogger(__name__)
 
-# Directus client (initialized once, never reassigned)
-directus = DirectusClient(config.DIRECTUS_URL, config.DIRECTUS_TOKEN)
+# Postgres data-access client (initialized once, never reassigned). Kept under the
+# name `directus` since every other module still imports/uses it under that name.
+directus = PostgresClient()
 
 # Worker asyncio.Task handles
 worker_task: Optional[asyncio.Task] = None

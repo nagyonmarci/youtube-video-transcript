@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from directus_client import DirectusClient
+import pg_client
 from transcriber import MembersOnlyError, transcribe_video
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -32,8 +32,6 @@ def required_env(name: str) -> str:
     return value
 
 
-DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
-DIRECTUS_TOKEN = required_env("DIRECTUS_TOKEN")
 APP_API_TOKEN = required_env("APP_API_TOKEN")
 APP_CORS_ORIGINS = [
     origin.strip()
@@ -49,8 +47,6 @@ BATCH_LIMIT = int(os.environ.get("BATCH_LIMIT", "50"))
 # Rate limiting between audio downloads (same as fetcher)
 DOWNLOAD_DELAY_MIN = 45
 DOWNLOAD_DELAY_MAX = 75
-
-directus = DirectusClient(DIRECTUS_URL, DIRECTUS_TOKEN)
 
 # Worker state
 task_queue: asyncio.Queue = asyncio.Queue()
@@ -100,7 +96,7 @@ async def process_transcription_task(task: dict):
     }
 
     # Mark as processing
-    await directus.update_video(directus_id, {"whisper_status": "processing"})
+    await pg_client.update_video(directus_id, {"whisper_status": "processing"})
 
     # Rate limit before download (skip for first item in batch)
     if task.get("delay", False):
@@ -111,7 +107,7 @@ async def process_transcription_task(task: dict):
     # Run transcription in thread pool (blocking I/O)
     current_task_info["phase"] = "transcribing"
     loop = asyncio.get_event_loop()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     try:
         transcript_result = await loop.run_in_executor(
             None,
@@ -123,7 +119,7 @@ async def process_transcription_task(task: dict):
             WHISPER_THREADS,
         )
     except MembersOnlyError:
-        await directus.update_video(directus_id, {
+        await pg_client.update_video(directus_id, {
             "whisper_status": "members_only",
             "processed_at": now,
         })
@@ -132,7 +128,7 @@ async def process_transcription_task(task: dict):
 
     if transcript_result:
         transcript, transcript_timed = transcript_result
-        await directus.update_video(directus_id, {
+        await pg_client.update_video(directus_id, {
             "transcript": transcript,
             "transcript_timed": transcript_timed,
             "status": "done",
@@ -141,7 +137,7 @@ async def process_transcription_task(task: dict):
         })
         logger.info(f"Whisper done: {video_id} ({len(transcript)} chars)")
     else:
-        await directus.update_video(directus_id, {
+        await pg_client.update_video(directus_id, {
             "whisper_status": "error",
             "processed_at": now,
         })
@@ -157,7 +153,7 @@ async def run_batch(limit: int = BATCH_LIMIT, language: str = WHISPER_LANGUAGE):
 
     batch_running = True
     try:
-        videos = await directus.get_no_transcript_videos(limit=limit)
+        videos = await pg_client.get_no_transcript_videos(limit=limit)
         if not videos:
             logger.info("No videos to transcribe")
             return 0
@@ -187,24 +183,22 @@ async def scheduled_batch():
 async def lifespan(app: FastAPI):
     global worker_task, scheduler
 
-    # Wait for Directus
-    logger.info("Waiting for Directus...")
+    # Wait for Postgres
+    logger.info("Waiting for Postgres...")
     for _ in range(40):
-        if await directus.health_check():
+        try:
+            pool = await pg_client.get_pg_pool()
+            await pool.fetchval("SELECT 1")
             break
-        await asyncio.sleep(3)
+        except Exception:
+            await asyncio.sleep(3)
     else:
-        logger.warning("Directus not responding, continuing anyway")
+        logger.warning("Postgres not responding, continuing anyway")
 
-    # Ensure whisper_status field exists
+    # Pre-mark known members-only videos (title contains MEMBERS) — redundant fallback,
+    # the fetcher's for_whisper flag already excludes members-only videos more reliably.
     try:
-        await directus.ensure_whisper_fields()
-    except Exception as e:
-        logger.error(f"Schema bootstrap error: {e}", exc_info=True)
-
-    # Pre-mark known members-only videos (title contains MEMBERS)
-    try:
-        count = await directus.mark_members_only_videos()
+        count = await pg_client.mark_members_only_videos()
         if count:
             logger.info(f"Pre-marked {count} MEMBERS videos as members_only")
     except Exception as e:
@@ -212,14 +206,9 @@ async def lifespan(app: FastAPI):
 
     # Reset any stale "processing" states from previous crashes
     try:
-        from httpx import AsyncClient
-        params = "?filter[whisper_status][_eq]=processing&limit=-1&fields=id"
-        result = await directus._request("GET", f"/items/videos{params}")
-        stale = result.get("data", [])
-        for v in stale:
-            await directus.update_video(v["id"], {"whisper_status": None})
-        if stale:
-            logger.info(f"Reset {len(stale)} stale whisper_status=processing records")
+        reset_count = await pg_client.reset_stale_processing()
+        if reset_count:
+            logger.info(f"Reset {reset_count} stale whisper_status=processing records")
     except Exception as e:
         logger.warning(f"Could not reset stale records: {e}")
 
@@ -249,6 +238,7 @@ async def lifespan(app: FastAPI):
         worker_task.cancel()
     if scheduler:
         scheduler.shutdown(wait=False)
+    await pg_client.close_pg_pool()
 
 
 app = FastAPI(title="Whisper Transcription Service", lifespan=lifespan)
@@ -308,9 +298,9 @@ async def transcribe_batch(request: BatchRequest = BatchRequest()):
 @app.post("/transcribe-video/{video_id}")
 async def transcribe_single_video(video_id: str):
     """Transcribe a single video by its YouTube video ID."""
-    video = await directus.find_video_by_yt_id(video_id)
+    video = await pg_client.find_video_by_yt_id(video_id)
     if not video:
-        raise HTTPException(status_code=404, detail="Video not found in Directus")
+        raise HTTPException(status_code=404, detail="Video not found")
 
     await task_queue.put({
         "video": video,

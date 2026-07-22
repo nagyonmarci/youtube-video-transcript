@@ -29,7 +29,7 @@ docker compose exec -T fetcher curl -sS -H "X-App-Token: $APP_API_TOKEN" http://
 `frontend` and `fetcher`/`fetch-worker`/`ai-worker` build on Chainguard's Wolfi-based images (multi-stage: a `-dev` builder stage, a minimal runtime stage). The shipped `frontend` image has a shell but no `wget`/`curl`/`npm`-as-CLI-tool network debugging; `fetcher`'s runtime stage is `wolfi-base` rather than a stripped image, so besides `curl`/`ffmpeg` (added explicitly for app needs) it still has `apk` available too (confirmed via `docker run --entrypoint sh`). There is no `-dev`-tagged variant of these *built* images — for deeper interactive debugging, run the relevant base image directly, e.g. `docker run --rm -it cgr.dev/chainguard/wolfi-base sh`.
 
 The app runs at **http://yt.test** (requires dnsmasq; see README).  
-The Caddy entrypoint is protected by Basic Auth. Directus is intentionally not exposed through `yt.test`; access it only from the Docker network or add a temporary local-only route when needed.
+The Caddy entrypoint is protected by Basic Auth. Postgres itself is not exposed through `yt.test`; access it only from the Docker network (`docker compose exec postgres psql -U directus`) or add a temporary local-only route when needed.
 
 ## Architecture
 
@@ -38,25 +38,25 @@ http://yt.test
       │
    Caddy ──► Frontend (Astro+React preview :4321)
       │
-      ├─ /api     ──► Fetcher :8000 ──► Directus :8055 ──► PostgreSQL
-      └─ /whisper ──► Whisper :8001 ──► Directus :8055
+      ├─ /api     ──► Fetcher :8000 ──► PostgreSQL
+      └─ /whisper ──► Whisper :8001 ──► PostgreSQL
 ```
 
-Core Docker services: `postgres`, `directus`, `fetcher`, `fetch-worker`, `ai-worker`, `whisper`, `frontend`, `caddy`.
+Core Docker services: `postgres`, `fetcher`, `fetch-worker`, `ai-worker`, `whisper`, `frontend`, `caddy`.
 
 ## Data Model
 
-All persistent state lives in Directus (PostgreSQL). Three key collections:
+All persistent state lives directly in PostgreSQL — the fetcher and whisper services talk to it via `asyncpg`, no ORM. Three key tables:
 
 - **`channels`** – YouTube channels (`channel_url`, `channel_handle`, `status`, `last_refreshed`)
 - **`videos`** – per-video records (`video_id`, `channel_id`, `transcript`, `transcript_timed`, `uploaded_at`, `status`, AI note fields)
 - **`jobs`** – persistent work queue (`queue`, `type`, `status`, `payload`, `sort_order`)
 
-Schema is bootstrapped at fetcher startup via `DirectusClient.ensure_schema()` — it creates missing collections and fields programmatically. No SQL migrations exist.
+Schema is bootstrapped at fetcher startup via `schema.py::ensure_schema()` — idempotent `CREATE TABLE IF NOT EXISTS`/`ALTER TABLE ADD COLUMN IF NOT EXISTS` statements. No SQL migrations exist.
 
 ## Fetcher Service (`fetcher/`)
 
-FastAPI app with **three background worker loops** polling the `jobs` Directus collection:
+FastAPI app with **three background worker loops** polling the `jobs` table:
 
 - `worker_loop` — processes `fetch` queue: `channel`, `video`, `refresh`, `refresh_dates`, `refresh_thumbnails`
 - `quick_worker_loop` — processes `quick` queue: fast one-paragraph summary (Phase 1)
@@ -68,7 +68,8 @@ Key modules:
 - `main.py` — FastAPI app init, lifespan, middleware, router wiring (~78 lines)
 - `config.py` — env var parsing, settings hot-reload (`apply_app_settings`)
 - `db.py` — asyncpg pool, index bootstrap
-- `worker_state.py` — global stop flags, task state dicts, ContextVars, directus instance
+- `schema.py` — idempotent table/column DDL bootstrap (`ensure_schema()`)
+- `worker_state.py` — global stop flags, task state dicts, ContextVars, `directus` instance (the shared `PostgresClient`)
 - `job_utils.py` — job claim (`FOR UPDATE SKIP LOCKED`), progress, heartbeat, retry, deduplication
 - `job_ops.py` — enqueue helpers, cancel, cleanup, year-backfill
 - `fetch_tasks.py` — channel/video/refresh task handlers
@@ -77,7 +78,7 @@ Key modules:
 - `scheduler.py` — APScheduler setup, daily refresh
 - `api_models.py` — Pydantic request models
 - `routes/` — FastAPI APIRouters: `status.py`, `jobs.py`, `ui.py`, `fetch.py`, `ai.py`
-- `directus_client.py` — all Directus REST calls; schema bootstrap; job CRUD
+- `pg_client.py` — `PostgresClient`: all channel/video/job/setting CRUD via `asyncpg`
 - `youtube_fetcher.py` — yt-dlp and youtube-transcript-api wrappers; rate-limited sleep helpers
 - `ai_notes.py` — Ollama/cloud chat call; `build_prompt()`; `extract_json()`; `normalize_list()`
 
@@ -88,7 +89,7 @@ Rate limits are enforced inside `youtube_fetcher.py` (`rate_limited_sleep_transc
 Astro shell (`src/pages/index.astro`) that mounts a single React SPA (`src/App.jsx`). All interactivity is React; Astro is only used for the HTML shell and Vite/dev-server.
 
 **Data access split:**
-- `src/lib/directus.js` — reads/writes UI data through fetcher facade endpoints under `/api/ui/*`; no Directus token is exposed to the browser
+- `src/lib/directus.js` — reads/writes UI data through fetcher facade endpoints under `/api/ui/*`; no database credentials are exposed to the browser
 - `src/lib/fetcher.js` — all write/action calls go through the Fetcher API (`/api/...`)
 - `src/lib/export.js` — pure client-side export helpers (TXT, MD, Obsidian MD, Markmap MD); no network calls
 
@@ -123,12 +124,12 @@ Distilled from an internal DevSecOps policy doc, scoped to what actually fits th
 
 **Containers**
 - Custom Dockerfiles (`fetcher/`, `whisper/`, `frontend/`) must run as non-root. Already true for all three: `fetcher`/`fetch-worker`/`ai-worker` → `USER nonroot`; `whisper` → `USER appuser`; `frontend` → inherits UID 65532 from the base image.
-- `security_opt: [no-new-privileges:true]` + `cap_drop: [ALL]` is required on every custom service in `docker-compose.yml`. Already applied to `fetcher`, `fetch-worker`, `ai-worker`, `whisper`, `frontend`. **Gap:** `postgres`, `directus`, `caddy` (vendor images) have none of this — add the same two lines when next touching `docker-compose.yml`. `caddy` is the one internet-facing service (ports 80/443) and currently has zero compose-level hardening, so it's the highest-priority of the three.
+- `security_opt: [no-new-privileges:true]` + `cap_drop: [ALL]` is required on every custom service in `docker-compose.yml`. Already applied to `fetcher`, `fetch-worker`, `ai-worker`, `whisper`, `frontend`. **Gap:** `postgres`, `caddy` (vendor images) have none of this — add the same two lines when next touching `docker-compose.yml`. `caddy` is the one internet-facing service (ports 80/443) and currently has zero compose-level hardening, so it's the higher-priority of the two.
 - Prefer a shell-free/package-manager-free final stage. **Gap, confirmed empirically** (`docker run --entrypoint sh <image> -c '...'`): none of the three custom images currently qualify. `fetcher`'s final stage is `wolfi-base` (has `apk` + shell — see the note above); `frontend`'s final stage is Chainguard's non-dev `node:latest` but still has a shell; `whisper`'s final stage is `python:3.12-slim` (Debian, apt + shell). Closing this needs a follow-up Dockerfile rework (e.g. `fetcher` → `chainguard/python`), not done here.
 - `read_only: true` root filesystem is the target for custom services, with `tmpfs` for the specific paths that need runtime writes. **Not yet applied anywhere.** What each service would need: `fetcher`/`fetch-worker`/`ai-worker` → `/tmp` (yt-dlp subtitle-fallback `tempfile.TemporaryDirectory()` in `youtube_fetcher.py`); `whisper` → `/tmp` (every transcription job calls `tempfile.mkdtemp()` in `transcriber.py` — core path, not a fallback); `frontend` → no runtime writes found, best candidate to flip first.
 - Static binaries don't apply to the Python/Node services. `whisper.cpp` (C/C++, built from source in `whisper/Dockerfile`) is dynamically linked today — static linking is possible future hardening, not a requirement.
-- Vendor images (`postgres:16-alpine`, `directus/directus`, `caddy:2-alpine`) are used unmodified — harden at the compose level only, never by forking their Dockerfiles.
-- DB is already Postgres (`postgres` service; Directus is pinned to `DB_CLIENT: pg`) — never introduce SQLite or another embedded/file-based DB.
+- Vendor images (`postgres:16-alpine`, `caddy:2-alpine`) are used unmodified — harden at the compose level only, never by forking their Dockerfiles.
+- DB is already Postgres (`postgres` service, accessed directly via `asyncpg`) — never introduce SQLite or another embedded/file-based DB.
 
 **Supply chain / CI**
 - `npm ci` should run with `--ignore-scripts` — `frontend/package.json` has no `preinstall`/`postinstall`/`prepare` scripts, so this is safe to add. **Not yet applied** in `.github/workflows/ci.yml` (`frontend` job) or `frontend/Dockerfile`.
@@ -149,6 +150,6 @@ Distilled from an internal DevSecOps policy doc, scoped to what actually fits th
 ## Workflow Notes
 
 - Enter plan mode for any task with 3+ steps or architectural decisions
-- After schema-touching changes to `directus_client.py`: the new fields only appear after `docker compose up -d fetcher` (schema bootstrap runs on startup)
+- After schema-touching changes to `fetcher/schema.py`: the new columns only appear after `docker compose up -d fetcher` (schema bootstrap runs on startup)
 - No full test suite — verify with `py_compile`, `npm run build`, `npm audit --omit=dev`, `docker compose config --quiet`, manual HTTP checks, and log inspection
-- Browser code must not call Directus directly or contain static service tokens
+- Browser code must not connect to Postgres directly or contain static service tokens

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 import worker_state
 from api_models import JobMoveRequest
-from directus_client import now_iso
+from pg_client import utcnow
 from job_ops import cleanup_orphan_ai_pending_videos
 from job_utils import job_status_counts
 from worker_state import directus
@@ -130,7 +130,7 @@ async def delete_job(job_id: str):
     if job.get("status") == "running":
         await directus.update_job(job_id, {
             "status": "cancelled",
-            "finished_at": now_iso(),
+            "finished_at": utcnow(),
             "error_message": "Cancelled by user",
             "locked_at": None,
             "locked_by": None,

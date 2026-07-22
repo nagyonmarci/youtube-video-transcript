@@ -49,6 +49,8 @@ async def ensure_database_indexes():
         "CREATE INDEX IF NOT EXISTS idx_videos_channel_id ON videos (channel_id)",
         "CREATE INDEX IF NOT EXISTS idx_videos_members_only ON videos (is_members_only)",
         "CREATE INDEX IF NOT EXISTS idx_videos_ai_notes_status ON videos (ai_notes_status)",
+        "CREATE INDEX IF NOT EXISTS idx_videos_status ON videos (status)",
+        "CREATE INDEX IF NOT EXISTS idx_videos_whisper_candidates ON videos (whisper_status) WHERE status = 'no_transcript' AND for_whisper IS TRUE",
         "CREATE INDEX IF NOT EXISTS idx_videos_summary_missing ON videos (id) WHERE summary IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_videos_thumbnail_missing ON videos (id) WHERE thumbnail_url IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_jobs_queue_status_sort ON jobs (queue, status, sort_order, created_at)",

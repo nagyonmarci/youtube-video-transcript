@@ -11,7 +11,7 @@ import config
 import worker_state
 from constants import HEARTBEAT_INTERVAL, STOPPED_BY_USER
 from db import get_pg_pool
-from directus_client import now_iso
+from pg_client import utcnow
 from worker_state import directus
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ async def retry_or_fail_job(job: dict, error: Exception, stopped: bool = False):
     attempts = int(job.get("attempts") or 0) + 1
     max_attempts = max(1, int(job.get("max_attempts") or 3))
     error_message = STOPPED_BY_USER if stopped else (str(error) or repr(error))[:1000]
-    now = now_iso()
+    now = utcnow()
     duration_seconds = job_duration_seconds(job)
     if stopped or attempts >= max_attempts:
         await directus.update_job(job["id"], {
@@ -128,7 +128,7 @@ async def heartbeat_job(job_id: str):
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL)
         try:
-            await directus.update_job(job_id, {"locked_at": now_iso()})
+            await directus.update_job(job_id, {"locked_at": utcnow()})
         except Exception as e:
             logger.warning(f"Could not heartbeat job {job_id}: {e}")
 

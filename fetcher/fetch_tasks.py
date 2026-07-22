@@ -7,7 +7,7 @@ from typing import Optional
 
 import config
 import worker_state
-from directus_client import now_iso
+from pg_client import utcnow
 from job_ops import enqueue_ai_note
 from job_utils import update_job_progress, update_video_ai_status
 from worker_state import directus
@@ -130,7 +130,7 @@ async def _process_channel_transcripts(
             )
             if directus_video_id:
                 await directus.update_video(directus_video_id, {
-                    "processed_at": now_iso(),
+                    "processed_at": utcnow(),
                     "status": "done" if transcript else "no_transcript",
                     "transcript": transcript or "",
                     "transcript_timed": transcript_timed or "",
@@ -149,7 +149,7 @@ async def _process_channel_transcripts(
                 try:
                     await directus.update_video(existing[video["video_id"]]["id"], {
                         "status": "error",
-                        "processed_at": now_iso(),
+                        "processed_at": utcnow(),
                     })
                 except Exception:
                     pass
@@ -215,7 +215,7 @@ async def process_channel_task(task: dict):
         if channel_id:
             await directus.update_channel(channel_id, {
                 "status": "backlog" if has_more_backlog else "done",
-                "last_refreshed": now_iso(),
+                "last_refreshed": utcnow(),
             })
 
     except Exception as e:
@@ -296,7 +296,7 @@ async def process_single_video_task(task: dict):
     transcript, transcript_timed = await loop.run_in_executor(None, fetch_transcript_variants, yt_id)
 
     update_data = {
-        "processed_at": now_iso(),
+        "processed_at": utcnow(),
         "status": "done" if transcript else "no_transcript",
         "transcript": transcript or "",
         "transcript_timed": transcript_timed or "",

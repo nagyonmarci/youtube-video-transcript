@@ -57,8 +57,6 @@ def validate_schedule(cron: str, timezone_name: str):
 
 # ---- Environment variables ----
 
-DIRECTUS_URL = os.environ.get("DIRECTUS_URL", "http://directus:8055")
-DIRECTUS_TOKEN = required_env("DIRECTUS_TOKEN")
 APP_API_TOKEN = required_env("APP_API_TOKEN")
 APP_CORS_ORIGINS = [
     origin.strip()
