@@ -188,7 +188,8 @@ def apply_app_settings(settings: dict) -> None:
     AI_NOTES_BATCH_LIMIT = int_setting(settings.get("ai_notes_batch_limit"), AI_NOTES_BATCH_LIMIT, 1)
     AI_NOTES_MAX_BATCH_LIMIT = int_setting(settings.get("ai_notes_max_batch_limit"), AI_NOTES_MAX_BATCH_LIMIT, 1)
     AI_NOTES_YEAR_BACKFILL_ENABLED = bool_setting(settings.get("ai_notes_year_backfill_enabled", AI_NOTES_YEAR_BACKFILL_ENABLED))
-    AI_NOTES_YEAR_BACKFILL_YEAR = int_setting(settings.get("ai_notes_year_backfill_year"), AI_NOTES_YEAR_BACKFILL_YEAR, 2005)
+    # 0 means "no year filter" (all years) — see job_ops.maybe_enqueue_ai_year_backfill.
+    AI_NOTES_YEAR_BACKFILL_YEAR = int_setting(settings.get("ai_notes_year_backfill_year"), AI_NOTES_YEAR_BACKFILL_YEAR, 0)
     AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT = int_setting(settings.get("ai_notes_year_backfill_batch_limit"), AI_NOTES_YEAR_BACKFILL_BATCH_LIMIT, 1)
     AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE = int_setting(settings.get("ai_notes_year_backfill_target_active"), AI_NOTES_YEAR_BACKFILL_TARGET_ACTIVE, 1)
     AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS = int_setting(settings.get("ai_notes_year_backfill_interval_seconds"), AI_NOTES_YEAR_BACKFILL_INTERVAL_SECONDS, 30)

@@ -189,7 +189,7 @@ export default function SettingsForm({ settingsDraft, settingsDirty, busy, onCha
           {t('label.aiBackfillYear')}
           <input
             type="number"
-            min="2005"
+            min="0"
             value={settingsDraft.ai_notes_year_backfill_year}
             onChange={e => onChange('ai_notes_year_backfill_year', Number(e.target.value))}
           />

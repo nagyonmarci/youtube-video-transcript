@@ -51,16 +51,19 @@ def _normalize_row(row) -> Optional[dict]:
     return {k: (str(v) if hasattr(v, "hex") else v) for k, v in dict(row).items()}
 
 
-async def get_no_transcript_videos(limit: int = 50) -> list:
-    """Videos flagged by the fetcher for whisper transcription that haven't been processed yet."""
+async def get_no_transcript_videos(limit: int = 50, max_attempts: int = 3) -> list:
+    """Videos flagged by the fetcher for whisper transcription that haven't been processed yet,
+    plus previously-failed ones that haven't exhausted their retry budget."""
     pool = await get_pg_pool()
     rows = await pool.fetch(
         """
-        SELECT id, video_id, title, url, duration_seconds FROM videos
-        WHERE status = 'no_transcript' AND whisper_status IS NULL AND for_whisper IS TRUE
+        SELECT id, video_id, title, url, duration_seconds, whisper_attempts FROM videos
+        WHERE status = 'no_transcript' AND for_whisper IS TRUE
+          AND (whisper_status IS NULL OR (whisper_status = 'error' AND whisper_attempts < $2))
         ORDER BY processed_at LIMIT $1
         """,
         limit,
+        max_attempts,
     )
     return [_normalize_row(r) for r in rows]
 

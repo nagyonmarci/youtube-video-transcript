@@ -90,9 +90,11 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
     if capacity <= 0:
         return {"queued": 0, "skipped": 0, "active_jobs": active_jobs}
 
-    missing_total = await directus.count_videos_missing_ai_notes(config.AI_NOTES_YEAR_BACKFILL_YEAR)
+    backfill_year = config.AI_NOTES_YEAR_BACKFILL_YEAR or None  # 0 means "all years"
+    year_label = backfill_year or "all years"
+    missing_total = await directus.count_videos_missing_ai_notes(backfill_year)
     if missing_total <= 0:
-        logger.info(f"AI year backfill complete for {config.AI_NOTES_YEAR_BACKFILL_YEAR}")
+        logger.info(f"AI year backfill complete for {year_label}")
         return {
             "queued": 0,
             "skipped": 0,
@@ -102,7 +104,7 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
 
     active_video_ids = await directus.get_ai_note_job_video_ids()
     scan_limit = min(config.AI_NOTES_MAX_BATCH_LIMIT, max(capacity * 5, capacity + len(active_video_ids)))
-    videos = await directus.get_videos_missing_ai_notes(scan_limit, year=config.AI_NOTES_YEAR_BACKFILL_YEAR)
+    videos = await directus.get_videos_missing_ai_notes(scan_limit, year=backfill_year)
 
     queued = 0
     skipped = 0
@@ -133,7 +135,7 @@ async def maybe_enqueue_ai_year_backfill(source: str = "scheduler", force: bool 
             skipped,
             missing_total,
             active_jobs,
-            config.AI_NOTES_YEAR_BACKFILL_YEAR,
+            year_label,
         )
     return {
         "queued": queued,
