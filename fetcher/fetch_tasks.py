@@ -134,6 +134,7 @@ async def _process_channel_transcripts(
                     "status": "done" if transcript else "no_transcript",
                     "transcript": transcript or "",
                     "transcript_timed": transcript_timed or "",
+                    **({"for_whisper": True} if not transcript else {}),
                 })
                 if transcript and config.AI_NOTES_AUTO:
                     try:
@@ -184,7 +185,7 @@ async def process_channel_task(task: dict):
         transcript_candidates = [
             v for v in videos
             if v["video_id"] not in existing
-            or (existing.get(v["video_id"], {}).get("status") or "pending") != "done"
+            or (existing.get(v["video_id"], {}).get("status") or "pending") not in ("done", "no_transcript")
         ]
         transcript_videos_all = [
             v for v in transcript_candidates
@@ -300,6 +301,8 @@ async def process_single_video_task(task: dict):
         "transcript": transcript or "",
         "transcript_timed": transcript_timed or "",
     }
+    if not transcript and not video_data["is_members_only"]:
+        update_data["for_whisper"] = True
     if directus_video_id:
         await directus.update_video(directus_video_id, update_data)
         if transcript and config.AI_NOTES_AUTO:
