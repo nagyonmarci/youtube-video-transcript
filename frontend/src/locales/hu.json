@@ -198,7 +198,7 @@
     "aiMaxChars": "Max transzkript karakter",
     "aiBatchLimit": "AI batch limit",
     "aiMaxBatchLimit": "AI max batch limit",
-    "aiBackfillYear": "Backfill év",
+    "aiBackfillYear": "Backfill év (0 = minden év)",
     "aiBackfillBatch": "Backfill batch",
     "aiBackfillTarget": "Backfill cél aktív job",
     "aiBackfillInterval": "Backfill időköz (mp)",

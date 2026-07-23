@@ -92,6 +92,7 @@ _ALTER_COLUMNS = [
     "ALTER TABLE videos ADD COLUMN IF NOT EXISTS ai_notes_error TEXT",
     # videos — whisper_status: owned here, whisper service no longer bootstraps it
     "ALTER TABLE videos ADD COLUMN IF NOT EXISTS whisper_status VARCHAR(50)",
+    "ALTER TABLE videos ADD COLUMN IF NOT EXISTS whisper_attempts INTEGER DEFAULT 0",
     # jobs — progress/lock/metrics fields
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(512)",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0",
